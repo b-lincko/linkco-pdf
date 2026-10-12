@@ -13,17 +13,19 @@ release: 1
 section: graphics
 priority: optional
 maintainer: ${PDFCRAFT_MAINTAINER}
-vendor: Learning Machines LLC
-homepage: https://getartcraft.com/apps/pdfcraft
+vendor: Al Rawabet Commercial Services & Contracting Company W.L.L.
+homepage: https://github.com/b-lincko/linkco-pdf
 license: MIT OR Apache-2.0
 description: |-
-  Open-source, native PDF workbench: read, comment, fill and sign forms,
-  organize, combine, split, edit, redact, protect and export PDFs.
-  Includes pdfcraft-cli, a headless command runner and opt-in MCP server.
+  Linkco PDF Editor — Professional PDF tools for everyday document work.
+  Read, comment, fill and sign forms, organize, combine, split, edit,
+  redact, protect and export PDFs. Includes pdfcraft-cli.
 
 # The binaries link only glibc and libgcc_s directly. Windowing (X11/Wayland, xkbcommon) and the
 # GPU (Vulkan, EGL/GL) are loaded at runtime, so they are dependencies/recommendations here
-# rather than ELF NEEDED entries.
+# rather than ELF NEEDED entries. Printing likewise shells out to CUPS's lpstat/lp (cups-client);
+# without it the Print dialog still offers Save as PDF, so it is a recommendation, not a hard
+# dependency.
 overrides:
   deb:
     depends:
@@ -32,6 +34,7 @@ overrides:
       - libxkbcommon0
       - libvulkan1 | libegl1
     recommends:
+      - cups-client
       - libwayland-client0
       - libx11-6
       - libx11-xcb1
@@ -45,6 +48,7 @@ overrides:
       - libxkbcommon
       - (vulkan-loader or libglvnd-egl)
     recommends:
+      - cups-client
       - libwayland-client
       - libX11
       - libXcursor

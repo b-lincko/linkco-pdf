@@ -12,8 +12,33 @@ fn bad(m: impl Into<String>) -> ToolError {
 
 impl Automation {
     pub(crate) fn printers(&self) -> Result<Value> {
-        let list: Vec<Value> = spool::printers().into_iter().map(|p| json!({ "name": p.name, "default": p.default })).collect();
+        let list: Vec<Value> = spool::printers_detailed()
+            .into_iter()
+            .map(|p| {
+                json!({
+                    "name": p.name,
+                    "default": p.default,
+                    "status": p.status.as_str(),
+                    "offline": p.status.is_offline(),
+                    "port": p.port,
+                    "driver": p.driver,
+                    "network": p.network,
+                })
+            })
+            .collect();
         Ok(json!({ "count": list.len(), "printers": list }))
+    }
+
+    pub(crate) fn printer_options(&self, a: &Args) -> Result<Value> {
+        let printer = a.str("printer")?;
+        let list: Vec<Value> = spool::printer_options(printer)
+            .into_iter()
+            .map(|o| {
+                let choices: Vec<Value> = o.choices.iter().map(|(value, label)| json!({ "value": value, "label": label })).collect();
+                json!({ "key": o.key, "label": o.label, "group": o.group, "default": o.default, "choices": choices })
+            })
+            .collect();
+        Ok(json!({ "printer": printer, "count": list.len(), "options": list }))
     }
 
     pub(crate) fn doc_print(&mut self, a: &Args) -> Result<Value> {
@@ -122,8 +147,26 @@ impl Automation {
                     },
                     grayscale: a.opt_bool("grayscale")?.unwrap_or(false),
                     title: name,
+                    options: match a.get("options") {
+                        None => Vec::new(),
+                        Some(Value::Object(m)) => m
+                            .iter()
+                            .map(|(k, v)| match v.as_str() {
+                                Some(v) => Ok((k.clone(), v.to_string())),
+                                None => Err(bad(format!("options.{k} must be a string (a choice from printer_options)"))),
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                        Some(_) => return Err(bad("options must be an object of option keys and choices from printer_options")),
+                    },
                 };
-                out["job"] = json!(spool::submit(&bytes, &job).map_err(|e| failed(e.to_string()))?);
+                let dpi = a.opt_int("dpi")?.unwrap_or(i64::from(spool::DEFAULT_PRINT_DPI)).clamp(72, 600) as u32;
+                let rendered_sheets = if cfg!(target_os = "windows") {
+                    self.session.render_print_sheets(id, &bytes, dpi, job.grayscale).map_err(failed)?
+                } else {
+                    Vec::new()
+                };
+                out["dpi"] = json!(dpi);
+                out["job"] = json!(spool::submit_sheets(&bytes, &rendered_sheets, &job).map_err(|e| failed(e.to_string()))?);
             }
             _ => return Err(bad("pass either path (save the print-ready PDF) or printer (a name from printers, or \"default\")")),
         }

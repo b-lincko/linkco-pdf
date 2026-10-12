@@ -45,8 +45,9 @@ jobs:
             # The checkout is synced in under another owner; let tests that call git read it.
             git config --global --add safe.directory "*"
             rustc --version
-            CARGO_PROFILE_DEV_DEBUG=0 cargo build --workspace --all-targets --locked
-            CARGO_PROFILE_DEV_DEBUG=0 cargo test --workspace --locked
+            export CARGO_PROFILE_DEV_DEBUG=0
+            bash .github/scripts/run-annotated.sh "FreeBSD build" cargo build --workspace --all-targets --locked
+            bash .github/scripts/run-annotated.sh "FreeBSD test" cargo test --workspace --locked --no-fail-fast
             # The release packaging, end to end (a quicker release profile than the real release).
-            CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 packaging/freebsd/package.sh
-            tar -tzf dist/release/pdfcraft-*-freebsd-*.tar.gz | grep -E '/bin/pdfcraft$|/bin/pdfcraft-cli$|applications/'
+            CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 bash .github/scripts/run-annotated.sh "FreeBSD package" packaging/freebsd/package.sh
+            tar -tzf dist/release/pdfcraft-*-freebsd-*.tar.gz | grep -E '/bin/pdfcraft$|/bin/pdfcraft-cli$|applications/|/share/pdfcraft/models/.+\.rten$'

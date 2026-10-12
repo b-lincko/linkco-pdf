@@ -72,15 +72,31 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Publish the reason as an annotation (the checks API returns those, not logs).
+          trap {
+            $why = "$($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)"
+            foreach ($log in 'per-user.log', 'install.log', 'install-nodesktop.log') {
+              if (Test-Path $log) { $why += "`n--- $log (errors) ---`n" + ((Select-String -Path $log -Pattern 'error|failed|return value 3' | Select-Object -Last 15 | ForEach-Object { $_.Line }) -join "`n") }
+            }
+            Write-Output ("::error title=ARM64 install::" + ($why -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'))
+            break
+          }
           $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
+          # A command-line override must not put files in a user profile while registering
+          # their handlers machine-wide (#305). This runs on a disposable CI runner.
+          $p = Start-Process msiexec.exe -WindowStyle Hidden -ArgumentList '/i', "`"$msi`"", '/qn', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', '/l*v', 'per-user.log' -Wait -PassThru
+          if ($p.ExitCode -ne 1603) { Get-Content per-user.log -Tail 60; throw "per-user install should fail with 1603, got $($p.ExitCode)" }
+          if (-not (Select-String -Path per-user.log -SimpleMatch 'Linkco PDF Editor must be installed for all users.')) {
+            Get-Content per-user.log -Tail 60; throw 'per-user install did not fail on the scope guard'
+          }
           $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/l*v', 'install.log' -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "msiexec /i exited $($p.ExitCode)" }
           $shortcuts = @(
-            (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'PdfCraft.lnk'),
-            (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'PdfCraft.lnk')
+            (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Linkco PDF Editor.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Linkco PDF Editor.lnk')
           )
           # Plain shortcuts to the program (#143), not advertised ones, so TargetPath is the exe.
-          $exePath = Join-Path $env:ProgramFiles 'PdfCraft\pdfcraft.exe'
+          $exePath = Join-Path $env:ProgramFiles 'Linkco\Linkco PDF Editor\pdfcraft.exe'
           $wsh = New-Object -ComObject WScript.Shell
           foreach ($shortcut in $shortcuts) {
             if (-not (Test-Path -LiteralPath $shortcut)) { throw "installer did not create $shortcut" }
@@ -88,7 +104,7 @@ jobs:
             if ($target -ne $exePath) { throw "$shortcut points to '$target', not $exePath" }
             Write-Output "ok $shortcut -> $target"
           }
-          $dir = Join-Path $env:ProgramFiles 'PdfCraft'
+          $dir = Join-Path $env:ProgramFiles 'Linkco\Linkco PDF Editor'
           foreach ($exe in 'pdfcraft.exe', 'pdfcraft-cli.exe') {
             $path = Join-Path $dir $exe
             if (-not (Test-Path $path)) { Get-ChildItem -Recurse $env:ProgramFiles -Filter $exe | Select-Object -First 3; throw "$exe not installed in $dir" }
@@ -148,4 +164,5 @@ jobs:
         with:
           key: windows-arm64-test
       - name: Test
-        run: cargo test --workspace --locked
+        shell: bash
+        run: .github/scripts/run-annotated.sh "test ARM64" cargo test --workspace --locked --no-fail-fast

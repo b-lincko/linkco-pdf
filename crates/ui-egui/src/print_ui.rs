@@ -1,5 +1,5 @@
 //! The Print dialog (Acrobat's File ▸ Print, execution plan M10.5): printer, copies, grayscale;
-//! pages to print (all, current, range with labels; odd/even, reverse); page sizing & handling
+//! pages to print (all, current, range with labels, the selected pages; odd/even, reverse); page sizing & handling
 //! (Size, Poster, Multiple, Booklet); orientation; comments & forms; and a live preview of the
 //! sheets. Printing sends the print-ready PDF to the system spooler; "Save as PDF" writes it.
 
@@ -9,11 +9,86 @@ use pdfcraft_engine::print::{self, Binding, BookletSubset, Content, Layout, Orie
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, widgets};
 
+/// The smallest preview pane, and the paper inside it (12 pt inset on each side). The dialog
+/// grows with the window (see [`PrintLayout`]); this is its size in a small one.
+const PREVIEW_W: f32 = 320.0;
+const PREVIEW_H: f32 = 380.0;
+const PREVIEW_INSET: f32 = 12.0;
+pub(crate) const PREVIEW_BOX: (f32, f32) = (PREVIEW_W - 2.0 * PREVIEW_INSET, PREVIEW_H - 2.0 * PREVIEW_INSET);
+/// The settings column, and the gap between it and the preview pane.
+const SETTINGS_W: f32 = 470.0;
+const COLUMN_GAP: f32 = 12.0;
+/// The narrowest dialog (the settings column beside the smallest preview pane).
+const MIN_DIALOG_W: f32 = 820.0;
+/// The largest dialog: on a big monitor the preview stays a comfortable size, as a normal window.
+const MAX_DIALOG: (f32, f32) = (1600.0, 1200.0);
+/// Kept clear between the dialog and the edges of the window.
+const WINDOW_MARGIN: f32 = 24.0;
+/// The dialog above and below its two columns: the title, the Print / Cancel row and the frame.
+const DIALOG_CHROME: f32 = 120.0;
+/// Under the preview pane: the sheet navigation row and the paper size line.
+const PREVIEW_FOOTER: f32 = 60.0;
+
+/// The Print dialog's size in a window: as large as a normal window (within [`WINDOW_MARGIN`] of
+/// the app window's edges and up to [`MAX_DIALOG`]), never smaller than the original dialog. The
+/// preview pane takes all the room the settings column leaves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PrintLayout {
+    /// The dialog's content width.
+    pub width: f32,
+    /// The height of the two columns; the settings scroll when they need more.
+    pub columns_h: f32,
+    /// The preview pane.
+    pub pane: egui::Vec2,
+}
+
+impl PrintLayout {
+    /// The layout for a window of `screen` points, with `spacing` points between widgets in a row.
+    pub(crate) fn for_screen(screen: egui::Vec2, spacing: f32) -> Self {
+        let finite = |v: f32, fallback: f32| if v.is_finite() && v > 0.0 { v } else { fallback };
+        let spacing = finite(spacing, 0.0).min(32.0);
+        let min_pane_w = MIN_DIALOG_W - SETTINGS_W - COLUMN_GAP - 2.0 * spacing;
+        let min_columns_h = PREVIEW_H + PREVIEW_FOOTER;
+        let width = (finite(screen.x, 0.0) - 2.0 * WINDOW_MARGIN).min(MAX_DIALOG.0).max(MIN_DIALOG_W);
+        let columns_h = ((finite(screen.y, 0.0) - 2.0 * WINDOW_MARGIN).min(MAX_DIALOG.1) - DIALOG_CHROME).max(min_columns_h);
+        let pane_w = (width - SETTINGS_W - COLUMN_GAP - 2.0 * spacing).max(min_pane_w.max(PREVIEW_W));
+        Self { width, columns_h, pane: vec2(pane_w, columns_h - PREVIEW_FOOTER) }
+    }
+
+    /// The room for the paper inside the preview pane.
+    pub(crate) fn preview_box(&self) -> (f32, f32) {
+        ((self.pane.x - 2.0 * PREVIEW_INSET).max(1.0), (self.pane.y - 2.0 * PREVIEW_INSET).max(1.0))
+    }
+}
+
+/// `r` moved (less than a pixel) so its corner lies on a whole physical pixel, so that a raster
+/// rendered for it maps texel for texel onto the screen instead of blurring across two pixels.
+fn snap_rect(r: Rect, ppp: f32) -> Rect {
+    if !(ppp.is_finite() && ppp > 0.0) {
+        return r;
+    }
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    Rect::from_min_size(pos2(snap(r.min.x), snap(r.min.y)), r.size())
+}
+
+/// A page's quad on screen, moved (less than a pixel) so its top-left lies on a whole physical
+/// pixel; see [`snap_rect`].
+fn snap_quad(corners: [Pos2; 4], ppp: f32) -> [Pos2; 4] {
+    let (x, y) = corners.iter().fold((f32::INFINITY, f32::INFINITY), |(x, y), p| (x.min(p.x), y.min(p.y)));
+    if !(ppp.is_finite() && ppp > 0.0 && x.is_finite() && y.is_finite()) {
+        return corners;
+    }
+    let shift = snap_rect(Rect::from_min_size(pos2(x, y), egui::Vec2::ZERO), ppp).min - pos2(x, y);
+    corners.map(|p| p + shift)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Which {
     All,
     Current,
     Range,
+    /// The pages picked in the Pages panel or the organize grid when the dialog opened.
+    Selected,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,14 +102,25 @@ pub enum Handling {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrintDraft {
     pub printers: Vec<spool::Printer>,
+    pub printer_details: Vec<spool::PrinterDetail>,
+    /// The printers are still being listed in the background (see [`PrinterSource`]).
+    pub printers_loading: bool,
+    /// The user chose the printer, so a list arriving late doesn't move it to the default.
+    pub printer_picked: bool,
+    /// "Check again" was pressed: the printers are listed afresh on the next frame (in the
+    /// background when there is a [`PrinterSource`]).
+    pub recheck_printers: bool,
     /// `None` = Save as PDF.
     pub printer: Option<String>,
     pub copies: u32,
     pub collate: bool,
     pub grayscale: bool,
     pub duplex: spool::Duplex,
+    pub dpi: u32,
     pub which: Which,
     pub range: String,
+    /// The pages `Which::Selected` prints (0-based, in page order); empty when none were picked.
+    pub selected: Vec<usize>,
     pub subset: Subset,
     pub reverse: bool,
     pub handling: Handling,
@@ -55,19 +141,32 @@ pub struct PrintDraft {
     /// The sheet shown in the preview (0-based).
     pub sheet: usize,
     pub current_page: usize,
+    /// The printer driver's own options and the printer they were read for (Properties…, CUPS).
+    pub driver_options: Option<(String, Vec<spool::PrinterOption>)>,
+    /// Driver options set away from the printer's defaults, for `driver_options`' printer.
+    pub driver_choices: std::collections::BTreeMap<String, String>,
+    pub show_driver_options: bool,
+    /// Why the printer's preferences window didn't open (Windows).
+    pub driver_error: Option<String>,
 }
 
 impl Default for PrintDraft {
     fn default() -> Self {
         PrintDraft {
             printers: Vec::new(),
+            printer_details: Vec::new(),
+            printers_loading: false,
+            printer_picked: false,
+            recheck_printers: false,
             printer: None,
             copies: 1,
             collate: true,
             grayscale: false,
             duplex: spool::Duplex::Off,
+            dpi: spool::DEFAULT_PRINT_DPI,
             which: Which::All,
             range: String::new(),
+            selected: Vec::new(),
             subset: Subset::All,
             reverse: false,
             handling: Handling::Size,
@@ -87,6 +186,10 @@ impl Default for PrintDraft {
             paper: 0,
             sheet: 0,
             current_page: 0,
+            driver_options: None,
+            driver_choices: Default::default(),
+            show_driver_options: false,
+            driver_error: None,
         }
     }
 }
@@ -98,11 +201,17 @@ impl PrintDraft {
             return Err("Cut and stack needs Two-sided: Off. Print single-sided sheets.".into());
         }
         let range = match self.which {
-            Which::All => None,
-            Which::Current => Some((self.current_page + 1).to_string()),
+            Which::All | Which::Selected => None,
+            Which::Current => Some(self.current_page.saturating_add(1).to_string()),
             Which::Range => Some(self.range.clone()),
         };
-        let pages = print::select_pages(count, range.as_deref(), labels, self.subset, self.reverse).map_err(|e| e.to_string())?;
+        let pages = if self.which == Which::Selected {
+            // Positions, not a typed range: a range would read numbers as page labels first.
+            print::select_listed(count, &self.selected, self.subset, self.reverse)
+        } else {
+            print::select_pages(count, range.as_deref(), labels, self.subset, self.reverse)
+        }
+        .map_err(|e| e.to_string())?;
         let layout = match self.handling {
             Handling::Size => Layout::Size(match self.size {
                 SizeMode::Custom(_) => SizeMode::Custom(self.custom_scale),
@@ -128,25 +237,203 @@ impl PrintDraft {
             duplex: self.duplex,
             grayscale: self.grayscale,
             title: title.to_string(),
+            // Only for the printer the options were read from.
+            options: match (&self.printer, &self.driver_options) {
+                (Some(p), Some((read_for, _))) if p == read_for => self.driver_choices.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                _ => Vec::new(),
+            },
         }
     }
+}
+
+/// Lists the printers off the UI thread (the desktop app sets [`PdfCraftApp::printer_source`]):
+/// on Windows that takes PowerShell a second or more, and CUPS' driverless discovery can wait on
+/// the network. Without a source the dialog reads them as it opens, so tests stay deterministic.
+pub type PrinterSource = std::sync::Arc<dyn Fn() -> Vec<spool::PrinterDetail> + Send + Sync>;
+
+/// The system spooler's printers, with their status, as the desktop app's [`PrinterSource`].
+pub fn system_printers() -> PrinterSource {
+    std::sync::Arc::new(spool::printers_detailed)
+}
+
+/// The Print dialog's work in the background: the printer list being read, and the jobs being
+/// spooled (the printer each was sent to, and the spooler's answer).
+#[derive(Default)]
+pub(crate) struct PrintTasks {
+    #[cfg(not(target_arch = "wasm32"))]
+    printers: Option<std::sync::mpsc::Receiver<Vec<spool::PrinterDetail>>>,
+    /// The list being read was asked for by "Check again" (see [`PdfCraftApp::apply_printer_list`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    recheck: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    jobs: Vec<(String, std::sync::mpsc::Receiver<Result<String, String>>)>,
+}
+
+/// The printer the dialog preselects: the system default if it is online, else the default, else
+/// the first online printer, else the first.
+fn default_printer(details: &[spool::PrinterDetail]) -> Option<String> {
+    details
+        .iter()
+        .find(|p| p.default && !p.status.is_offline())
+        .or_else(|| details.iter().find(|p| p.default))
+        .or_else(|| details.iter().find(|p| !p.status.is_offline()))
+        .or_else(|| details.first())
+        .map(|p| p.name.clone())
+}
+
+/// How Windows renders a job's sheets before spooling them (the other spoolers take the PDF).
+struct SheetRender {
+    dpi: u32,
+    max_dpi: u32,
+    grayscale: bool,
+}
+
+/// Render the sheets if the spooler needs them, then hand the job over. Runs on a worker thread
+/// on the desktop: a long document at 600 dpi takes a while.
+fn spool_job(bytes: &[u8], job: &spool::Job, render: Option<SheetRender>) -> Result<String, String> {
+    let sheets = match render {
+        Some(r) => pdfcraft_engine::render_imposed_sheets(bytes, r.dpi, r.max_dpi, r.grayscale).map_err(|e| e.to_string())?,
+        None => Vec::new(),
+    };
+    spool::submit_sheets(bytes, &sheets, job).map_err(|e| e.to_string())
 }
 
 impl PdfCraftApp {
     pub fn open_print(&mut self) {
         let Some((i, _)) = self.active_ids() else { return };
-        let printers = spool::printers();
-        let default = printers.iter().find(|p| p.default).or(printers.first()).map(|p| p.name.clone());
+        let (details, printers_loading) = match self.printer_source.clone() {
+            // The list from the last time the dialog opened, until the fresh one arrives.
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(source) => {
+                self.list_printers_in_background(source, false);
+                (self.print_draft.printer_details.clone(), true)
+            }
+            _ => (spool::printers_detailed(), false),
+        };
+        let printers: Vec<spool::Printer> = details.iter().map(|d| d.to_printer()).collect();
+        let default = default_printer(&details);
         let current = self.views[i].current;
+        let selected: Vec<usize> = self.views[i].selected.iter().copied().collect();
         let keep = std::mem::take(&mut self.print_draft);
-        self.print_draft = PrintDraft { printers, printer: default, current_page: current, sheet: 0, ..keep };
+        // Picked pages are what Print is for (Acrobat's "Selected pages"); without any, a choice
+        // left over from another document falls back to the whole document.
+        let which = match (selected.is_empty(), keep.which) {
+            (false, _) => Which::Selected,
+            (true, Which::Selected) => Which::All,
+            (true, other) => other,
+        };
+        self.print_draft = PrintDraft {
+            printers,
+            printer_details: details,
+            printers_loading,
+            printer_picked: false,
+            recheck_printers: false,
+            printer: default,
+            current_page: current,
+            sheet: 0,
+            selected,
+            which,
+            ..keep
+        };
         self.dialog = Some(crate::Dialog::Print);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn list_printers_in_background(&mut self, source: PrinterSource, recheck: bool) {
+        self.print_tasks.recheck |= recheck;
+        // A list already being read is as fresh as a new one would be.
+        if self.print_tasks.printers.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            // The receiver may be gone (the app quit): nothing to report to then.
+            let _ = tx.send(source());
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
+        });
+        self.print_tasks.printers = Some(rx);
+    }
+
+    /// A fresh printer list arrived. When the dialog opened, the default is preselected unless
+    /// the user has picked a printer meanwhile; after "Check again", the choice stays unless it
+    /// was Save as PDF or that printer is gone.
+    fn apply_printer_list(&mut self, details: Vec<spool::PrinterDetail>, recheck: bool) {
+        let d = &mut self.print_draft;
+        let printers: Vec<spool::Printer> = details.iter().map(|det| det.to_printer()).collect();
+        let replace = if recheck { d.printer.as_ref().is_none_or(|name| !printers.iter().any(|p| &p.name == name)) } else { !d.printer_picked };
+        if replace {
+            d.printer = default_printer(&details);
+        }
+        d.printers = printers;
+        d.printer_details = details;
+        d.printers_loading = false;
+    }
+
+    /// Pick up a printer list or a spooled job that finished, and start a "Check again" (each
+    /// frame).
+    pub(crate) fn poll_print(&mut self) {
+        if std::mem::take(&mut self.print_draft.recheck_printers) {
+            match self.printer_source.clone() {
+                #[cfg(not(target_arch = "wasm32"))]
+                Some(source) => {
+                    self.print_draft.printers_loading = true;
+                    self.list_printers_in_background(source, true);
+                }
+                _ => self.apply_printer_list(spool::printers_detailed(), true),
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(rx) = &self.print_tasks.printers {
+                let details = match rx.try_recv() {
+                    Ok(p) => Some(p),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                    // A source that died lists nothing new; the dialog keeps what it has.
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(self.print_draft.printer_details.clone()),
+                };
+                if let Some(details) = details {
+                    self.print_tasks.printers = None;
+                    let recheck = std::mem::take(&mut self.print_tasks.recheck);
+                    self.apply_printer_list(details, recheck);
+                }
+            }
+            let mut finished = Vec::new();
+            self.print_tasks.jobs.retain(|(printer, rx)| match rx.try_recv() {
+                Ok(r) => {
+                    finished.push((printer.clone(), r));
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    finished.push((printer.clone(), Err("the print job stopped unexpectedly".into())));
+                    false
+                }
+            });
+            for (printer, result) in finished {
+                self.report_print_job(&printer, result);
+            }
+        }
+    }
+
+    fn report_print_job(&mut self, printer: &str, result: Result<String, String>) {
+        match result {
+            Ok(msg) if msg.is_empty() => self.notify(crate::i18n::fmt(tl!("Sent to {printer}"), &[("printer", printer)])),
+            Ok(msg) => self.notify(crate::i18n::fmt(tl!("Sent to {printer}: {msg}"), &[("printer", printer), ("msg", &msg)])),
+            Err(e) => self.notify_error(e),
+        }
     }
 
     /// Print (or save) with the dialog's settings. Returns `true` on success. Save as PDF without
     /// a preset path returns `true` once the save picker is showing; the file is written on a
     /// later frame, when the user has chosen where.
     pub fn print_now(&mut self) -> bool {
+        // What's typed in a form field is part of what's printed (#166).
+        if !self.commit_form_typing() {
+            return false;
+        }
         let Some((_, id)) = self.active_ids() else { return false };
         let Some(doc) = self.session.get(id) else { return false };
         let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
@@ -166,22 +453,53 @@ impl PdfCraftApp {
             }
         };
         match self.print_draft.printer.clone() {
-            Some(printer) => match spool::submit(&bytes, &self.print_draft.job(&name)) {
-                Ok(msg) => {
-                    self.notify(if msg.is_empty() {
-                        crate::i18n::fmt(tl!("Sent to {printer}"), &[("printer", &printer)])
-                    } else {
-                        crate::i18n::fmt(tl!("Sent to {printer}: {msg}"), &[("printer", &printer), ("msg", &msg)])
-                    });
-                    true
-                }
-                Err(e) => {
-                    self.notify_error(e);
-                    false
-                }
-            },
+            Some(printer) => {
+                let job = self.print_draft.job(&name);
+                // Windows prints sheets the app renders itself; the document's print permission
+                // sets the highest resolution here, and the rendering happens with the spooling.
+                let render = if cfg!(target_os = "windows") {
+                    match self.session.print_max_dpi(id) {
+                        Ok(max_dpi) => Some(SheetRender { dpi: self.print_draft.dpi, max_dpi, grayscale: self.print_draft.grayscale }),
+                        Err(e) => {
+                            self.notify_error(e);
+                            return false;
+                        }
+                    }
+                } else {
+                    None
+                };
+                self.send_to_printer(printer, bytes, job, render)
+            }
             None => self.save_print_pdf(&name, bytes),
         }
+    }
+
+    /// Spool a job off the UI thread: on Windows every sheet is rendered at the printer's
+    /// resolution first, which can take minutes for a long document. The dialog closes at once
+    /// and the spooler's answer arrives as a notice.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job, render: Option<SheetRender>) -> bool {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            // The receiver may be gone (the app quit): nothing to report to then.
+            let _ = tx.send(spool_job(&bytes, &job, render));
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
+        });
+        self.notify(crate::i18n::fmt(tl!("Sending to {printer}…"), &[("printer", &printer)]));
+        self.print_tasks.jobs.push((printer, rx));
+        true
+    }
+
+    /// A browser has no spooler: `submit` answers at once.
+    #[cfg(target_arch = "wasm32")]
+    fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job, render: Option<SheetRender>) -> bool {
+        let result = spool_job(&bytes, &job, render);
+        let ok = result.is_ok();
+        self.report_print_job(&printer, result);
+        ok
     }
 
     /// Print ▸ Save as PDF on the desktop: write to `save_override` (tests and automation), or
@@ -230,6 +548,165 @@ impl PdfCraftApp {
     }
 }
 
+/// The longest side, in pixels, of one page's print-preview raster (also kept within the GPU's
+/// `max_texture_side`): an Actual-size print of a large page would otherwise ask for a raster
+/// bigger than a texture can be.
+pub(crate) const PREVIEW_MAX_SIDE: f32 = 4096.0;
+/// The most bytes of print-preview rasters kept at once. The current sheet comes first, then the
+/// next and the previous one; a neighbour that doesn't fit isn't rendered ahead.
+pub(crate) const PREVIEW_BYTES: f64 = 128.0 * 1024.0 * 1024.0;
+
+/// Pages on the current sheet and its neighbours, each with the device pixels per point that
+/// fill the preview pane's `paper_box` (so the picture is not a stretched thumbnail), nearest
+/// sheet first and within [`PREVIEW_MAX_SIDE`] (and `max_side`, the GPU's texture limit) and
+/// [`PREVIEW_BYTES`].
+pub(crate) fn preview_rasters(
+    d: &PrintDraft,
+    sizes: &[(f64, f64)],
+    labels: &[String],
+    ppp: f32,
+    max_side: f32,
+    paper_box: (f32, f32),
+) -> Vec<(usize, f32)> {
+    let Ok(settings) = d.settings(sizes.len(), labels) else { return Vec::new() };
+    let Ok(sheets) = print::layout(sizes, &settings) else { return Vec::new() };
+    if sheets.is_empty() {
+        return Vec::new();
+    }
+    let ppp = if ppp.is_finite() { ppp.max(1.0) } else { 1.0 };
+    let side = if max_side.is_finite() && max_side >= 1.0 { max_side.min(PREVIEW_MAX_SIDE) } else { PREVIEW_MAX_SIDE };
+    let paper_box =
+        if paper_box.0.is_finite() && paper_box.1.is_finite() && paper_box.0 >= 1.0 && paper_box.1 >= 1.0 { paper_box } else { PREVIEW_BOX };
+    let i = d.sheet.min(sheets.len() - 1);
+    // Nearest first: the sheet on screen, then the next one, then the previous one.
+    let order = [Some(i), i.checked_add(1).filter(|n| *n < sheets.len()), i.checked_sub(1)];
+    let mut out: Vec<(usize, f32, f64)> = Vec::new();
+    let mut bytes = 0.0f64;
+    for sheet in order.into_iter().flatten().filter_map(|s| sheets.get(s)) {
+        let (sw, sh) = (sheet.size.0 as f32, sheet.size.1 as f32);
+        if !(sw.is_finite() && sh.is_finite()) || sw < 1.0 || sh < 1.0 {
+            continue;
+        }
+        let k = (paper_box.0 / sw).min(paper_box.1 / sh);
+        for pl in &sheet.placed {
+            let [a, b, _, _, _, _] = pl.matrix.0;
+            let placed = (a.hypot(b) as f32) * k * ppp;
+            let Some(&(pw, ph)) = sizes.get(pl.page) else { continue };
+            let long_pt = pw.max(ph) as f32;
+            if !placed.is_finite() || placed < 0.05 || !long_pt.is_finite() || long_pt < 1.0 {
+                continue;
+            }
+            let scale = placed.min(64.0).min(side / long_pt);
+            let cost = (pw * f64::from(scale)).ceil() * (ph * f64::from(scale)).ceil() * 4.0;
+            if let Some(slot) = out.iter_mut().find(|(page, _, _)| *page == pl.page) {
+                if scale > slot.1 && bytes - slot.2 + cost <= PREVIEW_BYTES {
+                    bytes += cost - slot.2;
+                    (slot.1, slot.2) = (scale, cost);
+                }
+            } else if out.len() < 48 && (out.is_empty() || bytes + cost <= PREVIEW_BYTES) {
+                bytes += cost;
+                out.push((pl.page, scale, cost));
+            }
+        }
+    }
+    out.into_iter().map(|(page, scale, _)| (page, scale)).collect()
+}
+
+/// A printer status as the dialog shows it, in the interface language.
+fn status_label(status: spool::PrinterStatus) -> &'static str {
+    match status {
+        spool::PrinterStatus::Ready => tl!("Ready"),
+        spool::PrinterStatus::Printing => tl!("Printing"),
+        spool::PrinterStatus::Paused => tl!("Paused"),
+        spool::PrinterStatus::Offline => tl!("Offline"),
+        spool::PrinterStatus::Error => tl!("Error"),
+    }
+}
+
+/// A printer in the Printer list: its name, "(default)", "· Network" for a network printer and its
+/// status when it can't print now ("[Offline]").
+fn printer_label(p: &spool::Printer, detail: Option<&spool::PrinterDetail>) -> String {
+    let mut label = if p.default { crate::i18n::fmt(tl!("{name} (default)"), &[("name", &p.name)]) } else { p.name.clone() };
+    if detail.is_some_and(|det| det.network) {
+        label = format!("{label} · {}", tl!("Network"));
+    }
+    if let Some(det) = detail.filter(|det| !det.status.is_available()) {
+        label = format!("{label} [{}]", status_label(det.status));
+    }
+    label
+}
+
+/// The line under the Printer list about the chosen printer: "Network printer · Port: … · Driver: …"
+/// (each part only when known; empty when nothing is).
+fn printer_about(det: &spool::PrinterDetail) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if det.network {
+        parts.push(tl!("Network printer").to_string());
+    }
+    if !det.port.is_empty() {
+        parts.push(crate::i18n::fmt(tl!("Port: {port}"), &[("port", &det.port)]));
+    }
+    if !det.driver.is_empty() {
+        parts.push(crate::i18n::fmt(tl!("Driver: {driver}"), &[("driver", &det.driver)]));
+    }
+    parts.join("  ·  ")
+}
+
+/// Properties… on CUPS: the driver's options for this print, grouped as the driver groups them.
+/// Only choices away from the printer's defaults are kept, and sent with the job.
+fn driver_options_panel(ui: &mut egui::Ui, d: &mut PrintDraft, t: &Tokens) {
+    let PrintDraft { driver_options: Some((_, options)), driver_choices: choices, show_driver_options: show, .. } = d else { return };
+    egui::Frame::new().fill(t.hover).corner_radius(egui::CornerRadius::same(6)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(tl!("Printer properties")).font(theme::semibold(13.0)));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(tl!("Done")).clicked() {
+                    *show = false;
+                }
+                if ui.add_enabled(!choices.is_empty(), egui::Button::new(tl!("Reset to printer defaults"))).clicked() {
+                    choices.clear();
+                }
+            });
+        });
+        if options.is_empty() {
+            ui.label(egui::RichText::new(tl!("This printer offers no settings of its own.")).small().color(t.text_muted));
+            return;
+        }
+        egui::ScrollArea::vertical().id_salt("driver-options").max_height(240.0).show(ui, |ui| {
+            for (n, chunk) in options.chunk_by(|a, b| a.group == b.group).enumerate() {
+                let group = chunk.first().map_or("", |o| o.group.as_str());
+                if !group.is_empty() {
+                    ui.add_space(4.0);
+                    // Option and group names are the driver's own text.
+                    ui.label(egui::RichText::new(group).small().color(t.text_muted));
+                }
+                egui::Grid::new(("driver-group", n)).num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
+                    for o in chunk {
+                        ui.label(&o.label);
+                        let current = choices.get(&o.key).cloned().unwrap_or_else(|| o.default.clone());
+                        let label_of = |c: &str| o.choices.iter().find(|(k, _)| k == c).map_or_else(|| c.to_string(), |(_, l)| l.clone());
+                        let mut pick = current.clone();
+                        egui::ComboBox::from_id_salt(("driver-option", &o.key)).selected_text(label_of(&current)).width(200.0).show_ui(ui, |ui| {
+                            for (k, l) in &o.choices {
+                                ui.selectable_value(&mut pick, k.clone(), l.as_str());
+                            }
+                        });
+                        if pick != current {
+                            if pick == o.default {
+                                choices.remove(&o.key);
+                            } else {
+                                choices.insert(o.key.clone(), pick);
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            }
+        });
+    });
+}
+
 fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, choices: &[(T, &str)], width: f32) {
     let shown = choices.iter().find(|c| c.0 == *value).map_or("", |c| c.1);
     egui::ComboBox::from_id_salt(id).selected_text(shown).width(width).show_ui(ui, |ui| {
@@ -239,213 +716,309 @@ fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, choice
     });
 }
 
-/// Draw the dialog. `thumb` gives a page's thumbnail texture when there is one. Returns
-/// (print, cancel).
+/// Draw the dialog, sized by `layout`. `thumb` gives the texture to draw a page with when there is
+/// one, given the width in device pixels it is drawn at. Returns (print, cancel).
 pub(crate) fn body(
     ui: &mut egui::Ui,
     d: &mut PrintDraft,
     t: &Tokens,
     sizes: &[(f64, f64)],
     labels: &[String],
-    thumb: &dyn Fn(usize) -> Option<egui::TextureId>,
+    layout: &PrintLayout,
+    thumb: &mut dyn FnMut(usize, f32) -> Option<egui::TextureId>,
 ) -> (bool, bool) {
-    ui.set_width(820.0);
+    ui.set_width(layout.width);
     ui.label(egui::RichText::new(tl!("Print")).font(theme::semibold(18.0)));
     ui.add_space(8.0);
     let settings = d.settings(sizes.len(), labels);
     let sheets = settings.as_ref().ok().and_then(|s| print::layout(sizes, s).ok()).unwrap_or_default();
     d.sheet = d.sheet.min(sheets.len().saturating_sub(1));
     ui.horizontal_top(|ui| {
-        // Settings.
+        // Settings: they scroll when the window is too short for all of them.
         ui.vertical(|ui| {
-            ui.set_width(470.0);
-            egui::Grid::new("print-top").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
-                ui.label(tl!("Printer:"));
-                let shown = d.printer.clone().unwrap_or_else(|| tl!("Save as PDF").to_string());
-                egui::ComboBox::from_id_salt("printer").selected_text(shown).width(260.0).show_ui(ui, |ui| {
-                    for p in &d.printers {
-                        let label = if p.default { crate::i18n::fmt(tl!("{name} (default)"), &[("name", &p.name)]) } else { p.name.clone() };
-                        ui.selectable_value(&mut d.printer, Some(p.name.clone()), label);
-                    }
-                    ui.selectable_value(&mut d.printer, None, tl!("Save as PDF"));
-                });
-                ui.end_row();
-                ui.label(tl!("Copies:"));
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut d.copies).range(1..=999));
-                    ui.checkbox(&mut d.collate, tl!("Collate"));
-                    ui.checkbox(&mut d.grayscale, tl!("Print in grayscale"));
-                });
-                ui.end_row();
-                ui.label(tl!("Two-sided:"));
-                combo(
-                    ui,
-                    "duplex",
-                    &mut d.duplex,
-                    &[
-                        (spool::Duplex::Off, tl!("Off")),
-                        (spool::Duplex::LongEdge, tl!("Flip on long edge")),
-                        (spool::Duplex::ShortEdge, tl!("Flip on short edge")),
-                    ],
-                    160.0,
-                );
-                ui.end_row();
-                ui.label(tl!("Paper:"));
-                egui::ComboBox::from_id_salt("paper").selected_text(PAPERS[d.paper].0).width(160.0).show_ui(ui, |ui| {
-                    for (i, (name, _)) in PAPERS.iter().enumerate() {
-                        ui.selectable_value(&mut d.paper, i, *name);
-                    }
-                });
-                ui.end_row();
-            });
-            ui.add_space(6.0);
-            widgets::section_title(ui, tl!("Pages to Print"));
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut d.which, Which::All, tl!("All"));
-                ui.radio_value(&mut d.which, Which::Current, tl!("Current page"));
-                ui.radio_value(&mut d.which, Which::Range, tl!("Pages"));
-                let r = ui.add_enabled(
-                    d.which == Which::Range,
-                    egui::TextEdit::singleline(&mut d.range).hint_text(format!("1-{}", sizes.len())).desired_width(110.0),
-                );
-                if r.gained_focus() {
-                    d.which = Which::Range;
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label(tl!("More options:"));
-                combo(
-                    ui,
-                    "subset",
-                    &mut d.subset,
-                    &[(Subset::All, tl!("All pages in range")), (Subset::Odd, tl!("Odd pages only")), (Subset::Even, tl!("Even pages only"))],
-                    150.0,
-                );
-                ui.checkbox(&mut d.reverse, tl!("Reverse pages"));
-            });
-            ui.add_space(6.0);
-            widgets::section_title(ui, tl!("Page Sizing & Handling"));
-            ui.horizontal(|ui| {
-                for (h, label) in [
-                    (Handling::Size, tl!("Size")),
-                    (Handling::Poster, tl!("Poster")),
-                    (Handling::Multiple, tl!("Multiple")),
-                    (Handling::Booklet, tl!("Booklet")),
-                ] {
-                    if widgets::mode_tab(ui, label, d.handling == h).clicked() {
-                        d.handling = h;
-                        d.sheet = 0;
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            match d.handling {
-                Handling::Size => {
+            ui.set_width(SETTINGS_W);
+            egui::ScrollArea::vertical().id_salt("print-settings").max_height(layout.columns_h).auto_shrink([false, true]).show(ui, |ui| {
+                egui::Grid::new("print-top").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
+                    ui.label(tl!("Printer:"));
+                    let before = d.printer.clone();
                     ui.horizontal(|ui| {
-                        ui.radio_value(&mut d.size, SizeMode::Fit, tl!("Fit"));
-                        ui.radio_value(&mut d.size, SizeMode::Actual, tl!("Actual size"));
-                        ui.radio_value(&mut d.size, SizeMode::Shrink, tl!("Shrink oversized pages"));
-                    });
-                    ui.horizontal(|ui| {
-                        let custom = matches!(d.size, SizeMode::Custom(_));
-                        if ui.radio(custom, tl!("Custom scale:")).clicked() {
-                            d.size = SizeMode::Custom(d.custom_scale);
+                        let shown = d.printer.clone().unwrap_or_else(|| tl!("Save as PDF").to_string());
+                        egui::ComboBox::from_id_salt("printer").selected_text(shown).width(235.0).show_ui(ui, |ui| {
+                            if d.printers_loading {
+                                ui.add_enabled(false, egui::Label::new(tl!("Looking for printers…")));
+                            }
+                            for p in &d.printers {
+                                let detail = d.printer_details.iter().find(|det| det.name == p.name);
+                                let label = printer_label(p, detail);
+                                ui.selectable_value(&mut d.printer, Some(p.name.clone()), label);
+                            }
+                            ui.selectable_value(&mut d.printer, None, tl!("Save as PDF"));
+                        });
+                        let tip = if spool::HAS_PRINTER_PREFERENCES {
+                            tl!("Opens the printer driver's preferences. They are saved for every print from this computer; the copies, two-sided, grayscale and paper chosen here still apply.")
+                        } else {
+                            tl!("The printer driver's own settings for this print: paper tray, paper type, finishing and more.")
+                        };
+                        let properties = ui.add_enabled(d.printer.is_some(), egui::Button::new(tl!("Properties…"))).on_hover_text(tip);
+                        if properties.clicked()
+                            && let Some(p) = d.printer.clone()
+                        {
+                            if spool::HAS_PRINTER_PREFERENCES {
+                                d.driver_error = spool::open_printer_preferences(&p).err().map(|e| e.to_string());
+                            } else {
+                                if d.driver_options.as_ref().is_none_or(|(read_for, _)| *read_for != p) {
+                                    d.driver_options = Some((p.clone(), spool::printer_options(&p)));
+                                    d.driver_choices.clear();
+                                }
+                                d.show_driver_options = !d.show_driver_options;
+                            }
                         }
-                        ui.add_enabled(custom, egui::DragValue::new(&mut d.custom_scale).range(1.0..=1000.0).suffix(" %"));
+                        if crate::icons::button(ui, "rotate-cw", 24.0, false, tl!("Check again")).clicked() {
+                            d.recheck_printers = true;
+                        }
                     });
-                }
-                Handling::Poster => {
+                    if d.printer != before {
+                        d.printer_picked = true;
+                        d.show_driver_options = false;
+                        d.driver_error = None;
+                    }
+                    ui.end_row();
+                    if let Some(selected_name) = &d.printer
+                        && let Some(det) = d.printer_details.iter().find(|det| &det.name == selected_name)
+                    {
+                        // What kind of printer this is: network or local, its port and its driver.
+                        let about = printer_about(det);
+                        if !about.is_empty() {
+                            ui.label("");
+                            // A long WSD port name is cut short; the whole line shows on hover.
+                            ui.add(egui::Label::new(egui::RichText::new(about.as_str()).small().color(t.text_muted)).truncate()).on_hover_text(about);
+                            ui.end_row();
+                        }
+                        if !det.status.is_available() {
+                            ui.label("");
+                            ui.label(
+                                egui::RichText::new(crate::i18n::fmt(
+                                    tl!("Printer status: {status}. Check the printer's connection before printing."),
+                                    &[("status", status_label(det.status))],
+                                ))
+                                .small()
+                                .color(Color32::from_rgb(0xD9, 0x77, 0x06)),
+                            );
+                            ui.end_row();
+                        }
+                    } else if !cfg!(target_arch = "wasm32") && d.printer.is_none() && !d.printers_loading && d.printers.is_empty() {
+                        // Nothing found: say so, and what to do (Save as PDF still works). A browser
+                        // lists no printers at all, so it gets no hint.
+                        let hint =
+                            tl!("No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.");
+                        ui.label("");
+                        ui.scope(|ui| {
+                            ui.set_max_width(360.0);
+                            ui.add(egui::Label::new(egui::RichText::new(hint).small().color(t.text_muted)).wrap());
+                        });
+                        ui.end_row();
+                    }
+                    ui.label(tl!("Copies:"));
                     ui.horizontal(|ui| {
-                        ui.label(tl!("Tile scale:"));
-                        ui.add(egui::DragValue::new(&mut d.poster_scale).range(10.0..=1000.0).suffix(" %"));
-                        ui.label(tl!("Overlap:"));
-                        ui.add(egui::DragValue::new(&mut d.overlap).range(0.0..=144.0).suffix(" pt"));
-                        ui.checkbox(&mut d.cut_marks, tl!("Cut marks"));
+                        ui.add(egui::DragValue::new(&mut d.copies).range(1..=999));
+                        ui.checkbox(&mut d.collate, tl!("Collate"));
+                        ui.checkbox(&mut d.grayscale, tl!("Print in grayscale"));
                     });
-                }
-                Handling::Multiple => {
+                    ui.end_row();
+                    ui.label(tl!("Two-sided:"));
                     ui.horizontal(|ui| {
-                        ui.label(tl!("Pages per sheet:"));
-                        combo(ui, "per-sheet", &mut d.per_sheet, &[(2, "2"), (4, "4"), (6, "6"), (9, "9"), (16, "16")], 60.0);
-                        ui.label(tl!("Page order:"));
                         combo(
                             ui,
-                            "order",
-                            &mut d.order,
+                            "duplex",
+                            &mut d.duplex,
                             &[
-                                (PageOrder::Horizontal, tl!("Horizontal")),
-                                (PageOrder::HorizontalReversed, tl!("Horizontal reversed")),
-                                (PageOrder::Vertical, tl!("Vertical")),
-                                (PageOrder::VerticalReversed, tl!("Vertical reversed")),
-                                (PageOrder::CutStack, tl!("Cut and stack")),
+                                (spool::Duplex::Off, tl!("Off")),
+                                (spool::Duplex::LongEdge, tl!("Flip on long edge")),
+                                (spool::Duplex::ShortEdge, tl!("Flip on short edge")),
                             ],
                             150.0,
                         );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut d.border, tl!("Print page border"));
-                        ui.checkbox(&mut d.auto_rotate, tl!("Auto-rotate pages"));
-                    });
-                    if d.order == PageOrder::CutStack {
-                        ui.label(tl!(
-                            "Print single-sided. Keep the sheets in order, cut at the marks, then stack the piles left to right, top to bottom."
-                        ));
-                    }
-                }
-                Handling::Booklet => {
-                    ui.horizontal(|ui| {
-                        ui.label(tl!("Booklet subset:"));
                         combo(
                             ui,
-                            "booklet",
-                            &mut d.booklet_subset,
-                            &[
-                                (BookletSubset::BothSides, tl!("Both sides")),
-                                (BookletSubset::FrontOnly, tl!("Front side only")),
-                                (BookletSubset::BackOnly, tl!("Back side only")),
-                            ],
-                            130.0,
+                            "print-dpi",
+                            &mut d.dpi,
+                            &[(150, "150 DPI"), (300, "300 DPI"), (600, "600 DPI")],
+                            90.0,
                         );
-                        ui.label(tl!("Binding:"));
-                        combo(ui, "binding", &mut d.binding, &[(Binding::Left, tl!("Left")), (Binding::Right, tl!("Right"))], 80.0);
                     });
+                    ui.end_row();
+                    ui.label(tl!("Paper:"));
+                    egui::ComboBox::from_id_salt("paper").selected_text(PAPERS[d.paper].0).width(160.0).show_ui(ui, |ui| {
+                        for (i, (name, _)) in PAPERS.iter().enumerate() {
+                            ui.selectable_value(&mut d.paper, i, *name);
+                        }
+                    });
+                    ui.end_row();
+                });
+                if let Some(e) = &d.driver_error {
+                    let msg = crate::i18n::fmt(tl!("Couldn't open the printer's preferences: {e}"), &[("e", e)]);
+                    ui.label(egui::RichText::new(msg).small().color(t.text_muted));
                 }
-            }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(tl!("Orientation:"));
-                ui.radio_value(&mut d.orientation, Orientation::Auto, tl!("Auto portrait/landscape"));
-                ui.radio_value(&mut d.orientation, Orientation::Portrait, tl!("Portrait"));
-                ui.radio_value(&mut d.orientation, Orientation::Landscape, tl!("Landscape"));
+                if d.show_driver_options {
+                    driver_options_panel(ui, d, t);
+                }
+                ui.add_space(6.0);
+                widgets::section_title(ui, tl!("Pages to Print"));
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut d.which, Which::All, tl!("All"));
+                    ui.radio_value(&mut d.which, Which::Current, tl!("Current page"));
+                    ui.radio_value(&mut d.which, Which::Range, tl!("Pages"));
+                    let r = ui.add_enabled(
+                        d.which == Which::Range,
+                        egui::TextEdit::singleline(&mut d.range).hint_text(format!("1-{}", sizes.len())).desired_width(110.0),
+                    );
+                    if r.gained_focus() {
+                        d.which = Which::Range;
+                    }
+                });
+                // Offered only when pages were picked before the dialog opened.
+                if !d.selected.is_empty() {
+                    let label = format!("{} ({})", tl!("Selected pages"), d.selected.len());
+                    ui.radio_value(&mut d.which, Which::Selected, label);
+                }
+                ui.horizontal(|ui| {
+                    ui.label(tl!("More options:"));
+                    combo(
+                        ui,
+                        "subset",
+                        &mut d.subset,
+                        &[(Subset::All, tl!("All pages in range")), (Subset::Odd, tl!("Odd pages only")), (Subset::Even, tl!("Even pages only"))],
+                        150.0,
+                    );
+                    ui.checkbox(&mut d.reverse, tl!("Reverse pages"));
+                });
+                ui.add_space(6.0);
+                widgets::section_title(ui, tl!("Page Sizing & Handling"));
+                ui.horizontal(|ui| {
+                    for (h, label) in [
+                        (Handling::Size, tl!("Size")),
+                        (Handling::Poster, tl!("Poster")),
+                        (Handling::Multiple, tl!("Multiple")),
+                        (Handling::Booklet, tl!("Booklet")),
+                    ] {
+                        if widgets::mode_tab(ui, label, d.handling == h).clicked() {
+                            d.handling = h;
+                            d.sheet = 0;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                match d.handling {
+                    Handling::Size => {
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut d.size, SizeMode::Fit, tl!("Fit"));
+                            ui.radio_value(&mut d.size, SizeMode::Actual, tl!("Actual size"));
+                            ui.radio_value(&mut d.size, SizeMode::Shrink, tl!("Shrink oversized pages"));
+                        });
+                        ui.horizontal(|ui| {
+                            let custom = matches!(d.size, SizeMode::Custom(_));
+                            if ui.radio(custom, tl!("Custom scale:")).clicked() {
+                                d.size = SizeMode::Custom(d.custom_scale);
+                            }
+                            ui.add_enabled(custom, egui::DragValue::new(&mut d.custom_scale).range(1.0..=1000.0).suffix(" %"));
+                        });
+                    }
+                    Handling::Poster => {
+                        ui.horizontal(|ui| {
+                            ui.label(tl!("Tile scale:"));
+                            ui.add(egui::DragValue::new(&mut d.poster_scale).range(10.0..=1000.0).suffix(" %"));
+                            ui.label(tl!("Overlap:"));
+                            ui.add(egui::DragValue::new(&mut d.overlap).range(0.0..=144.0).suffix(" pt"));
+                            ui.checkbox(&mut d.cut_marks, tl!("Cut marks"));
+                        });
+                    }
+                    Handling::Multiple => {
+                        ui.horizontal(|ui| {
+                            ui.label(tl!("Pages per sheet:"));
+                            combo(ui, "per-sheet", &mut d.per_sheet, &[(2, "2"), (4, "4"), (6, "6"), (9, "9"), (16, "16")], 60.0);
+                            ui.label(tl!("Page order:"));
+                            combo(
+                                ui,
+                                "order",
+                                &mut d.order,
+                                &[
+                                    (PageOrder::Horizontal, tl!("Horizontal")),
+                                    (PageOrder::HorizontalReversed, tl!("Horizontal reversed")),
+                                    (PageOrder::Vertical, tl!("Vertical")),
+                                    (PageOrder::VerticalReversed, tl!("Vertical reversed")),
+                                    (PageOrder::CutStack, tl!("Cut and stack")),
+                                ],
+                                150.0,
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut d.border, tl!("Print page border"));
+                            ui.checkbox(&mut d.auto_rotate, tl!("Auto-rotate pages"));
+                        });
+                        if d.order == PageOrder::CutStack {
+                            ui.label(tl!(
+                                "Print single-sided. Keep the sheets in order, cut at the marks, then stack the piles left to right, top to bottom."
+                            ));
+                        }
+                    }
+                    Handling::Booklet => {
+                        ui.horizontal(|ui| {
+                            ui.label(tl!("Booklet subset:"));
+                            combo(
+                                ui,
+                                "booklet",
+                                &mut d.booklet_subset,
+                                &[
+                                    (BookletSubset::BothSides, tl!("Both sides")),
+                                    (BookletSubset::FrontOnly, tl!("Front side only")),
+                                    (BookletSubset::BackOnly, tl!("Back side only")),
+                                ],
+                                130.0,
+                            );
+                            ui.label(tl!("Binding:"));
+                            combo(ui, "binding", &mut d.binding, &[(Binding::Left, tl!("Left")), (Binding::Right, tl!("Right"))], 80.0);
+                        });
+                    }
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(tl!("Orientation:"));
+                    ui.radio_value(&mut d.orientation, Orientation::Auto, tl!("Auto portrait/landscape"));
+                    ui.radio_value(&mut d.orientation, Orientation::Portrait, tl!("Portrait"));
+                    ui.radio_value(&mut d.orientation, Orientation::Landscape, tl!("Landscape"));
+                });
+                ui.add_space(6.0);
+                widgets::section_title(ui, tl!("Comments & Forms"));
+                combo(
+                    ui,
+                    "content",
+                    &mut d.content,
+                    &[
+                        (Content::Document, tl!("Document")),
+                        (Content::DocumentAndMarkups, tl!("Document and markups")),
+                        (Content::DocumentAndStamps, tl!("Document and stamps")),
+                        (Content::FormFieldsOnly, tl!("Form fields only")),
+                    ],
+                    220.0,
+                );
             });
-            ui.add_space(6.0);
-            widgets::section_title(ui, tl!("Comments & Forms"));
-            combo(
-                ui,
-                "content",
-                &mut d.content,
-                &[
-                    (Content::Document, tl!("Document")),
-                    (Content::DocumentAndMarkups, tl!("Document and markups")),
-                    (Content::DocumentAndStamps, tl!("Document and stamps")),
-                    (Content::FormFieldsOnly, tl!("Form fields only")),
-                ],
-                220.0,
-            );
         });
-        ui.add_space(12.0);
-        // Preview.
+        ui.add_space(COLUMN_GAP);
+        // Preview: the rest of the dialog.
         ui.vertical(|ui| {
-            ui.set_width(320.0);
-            let (area, _) = ui.allocate_exact_size(vec2(320.0, 380.0), egui::Sense::hover());
+            ui.set_width(layout.pane.x);
+            let (area, _) = ui.allocate_exact_size(layout.pane, egui::Sense::hover());
+            let ppp = ui.ctx().pixels_per_point();
+            let paper_box = layout.preview_box();
             ui.painter().rect_filled(area, 6.0, t.hover);
             match (&settings, sheets.get(d.sheet)) {
                 (Err(e), _) => {
                     ui.put(area.shrink(16.0), egui::Label::new(egui::RichText::new(e).color(t.text_muted)).wrap());
                 }
                 (Ok(_), Some(sheet)) => {
-                    let k = ((area.width() - 24.0) / sheet.size.0 as f32).min((area.height() - 24.0) / sheet.size.1 as f32);
-                    let paper = Rect::from_center_size(area.center(), vec2(sheet.size.0 as f32 * k, sheet.size.1 as f32 * k));
+                    let k = (paper_box.0 / sheet.size.0 as f32).min(paper_box.1 / sheet.size.1 as f32);
+                    // On whole pixels, so the page rasters (rendered for exactly this size) stay crisp.
+                    let paper = snap_rect(Rect::from_center_size(area.center(), vec2(sheet.size.0 as f32 * k, sheet.size.1 as f32 * k)), ppp);
                     ui.painter().rect_filled(paper, 0.0, Color32::WHITE);
                     ui.painter().rect_stroke(paper, 0.0, Stroke::new(1.0, t.border), egui::StrokeKind::Outside);
                     let to_screen = |x: f64, y: f64| -> Pos2 { pos2(paper.left() + x as f32 * k, paper.bottom() - y as f32 * k) };
@@ -453,14 +1026,21 @@ pub(crate) fn body(
                     for pl in &sheet.placed {
                         let (dw, dh) = sizes[pl.page];
                         let [x0, y0, x1, y1] = pl.clip;
-                        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| {
-                            let (sx, sy) = pl.matrix.apply(x, y);
-                            to_screen(sx, sy)
-                        });
+                        let corners = snap_quad(
+                            [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| {
+                                let (sx, sy) = pl.matrix.apply(x, y);
+                                to_screen(sx, sy)
+                            }),
+                            ppp,
+                        );
+                        // The page's width on screen in device pixels: the texture drawn should be
+                        // about that wide (see `View::print_preview_texture`).
+                        let [a, b, _, _, _, _] = pl.matrix.0;
+                        let want = dw as f32 * (a.hypot(b) as f32) * k * ppp;
                         // UVs of the visible part (texture y runs down from the page top).
                         let uv = |x: f64, y: f64| pos2((x / dw) as f32, (1.0 - y / dh) as f32);
                         let uvs = [uv(x0, y0), uv(x1, y0), uv(x1, y1), uv(x0, y1)];
-                        match thumb(pl.page) {
+                        match thumb(pl.page, want) {
                             Some(tex) => {
                                 let mut mesh = egui::Mesh::with_texture(tex);
                                 for (p, u) in corners.iter().zip(uvs) {
@@ -536,4 +1116,137 @@ pub(crate) fn body(
         }
     });
     (go, cancel)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_preview_rasters_stay_within_the_texture_limit() {
+        // Actual size on a 14,400 pt (200 in) page would ask for a raster far past any texture.
+        let d = PrintDraft { size: SizeMode::Actual, ..PrintDraft::default() };
+        let sizes = vec![(14_400.0, 14_400.0); 2];
+        let labels = vec!["1".into(), "2".into()];
+        for max_side in [2048.0, 8192.0, 16384.0, f32::NAN, 0.0] {
+            for (page, scale) in preview_rasters(&d, &sizes, &labels, 4.0, max_side, PREVIEW_BOX) {
+                let long = 14_400.0 * scale;
+                let cap = if max_side.is_finite() && max_side >= 1.0 { max_side.min(PREVIEW_MAX_SIDE) } else { PREVIEW_MAX_SIDE };
+                assert!(long <= cap + 1.0, "page {page} at {max_side}: {long} px");
+            }
+        }
+    }
+
+    #[test]
+    fn print_preview_rasters_keep_the_current_sheet_within_the_byte_budget() {
+        // Many large pages: the current sheet always gets its raster; neighbours only while the
+        // budget lasts, and the total stays within it.
+        let d = PrintDraft { sheet: 5, ..PrintDraft::default() };
+        let sizes = vec![(2_000.0, 2_000.0); 12];
+        let labels: Vec<String> = (1..=12).map(|n| n.to_string()).collect();
+        let rasters = preview_rasters(&d, &sizes, &labels, 4.0, 16384.0, PREVIEW_BOX);
+        assert_eq!(rasters.first().map(|r| r.0), Some(5), "the sheet on screen comes first: {rasters:?}");
+        let total: f64 = rasters.iter().map(|(_, s)| (2_000.0 * f64::from(*s)).ceil().powi(2) * 4.0).sum();
+        assert!(total <= PREVIEW_BYTES || rasters.len() == 1, "{total} bytes for {rasters:?}");
+    }
+
+    #[test]
+    fn print_preview_is_sharper_than_a_thumbnail_on_a_high_dpi_screen() {
+        let d = PrintDraft::default();
+        let sizes = vec![(612.0, 792.0); 3];
+        let labels = vec!["1".into(), "2".into(), "3".into()];
+        let rasters = preview_rasters(&d, &sizes, &labels, 2.0, 8192.0, PREVIEW_BOX);
+        let scale = rasters.iter().find(|(page, _)| *page == 0).map(|(_, s)| *s).unwrap();
+        // A 132 pt thumbnail at 2× is about 0.43 px/pt. The preview pane needs roughly twice that.
+        assert!(scale > 0.7, "letter page in the preview at 2 px/pt: {scale}");
+        assert!(rasters.iter().any(|(page, _)| *page == 1), "the next sheet is ready");
+        let mut later = d.clone();
+        later.sheet = 2;
+        let rasters = preview_rasters(&later, &sizes, &labels, 2.0, 8192.0, PREVIEW_BOX);
+        assert!(rasters.iter().any(|(page, _)| *page == 2));
+    }
+
+    #[test]
+    fn the_print_dialog_grows_to_a_normal_window_size() {
+        // A 1400 × 900 window (the UI tests' size): the dialog fills it within the margins and
+        // the preview pane takes everything the settings leave — far beyond the old 320 × 380.
+        let l = PrintLayout::for_screen(vec2(1400.0, 900.0), 8.0);
+        assert_eq!(l.width, 1400.0 - 2.0 * WINDOW_MARGIN);
+        assert_eq!(l.width, SETTINGS_W + COLUMN_GAP + 2.0 * 8.0 + l.pane.x, "the columns fill the dialog exactly");
+        assert!(l.pane.x > 800.0 && l.pane.y > 600.0, "{l:?}");
+        assert!(l.columns_h + DIALOG_CHROME <= 900.0 - 2.0 * WINDOW_MARGIN, "the dialog fits the window: {l:?}");
+        // A small window: never smaller than the original dialog.
+        let small = PrintLayout::for_screen(vec2(640.0, 480.0), 8.0);
+        assert_eq!(small.width, MIN_DIALOG_W);
+        assert!(small.pane.x >= PREVIEW_W && small.pane.y >= PREVIEW_H, "{small:?}");
+        // A large monitor: capped, as a normal window would be.
+        let big = PrintLayout::for_screen(vec2(3840.0, 2160.0), 8.0);
+        assert_eq!(big.width, MAX_DIALOG.0);
+        assert!(big.columns_h + DIALOG_CHROME <= MAX_DIALOG.1, "{big:?}");
+        // Nonsense from the platform falls back to the smallest dialog rather than breaking it.
+        for bad in [vec2(f32::NAN, f32::INFINITY), vec2(-5.0, 0.0)] {
+            let l = PrintLayout::for_screen(bad, f32::NAN);
+            assert!(l.width.is_finite() && l.pane.x.is_finite() && l.pane.y.is_finite(), "{l:?}");
+            assert!(l.pane.x >= PREVIEW_W && l.pane.y >= PREVIEW_H, "{l:?}");
+            let (w, h) = l.preview_box();
+            assert!(w >= 1.0 && h >= 1.0);
+        }
+    }
+
+    #[test]
+    fn a_bigger_preview_pane_gets_sharper_rasters() {
+        let d = PrintDraft::default();
+        let sizes = vec![(612.0, 792.0); 2];
+        let labels = vec!["1".into(), "2".into()];
+        let scale = |paper_box| preview_rasters(&d, &sizes, &labels, 1.0, 8192.0, paper_box).first().map(|(_, s)| *s).unwrap_or(0.0);
+        let big = PrintLayout::for_screen(vec2(1400.0, 900.0), 8.0).preview_box();
+        // A portrait sheet is about 1.8× taller on screen in the 1400 × 900 window, and so is its raster.
+        assert!(scale(big) > 1.5 * scale(PREVIEW_BOX), "{} vs {}", scale(big), scale(PREVIEW_BOX));
+        // A broken box falls back to the smallest pane.
+        assert_eq!(scale((f32::NAN, 0.0)), scale(PREVIEW_BOX));
+    }
+
+    #[test]
+    fn preview_pages_land_on_whole_pixels() {
+        for ppp in [1.0, 1.25, 1.5, 2.0] {
+            let r = snap_rect(Rect::from_min_size(pos2(100.37, 20.91), vec2(300.0, 400.0)), ppp);
+            assert_eq!(r.size(), vec2(300.0, 400.0));
+            for v in [r.min.x * ppp, r.min.y * ppp] {
+                assert!((v - v.round()).abs() < 1e-3, "{v} at {ppp}");
+            }
+            assert!((r.min.x - 100.37).abs() <= 0.5 / ppp + 1e-4 && (r.min.y - 20.91).abs() <= 0.5 / ppp + 1e-4);
+            // A quad keeps its shape (a rotated landscape page too) and moves less than a pixel.
+            let quad = [pos2(10.3, 50.7), pos2(10.3, 20.2), pos2(60.6, 20.2), pos2(60.6, 50.7)];
+            let q = snap_quad(quad, ppp);
+            let shift = q[0] - quad[0];
+            assert!(q.iter().zip(quad).all(|(a, b)| (*a - b - shift).length() < 1e-4));
+            assert!(shift.x.abs() <= 0.5 / ppp + 1e-4 && shift.y.abs() <= 0.5 / ppp + 1e-4);
+            assert!(((q[1].x * ppp) - (q[1].x * ppp).round()).abs() < 1e-3 && ((q[1].y * ppp) - (q[1].y * ppp).round()).abs() < 1e-3);
+        }
+        let r = Rect::from_min_size(pos2(1.5, 2.5), vec2(3.0, 4.0));
+        assert_eq!(snap_rect(r, f32::NAN), r);
+        assert_eq!(snap_rect(r, 0.0), r);
+    }
+
+    #[test]
+    fn the_preview_never_shrinks_a_much_larger_raster_into_the_pane() {
+        use crate::canvas::pick_preview_texture;
+        let id = egui::TextureId::User;
+        let (print, thumb, view) = ((800, id(1)), (180, id(2)), (3_200, id(3)));
+        // The print raster rendered for the pane wins.
+        assert_eq!(pick_preview_texture(&[print, thumb, view], 800.0), Some(id(1)));
+        // Before it arrives: a view raster at 4× would break up; the soft thumbnail is drawn.
+        assert_eq!(pick_preview_texture(&[thumb, view], 800.0), Some(id(2)));
+        // A view raster within 2× is sharper than the thumbnail and still filters cleanly.
+        assert_eq!(pick_preview_texture(&[thumb, (1_400, id(3))], 800.0), Some(id(3)));
+        // A print raster left from a smaller layout is used until the new one arrives, if nothing better.
+        assert_eq!(pick_preview_texture(&[(400, id(1)), thumb], 800.0), Some(id(1)));
+        // Only a far larger one: drawn rather than nothing.
+        assert_eq!(pick_preview_texture(&[view], 800.0), Some(id(3)));
+        assert_eq!(pick_preview_texture(&[], 800.0), None);
+        // Rounding: a raster a hair narrower than wanted counts as exact, and ties go to the first.
+        assert_eq!(pick_preview_texture(&[(799, id(1)), (1_000, id(3))], 800.0), Some(id(1)));
+        assert_eq!(pick_preview_texture(&[(800, id(1)), (800, id(3))], 800.0), Some(id(1)));
+        assert_eq!(pick_preview_texture(&[(800, id(1)), (800, id(3))], f32::NAN), Some(id(1)));
+    }
 }
