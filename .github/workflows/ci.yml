@@ -69,7 +69,7 @@ jobs:
       - name: Test
         if: runner.os != 'Linux'
         shell: bash
-        run: .github/scripts/run-annotated.sh "test ${{ runner.os }}" cargo test --workspace
+        run: .github/scripts/run-annotated.sh "test ${{ runner.os }}" cargo test --workspace --no-fail-fast
 
       - name: Test (with craft-fonts)
         if: runner.os == 'Linux'
@@ -77,7 +77,7 @@ jobs:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
         shell: bash
-        run: .github/scripts/run-annotated.sh "test Linux" cargo test --workspace
+        run: .github/scripts/run-annotated.sh "test Linux" cargo test --workspace --no-fail-fast
 
       - name: Layering
         shell: bash

@@ -165,4 +165,4 @@ jobs:
           key: windows-arm64-test
       - name: Test
         shell: bash
-        run: .github/scripts/run-annotated.sh "test ARM64" cargo test --workspace --locked
+        run: .github/scripts/run-annotated.sh "test ARM64" cargo test --workspace --locked --no-fail-fast

@@ -26,7 +26,8 @@ fn top_bar_and_home_have_no_community_links() {
 #[test]
 fn home_screen_shows_linkco_header_and_tools() {
     let h = harness(|_| {});
-    h.get_by_label("Linkco PDF Editor");
+    // The app mark image carries the same accessible name, so match the visible title text.
+    h.get_by_role_and_label(egui::accesskit::Role::Label, "Linkco PDF Editor");
     h.get_by_label("Professional PDF tools for everyday document work.");
     h.get_by_label("View all tools →");
 }
@@ -38,7 +39,8 @@ fn about_dialog_shows_the_brand_and_copyright() {
         app.open_bytes("one.pdf", None, pdf.to_vec()).unwrap();
         app.dialog = Some(Dialog::About);
     });
-    h.get_by_label("Linkco PDF Editor");
+    // The app mark image carries the same accessible name, so match the visible title text.
+    h.get_by_role_and_label(egui::accesskit::Role::Label, "Linkco PDF Editor");
     h.get_by_label("Professional PDF document tools by Linkco.");
     h.get_by_label("© Al Rawabet Commercial Services & Contracting Company W.L.L.");
     h.get_by_label_contains(&format!("Version {}", env!("CARGO_PKG_VERSION")));
