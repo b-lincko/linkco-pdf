@@ -122,7 +122,9 @@ fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
 #[test]
 fn xfa_buttons_run_their_scripts_in_the_app() {
     let mut h = open(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
-    for _ in 0..40 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;

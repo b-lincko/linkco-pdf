@@ -14,7 +14,9 @@ fn harness() -> Harness<'static, PdfCraftApp> {
         app.set_option("zoom", "150").unwrap();
         app
     });
-    for _ in 0..60 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;

@@ -39,7 +39,9 @@ fn the_identity_name_signs_new_comments_and_is_remembered() {
     // New comments carry it. Wait for the page (and its text) to finish loading first: selecting
     // text that hasn't loaded selects nothing, and no highlight is made (seen on slow CI runners).
     h.state_mut().set_option("dialog", "none").unwrap();
-    for _ in 0..200 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;

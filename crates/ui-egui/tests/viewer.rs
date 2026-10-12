@@ -39,7 +39,9 @@ fn harness() -> Harness<'static, PdfCraftApp> {
         app.open_bytes("b.pdf", None, fixture(2)).unwrap();
         app
     });
-    for _ in 0..40 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;

@@ -639,7 +639,9 @@ fn highlight_fields_tints_the_field_area() {
     let _gpu = gpu();
     let mut h = form_harness();
     h.state_mut().set_option("panel", "none").unwrap();
-    for _ in 0..100 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;
@@ -688,7 +690,9 @@ fn required_radio_buttons_get_a_round_red_border() {
         app.set_option("fields", "on").unwrap();
         app
     });
-    for _ in 0..100 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;
@@ -771,7 +775,9 @@ fn required_fields_get_a_red_border_when_highlighting() {
     h.state_mut().set_option("fields", "on").unwrap();
     let props = pdfcraft_engine::FieldProps { required: Some(true), ..Default::default() };
     h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps { name: "fullname".into(), props: Box::new(props) });
-    for _ in 0..100 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;
@@ -833,7 +839,9 @@ trailer << /Root 1 0 R >>
 /// Mean and largest difference between page 1 on screen and the page rendered directly at the
 /// view's exact device scale, over the lined area of `page_raster_maps_one_to_one_onto_screen_pixels`.
 fn compare_page_with_raster(h: &mut Harness<'static, PdfCraftApp>, pdf: &[u8], zoom: f32) -> (f64, u8) {
-    for _ in 0..100 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;
@@ -894,7 +902,9 @@ trailer << /Root 1 0 R >>
         app.set_option("zoom", "300").unwrap();
         app
     });
-    for _ in 0..400 {
+    // Wait by a deadline, not a frame count: a slow machine (the FreeBSD VM) renders slowly.
+    let render_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < render_deadline {
         h.run_steps(2);
         if !h.state().render_pending() {
             break;
