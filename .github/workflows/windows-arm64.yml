@@ -72,12 +72,21 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Publish the reason as an annotation (the checks API returns those, not logs).
+          trap {
+            $why = "$($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)"
+            foreach ($log in 'per-user.log', 'install.log', 'install-nodesktop.log') {
+              if (Test-Path $log) { $why += "`n--- $log (errors) ---`n" + ((Select-String -Path $log -Pattern 'error|failed|return value 3' | Select-Object -Last 15 | ForEach-Object { $_.Line }) -join "`n") }
+            }
+            Write-Output ("::error title=ARM64 install::" + ($why -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'))
+            break
+          }
           $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
           # A command-line override must not put files in a user profile while registering
           # their handlers machine-wide (#305). This runs on a disposable CI runner.
           $p = Start-Process msiexec.exe -WindowStyle Hidden -ArgumentList '/i', "`"$msi`"", '/qn', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', '/l*v', 'per-user.log' -Wait -PassThru
           if ($p.ExitCode -ne 1603) { Get-Content per-user.log -Tail 60; throw "per-user install should fail with 1603, got $($p.ExitCode)" }
-          if (-not (Select-String -Path per-user.log -SimpleMatch 'PdfCraft must be installed for all users.')) {
+          if (-not (Select-String -Path per-user.log -SimpleMatch 'Linkco PDF Editor must be installed for all users.')) {
             Get-Content per-user.log -Tail 60; throw 'per-user install did not fail on the scope guard'
           }
           $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/l*v', 'install.log' -Wait -PassThru
@@ -155,4 +164,5 @@ jobs:
         with:
           key: windows-arm64-test
       - name: Test
-        run: cargo test --workspace --locked
+        shell: bash
+        run: .github/scripts/run-annotated.sh "test ARM64" cargo test --workspace --locked

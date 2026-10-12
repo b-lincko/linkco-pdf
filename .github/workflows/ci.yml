@@ -63,25 +63,30 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: bash
+        run: .github/scripts/run-annotated.sh "clippy ${{ runner.os }}" cargo clippy --workspace --all-targets --message-format=short -- -D warnings
 
       - name: Test
         if: runner.os != 'Linux'
-        run: cargo test --workspace
+        shell: bash
+        run: .github/scripts/run-annotated.sh "test ${{ runner.os }}" cargo test --workspace
 
       - name: Test (with craft-fonts)
         if: runner.os == 'Linux'
         env:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
-        run: cargo test --workspace
+        shell: bash
+        run: .github/scripts/run-annotated.sh "test Linux" cargo test --workspace
 
       - name: Layering
-        run: cargo xtask layers
+        shell: bash
+        run: .github/scripts/run-annotated.sh "layers ${{ runner.os }}" cargo xtask layers
 
       - name: Assets (licences and attribution)
         if: runner.os == 'Linux'
-        run: cargo xtask assets
+        shell: bash
+        run: .github/scripts/run-annotated.sh "assets" cargo xtask assets
 
       - name: CLI without the MCP server still builds
         if: runner.os == 'Linux'
