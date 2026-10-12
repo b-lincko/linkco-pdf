@@ -271,9 +271,16 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" · ");
             let description = text_shapes.iter().find(|text| text.galley.job.text == blurb).unwrap();
+            // Cards wrap into rows, so cards in the same column share an x: the action belonging
+            // to this card is the nearest one below its description.
             let action = text_shapes
                 .iter()
-                .find(|text| text.galley.job.text == crate::i18n::tr(de, "Use now") && (text.pos.x - description.pos.x).abs() < 0.1)
+                .filter(|text| {
+                    text.galley.job.text == crate::i18n::tr(de, "Use now")
+                        && (text.pos.x - description.pos.x).abs() < 0.1
+                        && text.pos.y > description.pos.y
+                })
+                .min_by(|a, b| a.pos.y.total_cmp(&b.pos.y))
                 .unwrap();
             assert!(description.galley.rows.len() <= 2);
             assert!(
