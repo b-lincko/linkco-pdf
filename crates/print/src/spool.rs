@@ -132,7 +132,8 @@ impl Default for Job {
 
 /// Convert premultiplied RGBA8 pixels in-place to perceptual grayscale (ITU-R BT.709).
 pub fn apply_grayscale_rgba(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    let (pixels, _) = rgba.as_chunks_mut::<4>();
+    for px in pixels {
         let r = u32::from(px[0]);
         let g = u32::from(px[1]);
         let b = u32::from(px[2]);

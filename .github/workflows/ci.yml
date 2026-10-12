@@ -64,7 +64,7 @@ jobs:
 
       - name: Clippy
         shell: bash
-        run: .github/scripts/run-annotated.sh "clippy ${{ runner.os }}" cargo clippy --workspace --all-targets --message-format=short -- -D warnings
+        run: .github/scripts/run-annotated.sh "clippy ${{ runner.os }}" cargo clippy --workspace --all-targets --keep-going --message-format=short -- -D warnings
 
       - name: Test
         if: runner.os != 'Linux'
