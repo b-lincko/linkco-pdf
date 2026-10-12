@@ -165,6 +165,9 @@ fn search_finds_collapsed_bookmarks_and_keeps_original_paths() {
     h.run_steps(3);
     assert!(h.query_by_label("Résumé results").is_none());
     let id = h.state().views[0].id;
+    // A full save stamps /ModDate to the second: pin the clock so the two saves compare only content.
+    let app = h.state_mut();
+    app.session = std::mem::take(&mut app.session).with_clock(|| 1_700_000_000);
     let before = h.state().session.save_full_bytes(id).unwrap();
     h.get_by_label("Search").click();
     h.run_steps(1);
