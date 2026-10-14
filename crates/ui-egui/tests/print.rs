@@ -95,6 +95,42 @@ fn invalid_ranges_are_explained_in_the_preview() {
     h.get_by_label_contains("out of range");
 }
 
+/// "Print both sides" under the preview switches two-sided printing on and off, and stays off for
+/// cut and stack, whose sheets are printed single-sided.
+#[test]
+fn the_preview_switches_two_sided_printing_on_and_off() {
+    use pdfcraft_engine::print::{PageOrder, spool::Duplex};
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::LongEdge);
+    // The button and the Two-sided dropdown are the one setting.
+    h.get_by_value("Flip on long edge");
+    // A second click goes back to one side.
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    // Cut and stack prints single-sided sheets: the button is disabled there.
+    h.state_mut().print_draft.handling = pdfcraft_ui_egui::PrintHandling::Multiple;
+    h.state_mut().print_draft.order = PageOrder::CutStack;
+    h.run_steps(2);
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    // Two-sided on for that order (from the dropdown, or another document) is switched off by it:
+    // the button is the way out of the error the preview shows.
+    h.state_mut().print_draft.duplex = Duplex::ShortEdge;
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("Cut and stack needs Two-sided: Off").is_some());
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    assert!(h.query_by_label_contains("Cut and stack needs Two-sided: Off").is_none(), "the preview is clean again");
+}
+
 #[test]
 fn cut_stack_dialog_previews_saves_and_refuses_duplex() {
     use pdfcraft_engine::print::{PageOrder, spool::Duplex};

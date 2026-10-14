@@ -26,8 +26,9 @@ const MAX_DIALOG: (f32, f32) = (1600.0, 1200.0);
 const WINDOW_MARGIN: f32 = 24.0;
 /// The dialog above and below its two columns: the title, the Print / Cancel row and the frame.
 const DIALOG_CHROME: f32 = 120.0;
-/// Under the preview pane: the sheet navigation row and the paper size line.
-const PREVIEW_FOOTER: f32 = 60.0;
+/// Under the preview pane: the sheet navigation row, and the row holding the "Print both sides"
+/// button and the sheet's size.
+const PREVIEW_FOOTER: f32 = 68.0;
 
 /// The Print dialog's size in a window: as large as a normal window (within [`WINDOW_MARGIN`] of
 /// the app window's edges and up to [`MAX_DIALOG`]), never smaller than the original dialog. The
@@ -716,6 +717,39 @@ fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, choice
     });
 }
 
+/// The layout prints sheets that are turned over by hand: cut and stack arranges the pages on
+/// single-sided sheets to cut into piles, so two-sided printing is refused for it (see
+/// [`PrintDraft::settings`]).
+fn single_sided_only(d: &PrintDraft) -> bool {
+    d.handling == Handling::Multiple && d.order == PageOrder::CutStack
+}
+
+/// What the preview's "Print both sides" button switches to: on, flipped on the long edge (what
+/// most two-sided printers do with the sheet), or off. A short-edge flip, chosen under Two-sided
+/// in the settings, counts as on, and the button turns it off.
+fn toggled_duplex(d: &PrintDraft) -> spool::Duplex {
+    if d.duplex == spool::Duplex::Off { spool::Duplex::LongEdge } else { spool::Duplex::Off }
+}
+
+/// The "Print both sides" button under the preview: one click prints on both sides of the sheet,
+/// another goes back to one side (the caller sets [`toggled_duplex`]). It stays off for cut and
+/// stack, whose sheets are printed single-sided, but is still clickable there while two-sided is
+/// on, so it is also the way out of the error the preview shows for that combination.
+fn both_sides_button(ui: &mut egui::Ui, d: &PrintDraft) -> egui::Response {
+    let on = d.duplex != spool::Duplex::Off;
+    let blocked = single_sided_only(d) && !on;
+    let label = tl!("Print both sides");
+    let tip = if blocked {
+        tl!("Cut and stack prints single-sided sheets. Choose another page order to print on both sides.")
+    } else if on {
+        tl!("Printing on both sides of the sheet. Click to print on one side only.")
+    } else {
+        tl!("Print on both sides of the sheet, turning it over on its long edge, if the printer can.")
+    };
+    let resp = ui.add_enabled_ui(!blocked, |ui| widgets::toggle_pill(ui, "copy", label, on)).inner;
+    resp.on_hover_text(tip)
+}
+
 /// Draw the dialog, sized by `layout`. `thumb` gives the texture to draw a page with when there is
 /// one, given the width in device pixels it is drawn at. Returns (print, cancel).
 pub(crate) fn body(
@@ -1098,10 +1132,18 @@ pub(crate) fn body(
                     d.sheet += 1;
                 }
             });
-            if let Some(s) = sheets.first() {
-                let (w, h) = (s.size.0 / 72.0, s.size.1 / 72.0);
-                ui.label(egui::RichText::new(format!("{w:.2} × {h:.2} in")).small().color(t.text_muted));
-            }
+            ui.horizontal(|ui| {
+                if both_sides_button(ui, d).clicked() {
+                    d.duplex = toggled_duplex(d);
+                }
+                // The sheet's size on the right of the same row.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(s) = sheets.first() {
+                        let (w, h) = (s.size.0 / 72.0, s.size.1 / 72.0);
+                        ui.label(egui::RichText::new(format!("{w:.2} × {h:.2} in")).small().color(t.text_muted));
+                    }
+                });
+            });
         });
     });
     ui.add_space(12.0);
@@ -1164,6 +1206,41 @@ mod tests {
         later.sheet = 2;
         let rasters = preview_rasters(&later, &sizes, &labels, 2.0, 8192.0, PREVIEW_BOX);
         assert!(rasters.iter().any(|(page, _)| *page == 2));
+    }
+
+    #[test]
+    fn the_both_sides_button_switches_two_sided_printing_on_and_off() {
+        let mut d = PrintDraft::default();
+        assert_eq!(d.duplex, spool::Duplex::Off);
+        // One click on: flip on the long edge, what most two-sided printers do with the sheet.
+        d.duplex = toggled_duplex(&d);
+        assert_eq!(d.duplex, spool::Duplex::LongEdge);
+        // And off again.
+        d.duplex = toggled_duplex(&d);
+        assert_eq!(d.duplex, spool::Duplex::Off);
+        // A short-edge flip, chosen under Two-sided in the settings, is on: the button turns it off.
+        let short = PrintDraft { duplex: spool::Duplex::ShortEdge, ..PrintDraft::default() };
+        assert_eq!(toggled_duplex(&short), spool::Duplex::Off);
+    }
+
+    #[test]
+    fn cut_and_stack_keeps_the_both_sides_button_off() {
+        // Cut and stack lays pages out on sheets to be cut into piles, which are printed one
+        // sided: the draft refuses two-sided for it, so the button stays off and disabled.
+        let cut_stack = PrintDraft { handling: Handling::Multiple, order: PageOrder::CutStack, ..PrintDraft::default() };
+        assert!(single_sided_only(&cut_stack));
+        let on = PrintDraft { duplex: spool::Duplex::LongEdge, ..cut_stack.clone() };
+        assert!(on.settings(2, &["1".into(), "2".into()]).is_err(), "the dialog says why");
+        // Switched on some other way, the button is still the way back off.
+        assert_eq!(toggled_duplex(&on), spool::Duplex::Off);
+        // Every other order and handling prints on both sides.
+        for d in [
+            PrintDraft::default(),
+            PrintDraft { handling: Handling::Multiple, order: PageOrder::Horizontal, ..PrintDraft::default() },
+            PrintDraft { handling: Handling::Booklet, order: PageOrder::CutStack, ..PrintDraft::default() },
+        ] {
+            assert!(!single_sided_only(&d), "{d:?}");
+        }
     }
 
     #[test]

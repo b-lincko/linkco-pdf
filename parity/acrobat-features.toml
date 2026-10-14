@@ -7938,8 +7938,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::the_windows_job_is_the_environment_of_the_print_script", "crates/print/src/tests.rs::the_print_script_renders_the_job_and_reaches_the_spooler"]
-notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting"
+evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::the_windows_job_is_the_environment_of_the_print_script", "crates/print/src/tests.rs::the_print_script_renders_the_job_and_reaches_the_spooler", "crates/ui-egui/tests/print.rs::the_preview_switches_two_sided_printing_on_and_off"]
+notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting; the preview's \"Print both sides\" button switches it on and off (flip on long edge), and stays off for cut and stack"
 
 [[feature]]
 id = "print.n-up"
