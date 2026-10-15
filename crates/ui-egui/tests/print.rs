@@ -1,7 +1,7 @@
 //! The Print dialog in the real shell (egui_kittest): settings, preview sheets, Save as PDF.
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
 
 fn harness() -> Harness<'static, PdfCraftApp> {
@@ -358,4 +358,42 @@ fn printer_row_describes_network_printers_and_an_empty_list() {
     assert_eq!(h.state().print_draft.printer, None);
     h.get_by_label_contains("No printers were found.");
     assert!(h.query_by_label_contains("Network printer").is_none());
+}
+
+#[test]
+fn architectural_page_can_be_matched_at_100_percent() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1000.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let bytes = app.session.create_blank(2592.0, 1728.0, 1).unwrap();
+        app.open_bytes("architectural.pdf", None, bytes.as_ref().clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_label("PDF page: 36.00 × 24.00 in");
+    h.get_by_label("Match page at 100%").click();
+    h.run_steps(3);
+    h.get_by_value("ARCH D (24 x 36 in)");
+    h.get_by_label("PDF scale: 100.00%");
+    h.get_by_label("36.00 × 24.00 in");
+    let settings = h.state().print_draft.settings(1, &[]).unwrap();
+    assert_eq!(settings.paper, (1728.0, 2592.0));
+    assert_eq!(settings.layout, pdfcraft_engine::print::Layout::Size(pdfcraft_engine::print::SizeMode::Actual));
+}
+
+#[test]
+fn custom_page_cannot_silently_match_a_standard_paper() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    // The 300 x 400 pt fixture is not a standard sheet.
+    assert!(pdfcraft_engine::print::matching_paper((300.0, 400.0)).is_none());
+    let before = h.state().print_draft.clone();
+    assert!(h.get_by_label("Match page at 100%").accesskit_node().is_disabled());
+    h.get_by_label("Match page at 100%").click();
+    h.run_steps(3);
+    assert_eq!(h.state().print_draft.paper, before.paper);
+    assert_eq!(h.state().print_draft.size, before.size);
 }

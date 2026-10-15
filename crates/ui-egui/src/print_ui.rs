@@ -882,7 +882,9 @@ pub(crate) fn body(
                     });
                     ui.end_row();
                     ui.label(tl!("Paper:"));
-                    egui::ComboBox::from_id_salt("paper").selected_text(PAPERS[d.paper].0).width(160.0).show_ui(ui, |ui| {
+                    // The saved draft can name a paper this catalog no longer has (#1123).
+                    let paper_name = PAPERS.get(d.paper).map_or("US Letter", |p| p.0);
+                    egui::ComboBox::from_id_salt("paper").selected_text(paper_name).width(260.0).show_ui(ui, |ui| {
                         for (i, (name, _)) in PAPERS.iter().enumerate() {
                             ui.selectable_value(&mut d.paper, i, *name);
                         }
@@ -895,6 +897,24 @@ pub(crate) fn body(
                 }
                 if d.show_driver_options {
                     driver_options_panel(ui, d, t);
+                }
+                // The page on screen, and one click to print it at its own size on the sheet that fits.
+                if let Some(&source) = sizes.get(d.current_page) {
+                    ui.horizontal_wrapped(|ui| {
+                        let (w, h) = (source.0 / 72.0, source.1 / 72.0);
+                        ui.label(crate::i18n::fmt(tl!("PDF page: {w} × {h} in"), &[("w", &format!("{w:.2}")), ("h", &format!("{h:.2}"))]));
+                        let matched = print::matching_paper(source);
+                        let tip = tl!("Print at 100% on the paper of the same size, leaving the page range alone.");
+                        if ui.add_enabled(matched.is_some(), egui::Button::new(tl!("Match page at 100%"))).on_hover_text(tip).clicked()
+                            && let Some(paper) = matched
+                        {
+                            d.paper = paper;
+                            d.handling = Handling::Size;
+                            d.size = SizeMode::Actual;
+                            d.orientation = Orientation::Auto;
+                            d.sheet = 0;
+                        }
+                    });
                 }
                 ui.add_space(6.0);
                 widgets::section_title(ui, tl!("Pages to Print"));
@@ -1138,9 +1158,18 @@ pub(crate) fn body(
                 }
                 // The sheet's size on the right of the same row.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(s) = sheets.first() {
+                    if let Some(s) = sheets.get(d.sheet) {
                         let (w, h) = (s.size.0 / 72.0, s.size.1 / 72.0);
                         ui.label(egui::RichText::new(format!("{w:.2} × {h:.2} in")).small().color(t.text_muted));
+                        // The scale the page is drawn at on the previewed sheet (#1123).
+                        if d.handling == Handling::Size
+                            && let Some(p) = s.placed.first()
+                        {
+                            let scale = p.matrix.0[0].hypot(p.matrix.0[1]) * 100.0;
+                            let text = crate::i18n::fmt(tl!("PDF scale: {scale}%"), &[("scale", &format!("{scale:.2}"))]);
+                            let tip = tl!("The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.");
+                            ui.label(egui::RichText::new(text).small().color(t.text_muted)).on_hover_text(tip);
+                        }
                     }
                 });
             });
