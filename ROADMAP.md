@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~26% (ready for real work 49% → 75%) and ~400–700 h away
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (localized shortcut labels, #496; readiness table with hours per audience; full number as weighted sum 49%; earlier: second look: ready 40% → 47%, mainstream 55% added; core-workflow gate applied → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-15 · **Change:** minor (print ports: current page, the poster sheet limit, architectural paper presets and scale, #1411/#1376/#1123; earlier: localized shortcut labels, #496; readiness table with hours per audience; full number as weighted sum 49%; earlier: second look: ready 40% → 47%, mainstream 55% added; core-workflow gate applied → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 PdfCraft's one-page summary: how close it is to Adobe Acrobat Pro's offline feature set, and what
 comes next. Adobe's cloud services (Document Cloud, Acrobat Sign requests, shared review, the AI
@@ -134,6 +134,19 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 ## Progress log
 
 Newest first: the date, what moved, and the new overall estimate.
+
+- **2026-10-15 (L Print, ports from upstream):** Three fixes and one feature carried over from
+  storytold/pdfcraft. **Current page** now prints the page on screen instead of the page
+  labelled with its number, which mattered as soon as a document's front matter is numbered
+  i, ii, iii (#1411). A **poster** scale large enough to saturate the tile counts is refused
+  with the 1024-sheet error instead of overflowing the sheet count (#1376). The **Paper**
+  menu, `doc_print` and the dialog gained the architectural sheets — ARCH A/B/C/D/E1/E,
+  ANSI C/D/E and ISO A0/A1/A2 — with **Match page at 100%** (the standard sheet the page on
+  screen fits, Actual size, auto orientation, page range left alone; disabled for a custom
+  page size) and a **PDF scale** readout of the sheet being previewed, which also no longer
+  shows sheet 1's size while another sheet is on screen (#1123). Covered by unit tests, a
+  tool test over every preset and two real-shell kitests. Milestone and effort estimates
+  unchanged; the upstream printing backend itself is deliberately not ported.
 
 - **2026-10-14 (L Print, print preview):** Print ▸ preview has a **Print both sides** button under the sheet navigation: one click turns two-sided printing on (flipped on the long edge), another goes back to one side, and the Two-sided dropdown in the settings stays in step with it. It is off and disabled for cut and stack, whose sheets are printed single-sided, but stays clickable there while two-sided is on, so it is also the way out of the error the preview shows for that combination. Covered by a real-shell kittest and unit tests; milestone and effort estimates unchanged.
 
