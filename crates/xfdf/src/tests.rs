@@ -341,6 +341,42 @@ fn form_data_as_xml_csv_and_text() {
 }
 
 #[test]
+fn csv_exports_preserve_carriage_returns_in_names_and_values() {
+    for (name, value, expected) in [
+        ("Name", "plain", "Name\nplain\n"),
+        ("Name", "Tail\r", "Name\n\"Tail\r\"\n"),
+        ("Name", "Alpha\rBeta", "Name\n\"Alpha\rBeta\"\n"),
+        ("Name", "\rLead", "Name\n\"\rLead\"\n"),
+        ("Name", "\r", "Name\n\"\r\"\n"),
+        ("Name", "Alpha\r\nBeta", "Name\n\"Alpha\r\nBeta\"\n"),
+        ("Name", "Alpha\nBeta", "Name\n\"Alpha\nBeta\"\n"),
+        ("Name", "comma,\r", "Name\n\"comma,\r\"\n"),
+        ("Name", "\"quoted\"\r", "Name\n\"\"\"quoted\"\"\r\"\n"),
+        ("Name", "before\r,\"after\"", "Name\n\"before\r,\"\"after\"\"\"\n"),
+        ("Na\rme", "both\r", "\"Na\rme\"\n\"both\r\"\n"),
+    ] {
+        let mut src = pages_only();
+        add_field(&mut src, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Name")).unwrap();
+        let field = fields(&src)[0].obj;
+        src.update_dict(field, |d| d.set(b"T".to_vec(), PdfString::text(name))).unwrap();
+        set_value(&mut src, name, &FieldValue::Text(value.into())).unwrap();
+        let source = Arc::new(write_full(&src, &SaveOptions::default()).unwrap());
+        let src = Document::open(source.clone()).unwrap();
+        assert_eq!(values(&src), [(name.to_string(), vec![value.to_string()])]);
+        let csv = export_data(&src, Format::Csv);
+
+        let mut dst = Document::open(source).unwrap();
+        set_value(&mut dst, name, &FieldValue::Text("replaced".into())).unwrap();
+        let report = import(&mut dst, csv.as_bytes()).unwrap();
+        assert_eq!(report.fields, 1);
+        assert!(report.rejected.is_empty(), "{report:?}");
+        let reopened = Document::open(Arc::new(write_full(&dst, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(values(&reopened), [(name.to_string(), vec![value.to_string()])]);
+        assert_eq!(csv, expected, "CSV must quote CR as well as LF, commas and quotes");
+    }
+}
+
+#[test]
 fn csv_values_may_span_lines() {
     // A quoted CSV value may hold line breaks (export_data writes multiline text that way): the
     // record goes on to the closing quote, so later columns still import.
