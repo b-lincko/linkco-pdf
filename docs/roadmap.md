@@ -121,6 +121,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | M6/M10 upstream ports: label printing (#1583), inline-image sample boundaries (#1562), lost page trees (#1664), Wayland wheel phases (#1569), NCName field tags (#1588), XFDF text around comments (#1647), CSV carriage returns (#1563). Estimates unchanged. |
 | 2026-10-10 | minor | M14: localized shortcut key names (#496), including runtime switching and native layout checks. Estimates unchanged. |
 | 2026-10-10 | minor | Re-judged convert and share with the cross-app gate rule (only a workflow that can't be completed at all blocks): partial, not blocking → stage alpha |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows; convert and share fails → pre-alpha, 40–70 h to alpha) and rank 0 in the upcoming milestones |

@@ -133,7 +133,7 @@ feature — but it changes behaviour worth copying: with `crates/oracle`, a miss
 next time we write a PDF fixture. The v0.8.0 changelog (77 PRs) is also the cleanest statement of
 everything we are behind on.
 
-## 0.2 Ported into this repo — 15 Oct 2026
+## 0.2 Ported into this repo — 17 Oct 2026
 
 Taken one task id per commit, each with upstream's tests. Our printing path (PowerShell spooler and
 `render_print_sheets`) is **kept**: upstream moved theirs into a `craft-print` crate, and swapping it
@@ -147,11 +147,38 @@ needs real Windows verification, so only the print *fixes* were ported.
 | `11255c7` | `4812e49` (#1226) | CUPS printer instances get their driver options |
 | `a915820` | `c0c40ac` (#981) | macOS: saves to SMB/FUSE volumes fall back to a plain fsync |
 | `d21ec1b` | `87b448b` (#1339) | An incremental save with no objects writes a valid xref |
+| `c287cb0` | `9c2fc4f` (#1849) | A6 in the Paper menu and `doc_print`, so our paper list matches upstream's |
+| `8eb6efa` | `980bd90` (#1583) | 4 × 6 in label paper, `media=` for the sheet the pages were laid out on, and a Label layout that cuts a label to its printed area and turns it upright |
+| `95bc12d` | `95a972a` (#1562) | Unfiltered inline images use their sample length: pixels that look like `EI` are no longer cut short |
+| `04aedac` | `cccd55f` (#1664) | Editing a file whose page tree is lost addresses the pages the reader finds by scanning |
+| `ffbd600` | `afa8e18` (#1569) | Wayland: a pixel-only wheel no longer keeps Ctrl held, so zooming stops sticking |
+| `de54549` | `e62d3db` (#1588) | Exported XML field tags stay inside the NCName grammar |
+| `f7ff940` | `57c8de0` (#1647) | XFDF field text survives XML comments and processing instructions |
+| `96b94b1` | `53b9bc1` (#1563) | Form CSV export quotes carriage returns |
 
-Still queued: validate-before-replace (`c1a41cc`), #1630, #1306, #1512, #1477, #1640, #1499, #1500;
-then the medium features #1243 (web printing), #1270 (reading colours), #463 (units), #1537 (tabs).
+Still queued from the older batch: validate-before-replace (`c1a41cc`), #1630, #1306, #1512, #1477,
+#1640, #1499, #1500; then the medium features #1243 (web printing), #1270 (reading colours), #463
+(units), #1537 (tabs). From the 17 Oct batch: `02a4d81` (#1452), `d1bc200` (#1539), `7aac682`
+(#1621), `10ad9b4` (#1528), `a790a04` (#1486), `ae9fb42` (#1549), `fcd7274` (#1524), `cdf44d7`
+(#1614), `24f93e6` (#1466), `3805be7` (#1536), `7461c29` (#1448), `ab45a18` (#1557).
+
+Three from the selected batch were **not** taken, each for its own reason:
+
+- **`41809cf` (#1533, macOS Cmd+Q asks about unsaved changes).** Needs cargo: it adds a git
+  dependency (`craft-quit` from `storytold/craft-libs` at `f58bc1a`, while we pin that repo at
+  `5c874d51` for `craft-ui`), and its `Cargo.lock` entry can't be resolved or written by hand here.
+- **`f65f733` (#2436, faster sampled functions, image decodes and patch meshes).** It patches
+  `vendor/hayro-interpret`, which has diverged: upstream's `cache.rs` is 279 lines against our 161
+  and its `x_object.rs` 1213 against our 984. Only `encode.rs` and `function/type0.rs` still match.
+  Taking it means syncing our vendored hayro-interpret first — a job of its own.
+- **`416c855` (#1434, defer marker and link scans).** Portable in principle, but it turns
+  `Document::marks/added/links` from fields into lazy accessors across 14 files (engine, five UI
+  files, four UI test files) and adds a `Scope::Links` refresh path. Left for a session with a build.
+
 Deliberately **not** ported: the `craft-print` migration, camera/Enhance, PDF/UA auto-tagging and the
-Tags panel, the batch CLI, `crates/oracle` + `crates/testkit`, `crates/audit`, PowerPoint export.
+Tags panel, the batch CLI, `crates/oracle` + `crates/testkit`, `crates/audit`, PowerPoint export,
+the M12 accessibility work (`b7976ef`, `a6124bc`, `afa5099`), the redaction audit (`9dfc91e`) and
+`5fdd820` (#1895, UI we have diverged from).
 
 ## 1. New end-user functions (command ids we don't have)
 
