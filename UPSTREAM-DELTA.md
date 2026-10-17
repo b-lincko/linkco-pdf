@@ -1,7 +1,8 @@
 # Upstream delta — storytold/pdfcraft → b-lincko/linkco-pdf
 
 Checked **2026-10-14** against `storytold/pdfcraft` `main` (`c1a41cc`), re-checked **2026-10-15**
-against `9b6dab1`. Section 0.1 lists what we have since taken.
+against `9b6dab1`, and **2026-10-17** against `924c4da`. Sections 0.1–0.2 list what has landed
+since and what we have taken.
 This is the **functional** list: what a user or an agent can do upstream that they cannot do here.
 Counts come from comparing command ids, automation tool ids, the engine's public API, crate lists,
 UI panels and language catalogs — not from reading commit subjects.
@@ -18,7 +19,48 @@ UI panels and language catalogs — not from reading commit subjects.
 | UI languages | ours 16 → upstream 21 (**new: el, kk, lt, sl, tr**) |
 | Files changed upstream | 434 files, **+82,089 / −7,013**; 88 new files, none of them here |
 
-## 0. Update — 15 Oct 2026: what landed since the check above
+## 0. Update — 17 Oct 2026: 45 commits since 9b6dab1
+
+Upstream `main` moved `9b6dab1` -> **`924c4da`** (45 commits, 40 non-merge; 159 files,
+**+8,587 / -875**) - a post-v0.8.0 batch of community PRs, nearly all dated 15-16 Oct.
+
+**Printing (our area).**
+- `980bd90` #1583: **4 x 6 in label paper and a Label layout** for shipping labels (`crates/print`
+  +129, engine +14, the tool, the dialog). The only new print feature; the rest of upstream's print
+  work is still the `craft-print` backend we are not taking.
+
+**Fixes worth having.**
+- `13e3154` fix(fonts): read the Annex D.2 alias codes as the ink they draw (+173/-20).
+- `cccd55f` #1664: editing finds the pages of a damaged file that its readers find (+244/-13).
+- `95a972a` #1562: preserve known unfiltered inline-image sample boundaries (+244/-1) - the same
+  family as #1499, already queued.
+- `41809cf` #1136/#1533: macOS Cmd+Q asks about unsaved changes (+65).
+- `afa8e18` #1569: Wayland stops retaining Ctrl zoom for pixel-only wheel input (+114/-16).
+- Forms: `e62d3db` #1588 (NCName field tags), `57c8de0` #1647 (XFDF text around XML comments),
+  `53b9bc1` #1563 (carriage returns in CSV exports).
+- `ab45a18` #1557: annotations stay readable under reading colours - only useful once #1270 lands.
+
+**Performance.**
+- `f65f733` #2436: faster sampled functions, image decodes across zoom levels and patch meshes;
+  **vendored hayro/hayro-interpret patches 31-33** (+392/-235, 18 files under `vendor/`).
+- `416c855` #1434: marker and link index scans deferred until first use (+247/-85).
+
+**Larger features (a judgement call).**
+- `02a4d81` #1452 keep selected form values through later edits (+322/-31); `d1bc200` #1539 grow
+  text boxes and edit existing text; `7aac682` #1621 picture-menu actions; `10ad9b4` #1528 and
+  `a790a04` #1486 added text selection and line breaks; `ae9fb42` #1549 edge scrolling and taking
+  back a polygon's last point; `fcd7274` #1524 selectable list boxes; `cdf44d7` #1614 folding
+  comment groups; `24f93e6` #1466 hide author-only hover previews; `3805be7` #1536 XDG
+  configuration directory; `7461c29` #1448 `--automation-read-root`/`--automation-write-root` (we
+  still pass one `--root` to the CLI and MCP).
+
+**Not for us.** M12 accessibility (`b7976ef` #1496, `a6124bc` #1463, `afa5099` #1451), the redaction
+audit (`9dfc91e` #2662), tests/CI/docs/translations, and `5fdd820` #1895 (validated signature
+display and snapshot tab reuse: 38 files, +993, in UI we have diverged from). Upstream's own
+duplicate-key clean-ups (#2414 zh-hant, #2419 parity) found nothing here: our catalogs and
+`acrobat-features.toml` have no duplicate keys.
+
+## 0.1 Update — 15 Oct 2026: what landed since the check above
 
 Upstream `main` moved `c1a41cc` → **`d3a91c5`** (10 commits, 14–15 Oct). Two headline things:
 **PdfCraft v0.8.0 was released**, and a new **external-oracle / synthetic-fixture test
@@ -91,7 +133,7 @@ feature — but it changes behaviour worth copying: with `crates/oracle`, a miss
 next time we write a PDF fixture. The v0.8.0 changelog (77 PRs) is also the cleanest statement of
 everything we are behind on.
 
-## 0.1 Ported into this repo — 15 Oct 2026
+## 0.2 Ported into this repo — 15 Oct 2026
 
 Taken one task id per commit, each with upstream's tests. Our printing path (PowerShell spooler and
 `render_print_sheets`) is **kept**: upstream moved theirs into a `craft-print` crate, and swapping it
