@@ -246,6 +246,79 @@ trailer\n<< /Root 1 0 R >>\n%%EOF\n";
     assert_eq!((parent("cycle-a").as_deref(), parent("cycle-b").as_deref()), (Some("cycle-b"), Some("cycle-a")));
 }
 
+/// Two blank pages and no fields: the test names its own fields (`blank()` has three).
+fn pages_only() -> Document {
+    let mut doc = Document::new_empty();
+    let pages = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"Pages").unwrap();
+    let mut kids = Vec::new();
+    for _ in 0..2 {
+        let mut p = Dict::new();
+        p.set(b"Type".to_vec(), Object::name("Page"));
+        p.set(b"Parent".to_vec(), Object::Ref(pages));
+        p.set(b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 600.into(), 800.into()]));
+        kids.push(Object::Ref(doc.add(p)));
+    }
+    doc.update_dict(pages, |d| {
+        d.set(b"Count".to_vec(), Object::Int(kids.len() as i64));
+        d.set(b"Kids".to_vec(), Object::Array(kids));
+    })
+    .unwrap();
+    doc
+}
+
+#[test]
+fn xml_field_names_remain_valid_and_round_trip_without_collisions() {
+    assert_eq!(xml_name(".Value"), "_.Value");
+    let names = [
+        ("Area²", "Area_"),
+        ("Area_", "Area_"),
+        ("Aµ", "A_"),
+        ("µRate", "_Rate"),
+        ("²Rate", "_Rate"),
+        ("½Amount", "_Amount"),
+        ("1Rate", "_1Rate"),
+        ("Café", "Café"),
+        ("Δείγμα", "Δείγμα"),
+        ("姓名", "姓名"),
+        ("٣Value", "_٣Value"),
+        ("\u{345}Rate", "_\u{345}Rate"),
+        ("A\u{345}", "A\u{345}"),
+        ("Alpha_1-2", "Alpha_1-2"),
+        ("ns:value", "ns_value"),
+        ("-Value", "_-Value"),
+    ];
+    let mut src = pages_only();
+    for (index, (name, _)) in names.iter().enumerate() {
+        add_field(&mut src, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some(name)).unwrap();
+        set_value(&mut src, name, &FieldValue::Text(format!("value-{index}"))).unwrap();
+    }
+    let source = Arc::new(write_full(&src, &SaveOptions::default()).unwrap());
+    let src = Document::open(source.clone()).unwrap();
+    let want = values(&src);
+    for format in [Format::Xml, Format::Xdp] {
+        let text = export_data(&src, format);
+        let xml = roxmltree::Document::parse(&text).unwrap();
+        let children: Vec<_> = xml.root_element().children().filter(|n| n.is_element()).collect();
+        assert_eq!(children.len(), names.len());
+        for (child, (original, tag)) in children.iter().zip(names) {
+            assert_eq!(child.tag_name().name(), tag);
+            assert_eq!(child.attribute(("http://ns.adobe.com/xfdf-transition/", "original")), (original != tag).then_some(original));
+        }
+        assert!(!src.is_modified(), "export must not change the source PDF");
+        assert_eq!(src.bytes().as_slice(), source.as_slice());
+
+        let mut dst = Document::open(source.clone()).unwrap();
+        for (name, _) in names {
+            set_value(&mut dst, name, &FieldValue::Text("replaced".into())).unwrap();
+        }
+        let report = import(&mut dst, text.as_bytes()).unwrap();
+        assert_eq!(report.fields, names.len());
+        assert!(report.rejected.is_empty(), "{report:?}");
+        let reopened = Document::open(Arc::new(write_full(&dst, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(values(&reopened), want, "{format:?}: sanitized names must preserve distinct original fields");
+    }
+}
+
 #[test]
 fn form_data_as_xml_csv_and_text() {
     let src = filled();
