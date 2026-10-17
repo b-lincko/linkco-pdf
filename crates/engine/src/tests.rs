@@ -2700,6 +2700,7 @@ fn print_sheets_render_at_target_dpi_and_preserve_paper_geometry() {
         orientation: print::Orientation::Portrait,
         layout: print::Layout::Size(print::SizeMode::Fit),
         content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
     };
     let imposed_letter = s.print_pdf(id, &letter_settings).unwrap();
     let sheets_300 = s.render_print_sheets(id, &imposed_letter, 300, false).unwrap();
@@ -2715,6 +2716,7 @@ fn print_sheets_render_at_target_dpi_and_preserve_paper_geometry() {
         orientation: print::Orientation::Portrait,
         layout: print::Layout::Size(print::SizeMode::Fit),
         content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
     };
     let imposed_a4 = s.print_pdf(id, &a4_settings).unwrap();
     let sheets_a4 = s.render_print_sheets(id, &imposed_a4, 300, true).unwrap();
