@@ -160,6 +160,11 @@ fn inline_image(data: &[u8], pos: usize) -> (Dict, Vec<u8>, usize) {
     }
     // One whitespace byte separates ID from the data.
     let begin = (lx.pos + 1).min(data.len());
+    // The samples of an unfiltered image contain whatever bytes they contain, whitespace + `EI`
+    // included, so trust the known length when the terminator really does follow it.
+    if let Some((end_data, end)) = unfiltered_image_end(data, begin, &dict) {
+        return (dict, data[begin..end_data].to_vec(), end);
+    }
     // The data ends at whitespace + `EI` + (whitespace or end). Search for that pattern.
     let mut i = begin;
     while i + 2 <= data.len() {
@@ -174,6 +179,76 @@ fn inline_image(data: &[u8], pos: usize) -> (Dict, Vec<u8>, usize) {
         i += 1;
     }
     (dict, data[begin..].to_vec(), data.len())
+}
+
+/// An unfiltered image's samples determine its length, including byte padding per row.
+/// Binary samples may themselves contain whitespace + `EI` + whitespace, so use the known
+/// length when the actual terminator follows it. Unknown or damaged layouts keep the heuristic.
+fn unfiltered_image_end(data: &[u8], begin: usize, dict: &Dict) -> Option<(usize, usize)> {
+    for key in [b"Filter".as_slice(), b"F"] {
+        if let Some(filter) = dict.get(key)
+            && !matches!(filter, Object::Null)
+            && !matches!(filter, Object::Array(filters) if filters.is_empty())
+        {
+            return None;
+        }
+    }
+    for (full, short) in
+        [(b"Width".as_slice(), b"W".as_slice()), (b"Height", b"H"), (b"ColorSpace", b"CS"), (b"BitsPerComponent", b"BPC"), (b"ImageMask", b"IM")]
+    {
+        if let (Some(full), Some(short)) = (dict.get(full), dict.get(short))
+            && full != short
+        {
+            return None;
+        }
+    }
+    let get = |full: &[u8], short: &[u8]| dict.get(full).or_else(|| dict.get(short));
+    let width = usize::try_from(get(b"Width", b"W")?.as_int()?).ok().filter(|n| *n > 0)?;
+    let height = usize::try_from(get(b"Height", b"H")?.as_int()?).ok().filter(|n| *n > 0)?;
+    let mask = match get(b"ImageMask", b"IM") {
+        None | Some(Object::Null | Object::Bool(false)) => false,
+        Some(Object::Bool(true)) => true,
+        _ => return None,
+    };
+    let bits = match get(b"BitsPerComponent", b"BPC") {
+        None | Some(Object::Null) => None,
+        Some(value) => Some(value.as_int()?),
+    };
+    let (components, bits) = if mask {
+        if bits.is_some_and(|bits| bits != 1) {
+            return None;
+        }
+        (1usize, 1usize)
+    } else {
+        let (components, max_bits) = match get(b"ColorSpace", b"CS")? {
+            Object::Name(name) => match name.as_slice() {
+                b"DeviceGray" | b"G" => (1, 16),
+                b"DeviceRGB" | b"RGB" => (3, 16),
+                b"DeviceCMYK" | b"CMYK" => (4, 16),
+                _ => return None,
+            },
+            Object::Array(space) if space.len() == 4 && matches!(space.first().and_then(Object::as_name), Some(b"Indexed" | b"I")) => (1, 8),
+            _ => return None,
+        };
+        let bits = match bits? {
+            bits @ (1 | 2 | 4 | 8 | 16) => bits as usize,
+            _ => return None,
+        };
+        if bits > max_bits {
+            return None;
+        }
+        (components, bits)
+    };
+    let row = width.checked_mul(components)?.checked_mul(bits)?.div_ceil(8);
+    let end_data = begin.checked_add(row.checked_mul(height)?)?;
+    let after = data.get(end_data..)?;
+    if !after.first().is_some_and(|b| is_ws(*b)) {
+        return None;
+    }
+    let separator = after.iter().position(|b| !is_ws(*b))?;
+    let ei = end_data.checked_add(separator)?;
+    let end = ei.checked_add(2)?;
+    if data.get(ei..end) == Some(b"EI") && data.get(end).is_none_or(|b| is_ws(*b) || is_delim(*b)) { Some((end_data, end)) } else { None }
 }
 
 /// Write one operator (with a trailing newline).
