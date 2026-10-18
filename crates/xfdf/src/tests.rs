@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pdfcraft_annot::{Markup, Meta, NewAnnotation, Shape, Style, add_annotation, add_reply, summaries};
-use pdfcraft_cos::{SaveOptions, write_full};
+use pdfcraft_cos::{SaveOptions, write_full, write_incremental};
 use pdfcraft_forms::{NewField, add_field, fields, set_value};
 
 use super::*;
@@ -416,6 +416,38 @@ fn xml_exports_preserve_whitespace_in_field_names() {
         assert_eq!(values(&reopened), values(&src), "{format:?}");
     }
     assert_eq!(write_full(&src, &SaveOptions::default()).unwrap(), source_bytes, "export must not change the source PDF");
+}
+
+#[test]
+fn xml_form_import_preserves_text_around_comments_and_instructions() {
+    for (body, expected) in [
+        ("left<!-- ignored -->right", "leftright"),
+        ("<!-- first -->left<?note ignored?>middle<!-- last -->right", "leftmiddleright"),
+        ("<![CDATA[<left>]]><!-- ignored -->&amp;right", "<left>&right"),
+        (" left <!-- ignored --> right ", " left  right "),
+        ("<!-- empty --><?note ignored?>", ""),
+    ] {
+        let mut original = pages_only();
+        add_field(&mut original, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("Name")).unwrap();
+        let root = original.root().unwrap();
+        original.update_dict(root, |dict| dict.set(b"PCUnknown".to_vec(), PdfString::text("retained"))).unwrap();
+        set_value(&mut original, "Name", &FieldValue::Text("replace me".into())).unwrap();
+        let source = write_full(&original, &SaveOptions::default()).unwrap();
+        let mut doc = Document::open(Arc::new(source.clone())).unwrap();
+        let xml = format!("<?xml version=\"1.0\"?><fields><Name>{body}</Name></fields>");
+        let report = import(&mut doc, xml.as_bytes()).unwrap();
+        assert_eq!(report.fields, 1);
+        assert!(report.rejected.is_empty());
+        for saved in [write_full(&doc, &SaveOptions::default()).unwrap(), write_incremental(&doc, &SaveOptions::default()).unwrap()] {
+            let reopened = Document::open(Arc::new(saved)).unwrap();
+            let name = fields(&reopened).into_iter().find(|f| f.name == "Name").unwrap();
+            let want = if expected.is_empty() { Vec::new() } else { vec![expected.to_string()] };
+            assert_eq!(name.value, want, "XML body: {body}");
+            let root = reopened.get(reopened.root().unwrap());
+            assert_eq!(root.as_dict().unwrap().get(b"PCUnknown").unwrap().as_string().unwrap().to_text(), "retained");
+        }
+        assert_eq!(fields(&original).into_iter().find(|f| f.name == "Name").unwrap().value, vec!["replace me"]);
+    }
 }
 
 #[test]
