@@ -254,7 +254,6 @@ fn pieces_parse_as_one_stream_and_splice_back() {
     assert!(Pieces::join::<&[u8]>(&[]).splice([(0..1, b"x".to_vec())]).is_empty());
 }
 
-
 #[test]
 fn stream_boundary_comment_matches_space_concatenation() {
     for eol in [b"\n".as_slice(), b"\r", b"\r\n"] {

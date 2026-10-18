@@ -483,5 +483,4 @@ mod tests {
         assert_eq!(stream.decoded_within(1).unwrap(), b"A");
         assert_eq!(stream.decoded_strict().unwrap(), b"A");
     }
-
 }
