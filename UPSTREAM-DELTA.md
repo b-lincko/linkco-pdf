@@ -1,8 +1,8 @@
 # Upstream delta — storytold/pdfcraft → b-lincko/linkco-pdf
 
 Checked **2026-10-14** against `storytold/pdfcraft` `main` (`c1a41cc`), re-checked **2026-10-15**
-against `9b6dab1`, and **2026-10-17** against `924c4da`. Sections 0.1–0.2 list what has landed
-since and what we have taken.
+against `9b6dab1`, **2026-10-17** against `924c4da` and **2026-10-18** against `d8b2705`. Section
+0.0 is the newest survey; 0.1–0.2 list what has landed and what we have taken.
 This is the **functional** list: what a user or an agent can do upstream that they cannot do here.
 Counts come from comparing command ids, automation tool ids, the engine's public API, crate lists,
 UI panels and language catalogs — not from reading commit subjects.
@@ -18,6 +18,39 @@ UI panels and language catalogs — not from reading commit subjects.
 | Right-hand panels | ours 10 → upstream 11 (**new: Tags**) |
 | UI languages | ours 16 → upstream 21 (**new: el, kk, lt, sl, tr**) |
 | Files changed upstream | 434 files, **+82,089 / −7,013**; 88 new files, none of them here |
+
+## 0.0 Update — 18 Oct 2026: 30 commits since 924c4da (Release 0.9.0)
+
+Upstream `main` moved `924c4da` → **`d8b2705`**: 30 commits, 16 of them non-merge. **Release
+0.9.0** (`645016a`) was cut along the way — a workspace version bump in `Cargo.toml` and
+`Cargo.lock`, nothing we would carry over.
+
+| Commit | What it is | Size | Verdict |
+|---|---|---|---|
+| `893cb74` | Filters: the raw-Flate retry no longer swallows an output-limit error, so a stream over the caller's budget fails as a limit instead of as corruption | +54/−5 | **Take.** Our `crates/filters` (`flate.rs`, `lib.rs`) is byte-identical to upstream's; the `cos` half is a test |
+| `b85d519` | Form data: `esc()` encodes tab and line feed as `&#9;`/`&#10;` so XML attribute-value normalization cannot change a field name, comment identity or metadata entry | +114/−1 | **Take.** Two lines in our `esc`, which already has the `\r` case |
+| `14c3d95` | Form data: a plain-XML `<field>`'s character data is joined across text nodes, as #1647 did for XFDF | +44/−6 | **Take.** One line in `import_table` |
+| `08b44e8` | UI: writing files into a chosen folder refuses any name with a separator, a drive, or that is `.` or `..`, so a PDF-supplied name cannot escape the folder | +129/−17 | **Take the core.** `is_plain_file_name` plus the guard in `write_files_then`, both of which our `files.rs` has in the same shape; the attachment-tab and certificate-name halves ride on helpers we don't have |
+| `392406e` | #3081: content streams are joined with a space (as hayro, MuPDF and Poppler join them), and the parser records which piece boundaries a top-level comment crosses | +258/−10 | **Take the content half.** The newline joiner let an open comment hide the next stream's first line, and redacting unrelated text on such a page made hidden content visible |
+| `43bb98e` | #3084: a new mark is placed against the page's real operators, so content appended after an earlier wrapper that left state set no longer moves or hides later marks | +413/−18 | **Defer.** Rewrites `place_tagged`, where every header, Bates number, watermark and cover is placed: it wants a build |
+| `9b4af15` | #3081: marked content that opens in one stream and closes in the next keeps its replacement text when read for export | +27/−15 | **Defer with `43bb98e`** (same file, badly drifted) |
+| `d8b2705` | #1350: **Clear replacement text** — a new M8 redaction capability (clear a marked-content sequence's replacement text) | +668/−28 | **Ask.** A feature, not a fix, in a crate that has drifted (`redact/src/lib.rs` 239 lines apart, `interp.rs` 244; `sanitize.rs` only 24) |
+| `2654038` | #1917 follow-up: GoToR remote-document paths go through `craft-docpath` (device and network paths refused, relative targets resolved against the source document) | +69/−25 | **Not here.** It adds a `craft-libs` dependency (`craft-docpath`) and its `Cargo.lock` entry — the same wall as #1533 |
+| `77776ca`, `5cf11e9` | Build: take `craft-docpath` from the merged craft-libs rev | +3/−2, +3/−3 | With the above |
+| `c7a6feb` | i18n: translate the new link and file-name messages (21 catalogs) | +44/−22 | **Only with `08b44e8` and `2654038`**; we ship 16 catalogs to upstream's 21 |
+| `cee4838` | `deny.toml`: acknowledge the new zbus "unmaintained" advisories | +7 | **Maybe,** once the two above are decided: ours may not carry the same list |
+| `12fcc64` | #2812: seven timing-dependent render and UI tests count work or wait for state instead of racing a clock, plus vendored hayro-interpret patch (34) | +177/−25 | **Not now.** It rewrites tests we don't have in that form, and the vendored patch lands in `color.rs`, 141 lines from ours |
+| `645016a` | Release 0.9.0 | +70/−70 | **Not for us** (our versioning is our own) |
+
+How far the candidate files have drifted from upstream's pre-change state (differing lines, not
+hunks): `crates/filters/src/flate.rs` **0**, `crates/content/src/lib.rs` **81**,
+`crates/edit/src/lib.rs` **125**, `crates/redact/src/lib.rs` **239**, `crates/redact/src/interp.rs`
+**244**, `crates/xfdf/src/lib.rs` **244**, `crates/ui-egui/src/files.rs` **229**, and
+`crates/edit/src/text.rs` **1,525** — ours is 1,572 lines against upstream's 2,623, which is why
+both edit fixes are deferred.
+
+Recommended order: `893cb74` → `b85d519` → `14c3d95` → the core of `08b44e8` → the content half of
+`392406e`.
 
 ## 0. Update — 17 Oct 2026: 45 commits since 9b6dab1
 
