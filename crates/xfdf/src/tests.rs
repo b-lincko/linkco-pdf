@@ -377,6 +377,48 @@ fn csv_exports_preserve_carriage_returns_in_names_and_values() {
 }
 
 #[test]
+fn xml_exports_preserve_whitespace_in_field_names() {
+    let names = ["Line\nName", "Line\tName", "Line\rName", "Line\r\nName", "\t Leading\nTrailing \t", "Line Name"];
+    let value = "value\twith\nlines\r\nand <XML> & \"quotes\"";
+    let mut src = pages_only();
+    for (index, name) in names.iter().enumerate() {
+        let placeholder = format!("field{index}");
+        add_field(&mut src, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: true }, Some(&placeholder)).unwrap();
+        // Existing PDFs can have leading/trailing whitespace even though add_field trims it.
+        let field = fields(&src).into_iter().find(|f| f.name == placeholder).unwrap();
+        src.update_dict(field.obj, |d| d.set(b"T".to_vec(), PdfString::text(name))).unwrap();
+        set_value(&mut src, name, &FieldValue::Text(format!("{index}: {value}"))).unwrap();
+    }
+    let source_bytes = write_full(&src, &SaveOptions::default()).unwrap();
+    let src = Document::open(Arc::new(source_bytes.clone())).unwrap();
+    for format in [Format::Xml, Format::Xfdf] {
+        let exported = if format == Format::Xfdf { export_xfdf(&src, false, true, "form.pdf") } else { export_data(&src, format) };
+        let xml = roxmltree::Document::parse(&exported).unwrap();
+        let exported_names: Vec<_> = if format == Format::Xfdf {
+            xml.descendants().filter(|n| n.has_tag_name("field")).map(|n| n.attribute("name").unwrap()).collect()
+        } else {
+            xml.root_element()
+                .children()
+                .filter(|n| n.is_element())
+                .map(|n| n.attribute(("http://ns.adobe.com/xfdf-transition/", "original")).unwrap())
+                .collect()
+        };
+        assert_eq!(exported_names, names, "{format:?}: {exported}");
+        let mut dst = Document::open(Arc::new(source_bytes.clone())).unwrap();
+        for name in names {
+            set_value(&mut dst, name, &FieldValue::Text("replace me".into())).unwrap();
+        }
+        let report = import(&mut dst, exported.as_bytes()).unwrap();
+        assert_eq!(report.fields, names.len(), "{format:?}: {report:?}");
+        assert!(report.rejected.is_empty(), "{report:?}");
+        let saved = write_full(&dst, &SaveOptions::default()).unwrap();
+        let reopened = Document::open(Arc::new(saved)).unwrap();
+        assert_eq!(values(&reopened), values(&src), "{format:?}");
+    }
+    assert_eq!(write_full(&src, &SaveOptions::default()).unwrap(), source_bytes, "export must not change the source PDF");
+}
+
+#[test]
 fn csv_values_may_span_lines() {
     // A quoted CSV value may hold line breaks (export_data writes multiline text that way): the
     // record goes on to the closing quote, so later columns still import.
