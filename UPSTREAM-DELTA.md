@@ -52,6 +52,14 @@ both edit fixes are deferred.
 Recommended order: `893cb74` → `b85d519` → `14c3d95` → the core of `08b44e8` → the content half of
 `392406e`.
 
+**Taken (18 Oct):** all five, in that order — `900d95f` (#2267 filters), `58c2c5f` (#1917 form data),
+`aceb254` (#2686 form data), `ac71012` (#3083 file names, core only), `9ae5b23` (#3081 content half).
+Each is one commit on `arena/25355b3c-linkco-pdf` with the upstream tests where our file let them
+port; none has been compiled here, so CI is the first build. `08b44e8`'s new message and
+`392406e`'s `Pieces::comment_edges` ride on halves we lack: the `tl!` catalogs have no row for the
+first (it falls back to English, as do the keys still missing from #1123) and no caller for the
+second until the redaction half lands.
+
 ## 0. Update — 17 Oct 2026: 45 commits since 9b6dab1
 
 Upstream `main` moved `9b6dab1` -> **`924c4da`** (45 commits, 40 non-merge; 159 files,
