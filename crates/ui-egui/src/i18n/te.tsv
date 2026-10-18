@@ -2141,4 +2141,16 @@ key	Space	స్పేస్
 	Driver: {driver}	డ్రైవర్: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	ప్రింటర్ స్థితి: {status}. ముద్రించే ముందు ప్రింటర్ కనెక్షన్‌ను తనిఖీ చేయండి.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	ప్రింటర్లు ఏవీ కనుగొనబడలేదు. ప్రింటర్‌ను ఆన్ చేసి కనెక్ట్ చేయండి, ఆపై "మళ్లీ తనిఖీ చేయి" ఎంచుకోండి. మీరు ఇప్పటికీ PDFగా సేవ్ చేయవచ్చు.
+	Print both sides	రెండు వైపులా ముద్రించు
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	కాగితం రెండు వైపులా ముద్రించు, ప్రింటర్ చేయగలిగితే పొడవైన అంచున తిప్పి.
+	Printing on both sides of the sheet. Click to print on one side only.	కాగితం రెండు వైపులా ముద్రణ. ఒక వైపు మాత్రమే ముద్రించడానికి నొక్కండి.
+	Match page at 100%	100% వద్ద పేజీని సరిపోల్చు
+	Print at 100% on the paper of the same size, leaving the page range alone.	అదే పరిమాణం కాగితంపై 100% వద్ద ముద్రించు, పేజీ పరిధిని మార్చకుండా.
+	PDF page: {w} × {h} in	PDF పేజీ: {w} × {h} అంగుళాలు
+	PDF scale: {scale}%	PDF స్థాయి: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	పేజీ గీయబడిన స్థాయి; ప్రింటర్ డ్రైవర్ ఇప్పటికీ కాగితాన్ని మార్చవచ్చు లేదా పనిని చిన్నదిగా చేయవచ్చు.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	"కట్ అండ్ స్టాక్" ఒక వైపు మాత్రమే ఉన్న కాగితాలను ముద్రిస్తుంది. రెండు వైపులా ముద్రించడానికి మరొక పేజీ క్రమాన్ని ఎంచుకోండి.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	ప్రతి పేజీని ముద్రిత ప్రాంతానికి కత్తిరించి, నిటారుగా తిప్పి, సాగదీయకుండా షీట్‌కు సరిపెడుతుంది. ఒక్కో షీట్‌కు ఒక లేబుల్.
+	Turn upside down (180°)	తలకిందులుగా తిప్పు (180°)
+	the name is not a plain file name	పేరు సాధారణ ఫైల్ పేరు కాదు
 	Developer: {name}	డెవలపర్: {name}

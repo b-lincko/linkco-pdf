@@ -2231,4 +2231,16 @@ key	Space	مسافة
 	Driver: {driver}	برنامج التشغيل: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	حالة الطابعة: {status}. تحقق من اتصال الطابعة قبل الطباعة.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	لم يتم العثور على أي طابعة. شغّل الطابعة ووصّلها، ثم اختر «إعادة الفحص». لا يزال بإمكانك الحفظ بصيغة PDF.
+	Print both sides	طباعة على الوجهين
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	الطباعة على وجهي الورقة، مع قلبها من حافتها الطويلة، إن كان ذلك ممكنًا للطابعة.
+	Printing on both sides of the sheet. Click to print on one side only.	الطباعة على وجهي الورقة. اضغط للطباعة على وجه واحد فقط.
+	Match page at 100%	مطابقة الورق للصفحة بنسبة 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	الطباعة بنسبة 100% على ورق من الحجم نفسه، دون تغيير نطاق الصفحات.
+	PDF page: {w} × {h} in	صفحة PDF: {w} × {h} بوصة
+	PDF scale: {scale}%	مقياس PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	المقياس الذي تُرسم به الصفحة؛ ولا يزال بإمكان برنامج التشغيل استبدال الورق أو تصغير العمل.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	يطبع «القص والتكديس» صفحات أحادية الوجه. اختر ترتيب صفحات آخر للطباعة على الوجهين.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	يقص كل صفحة إلى المنطقة المطبوعة، ويديرها لتصبح مستقيمة ويلائمها مع الورقة دون تمديد. ملصق واحد لكل ورقة.
+	Turn upside down (180°)	اقلب رأسًا على عقب (180°)
+	the name is not a plain file name	الاسم ليس اسم ملف بسيطًا
 	Developer: {name}	المطوّر: {name}

@@ -2212,4 +2212,16 @@ key	Space	Espaço
 	Driver: {driver}	Driver: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Status da impressora: {status}. Verifique a conexão da impressora antes de imprimir.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Nenhuma impressora foi encontrada. Ligue a impressora e conecte-a; depois selecione "Verificar novamente". Você ainda pode salvar como PDF.
+	Print both sides	Imprimir frente e verso
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Imprime nos dois lados da folha, virando-a pela borda longa, se a impressora permitir.
+	Printing on both sides of the sheet. Click to print on one side only.	Imprimindo nos dois lados da folha. Clique para imprimir em apenas um lado.
+	Match page at 100%	Ajustar papel à página a 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Imprime a 100% em papel do mesmo tamanho, sem alterar o intervalo de páginas.
+	PDF page: {w} × {h} in	Página do PDF: {w} × {h} pol
+	PDF scale: {scale}%	Escala do PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	A escala em que a página é desenhada; um driver da impressora ainda pode substituir o papel ou reduzir o trabalho.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	«Cortar e empilhar» imprime folhas de um só lado. Escolha outra ordem de páginas para imprimir frente e verso.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Recorta cada página na área impressa, deixa-a na vertical e ajusta-a à folha sem distorcer. Uma etiqueta por folha.
+	Turn upside down (180°)	Virar de cabeça para baixo (180°)
+	the name is not a plain file name	o nome não é um nome de arquivo simples
 	Developer: {name}	Desenvolvedor: {name}

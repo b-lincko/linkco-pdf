@@ -2209,4 +2209,16 @@ key	Space	Szóköz
 	Driver: {driver}	Illesztőprogram: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Nyomtató állapota: {status}. Nyomtatás előtt ellenőrizze a nyomtató kapcsolatát.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Nem található nyomtató. Kapcsolja be és csatlakoztassa a nyomtatót, majd válassza az „Újraellenőrzés” lehetőséget. PDF-ként továbbra is mentheti.
+	Print both sides	Kétoldalas nyomtatás
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Nyomtatás a lap mindkét oldalára, hosszabb élénél megfordítva, ha a nyomtató tudja.
+	Printing on both sides of the sheet. Click to print on one side only.	Nyomtatás a lap mindkét oldalára. Kattintson, ha csak az egyik oldalra nyomtatna.
+	Match page at 100%	Papír illesztése az oldalhoz, 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	100 %-os nyomtatás azonos méretű papírra, az oldaltartomány változatlanul hagyásával.
+	PDF page: {w} × {h} in	PDF-oldal: {w} × {h} hüvelyk
+	PDF scale: {scale}%	PDF-méretarány: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Az a méretarány, amelyen az oldal rajzolódik; a nyomtató-illesztőprogram ettől még helyettesítheti a papírt vagy kicsinyítheti a munkát.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	A „Vágás és egymásra rakás” egyoldalas lapokat nyomtat. Válasszon másik oldalsorrendet a kétoldalas nyomtatáshoz.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Minden oldalt a nyomtatott területére vág, függőlegesre fordítja, és torzítás nélkül a laphoz igazítja. Laponként egy címke.
+	Turn upside down (180°)	Fejjel lefelé fordítás (180°)
+	the name is not a plain file name	a név nem egyszerű fájlnév
 	Developer: {name}	Fejlesztő: {name}
