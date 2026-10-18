@@ -470,4 +470,18 @@ mod tests {
         assert_eq!(stream.decoded_within(3).unwrap(), b"abc");
         assert_eq!(stream.decoded_strict().unwrap(), b"abc");
     }
+
+    #[test]
+    fn raw_flate_fallback_streams_preserve_the_caller_limit() {
+        // Raw deflate with a stored byte and a final empty block. 78 01 also
+        // passes the zlib header check, so decoding must retry the whole input.
+        let mut dict = Dict::new();
+        dict.set(b"Filter".to_vec(), Object::name("FlateDecode"));
+        let stream = Stream::from_raw(dict, vec![0x78, 0x01, 0x00, 0xfe, 0xff, b'A', 0x01, 0x00, 0x00, 0xff, 0xff]);
+        let result = stream.decoded_within(0);
+        assert!(matches!(&result, Err(CosError::Filter(detail)) if detail.contains("exceeds the limit of 0 bytes")), "{result:?}");
+        assert_eq!(stream.decoded_within(1).unwrap(), b"A");
+        assert_eq!(stream.decoded_strict().unwrap(), b"A");
+    }
+
 }
