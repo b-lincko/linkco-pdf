@@ -55,10 +55,22 @@ Recommended order: `893cb74` → `b85d519` → `14c3d95` → the core of `08b44e
 **Taken (18 Oct):** all five, in that order — `900d95f` (#2267 filters), `58c2c5f` (#1917 form data),
 `aceb254` (#2686 form data), `ac71012` (#3083 file names, core only), `9ae5b23` (#3081 content half).
 Each is one commit on `arena/25355b3c-linkco-pdf` with the upstream tests where our file let them
-port; none has been compiled here, so CI is the first build. `08b44e8`'s new message and
-`392406e`'s `Pieces::comment_edges` ride on halves we lack: the `tl!` catalogs have no row for the
-first (it falls back to English, as do the keys still missing from #1123) and no caller for the
-second until the redaction half lands.
+port. `08b44e8`'s new message and `392406e`'s `Pieces::comment_edges` ride on halves we lack: the
+`tl!` catalogs have no row for the first (it falls back to English, as do the keys still missing
+from #1123) and no caller for the second until the redaction half lands.
+
+**Built (18 Oct):** the branch had never been compiled, so a draft PR was opened to make CI run.
+rustfmt wanted three blank lines, which a temporary workflow applied and pushed. Of the ported
+commits, five were wrong: two didn't build (a missing `use` in the #981 staging test, and
+`Format::Xdp`, which our `xfdf::Format` has never had), the #1583 media option broke a print test
+that predates it, and #3083's message plus the print dialog's own wording were missing from all
+sixteen catalogs. Separately, the CSV test exposed a form bug upstream fixed in `2ee8ce1` (#1323)
+that we had never taken: a plain text field silently dropped a whitespace-only value. Four rustls
+advisories from 14 October are fixed by 0.23.46, whose dependencies are the ones the lockfile
+already holds, so the lock was bumped rather than the check waived. One Bulgarian letter (ѝ) is in
+Inter but not JetBrains Mono: upstream relaxed the coverage test for it, but our monospace family
+falls back to a CJK face rather than Inter, so the letter would really drop through - the test
+stays strict and the wording changes. CI (ubuntu, windows, wasm32, licences) is green.
 
 ## 0. Update — 17 Oct 2026: 45 commits since 9b6dab1
 
