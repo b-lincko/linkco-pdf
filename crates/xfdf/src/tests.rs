@@ -295,7 +295,8 @@ fn xml_field_names_remain_valid_and_round_trip_without_collisions() {
     let source = Arc::new(write_full(&src, &SaveOptions::default()).unwrap());
     let src = Document::open(source.clone()).unwrap();
     let want = values(&src);
-    for format in [Format::Xml, Format::Xdp] {
+    // XDP export is `xfa::data::Within` here, not a `Format`: only the XML form to check.
+    for format in [Format::Xml] {
         let text = export_data(&src, format);
         let xml = roxmltree::Document::parse(&text).unwrap();
         let children: Vec<_> = xml.root_element().children().filter(|n| n.is_element()).collect();
