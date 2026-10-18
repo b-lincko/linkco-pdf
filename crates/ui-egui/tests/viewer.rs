@@ -112,8 +112,10 @@ fn view_history_select_all_and_find_options() {
     h.state_mut().views[0].rerun_find();
     // Find runs in the background: wait for it by a deadline, not a frame count, which a loaded
     // machine (the whole workspace testing at once, or the slow FreeBSD VM) can use up before the
-    // last page is searched. The loop ends as soon as the search is done.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // last page is searched. The loop ends as soon as the search is done. The FreeBSD VM, with
+    // every other test binary running beside it, got three quarters of the way through four
+    // pages in the minute this allowed, so the deadline is three minutes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     while std::time::Instant::now() < deadline && h.state().views[0].find.as_ref().unwrap().matches.len() < 15 {
         h.run_steps(2);
         std::thread::sleep(std::time::Duration::from_millis(5));
