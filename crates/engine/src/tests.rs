@@ -2028,6 +2028,66 @@ fn detecting_fields_on_a_printed_form() {
     assert!(s.detect_fields(id, &[]).is_empty(), "nothing left to detect");
 }
 
+/// A one-page file that draws `body` with /F1 available, the way a printed form is built.
+fn page_drawing(body: &str) -> Vec<u8> {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()).into_bytes(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+#[test]
+fn detecting_comb_boxes_adds_one_comb_field_per_row() {
+    // The rows from #1887: five 18 x 22 cells and ten 16 x 20 cells, each a stroked `re`.
+    let mut body = String::from("BT /F1 10 Tf 40 205 Td (Postcode A) Tj ET BT /F1 10 Tf 40 105 Td (Postcode B) Tj ET\n");
+    for i in 0..5 {
+        body.push_str(&format!("{} 200 18 22 re S\n", 120 + i * 18));
+    }
+    for i in 0..10 {
+        body.push_str(&format!("{} 100 16 20 re S\n", 120 + i * 16));
+    }
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("comb.pdf", None, Arc::new(page_drawing(&body)), None).unwrap();
+    let found: Vec<(String, pdfcraft_forms::detect::Kind)> = s.detect_fields(id, &[]).into_iter().map(|(_, c)| (c.name, c.kind)).collect();
+    assert_eq!(
+        found,
+        [
+            ("Postcode A".to_string(), pdfcraft_forms::detect::Kind::Comb { cells: 5 }),
+            ("Postcode B".to_string(), pdfcraft_forms::detect::Kind::Comb { cells: 10 })
+        ]
+    );
+    s.auto_detect_fields(id, &[]).unwrap();
+    let d = s.get(id).unwrap();
+    let combs: Vec<(&str, pdfcraft_forms::FieldKind, bool, Option<usize>)> =
+        d.form.iter().map(|f| (f.name.as_str(), f.kind, f.has(pdfcraft_forms::flags::COMB), f.max_len)).collect();
+    assert_eq!(
+        combs,
+        [
+            ("Postcode A", pdfcraft_forms::FieldKind::Text, true, Some(5)),
+            ("Postcode B", pdfcraft_forms::FieldKind::Text, true, Some(10))
+        ]
+    );
+    assert_eq!(d.can_undo(), Some("Detect form fields"));
+}
+
 #[test]
 fn comparing_two_versions_of_a_document() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);

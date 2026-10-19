@@ -5034,8 +5034,8 @@ milestone = "M6"
 status = "partial"
 commands = ["form.detect", "form.prepare"]
 tools = ["form_detect_fields"]
-evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
-notes = "Underscore runs, rules, empty boxes and small squares (check boxes); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Not yet: comb boxes, tables of cells, scanned forms (needs OCR first), radio groups."
+evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/forms/src/tests.rs::detection_makes_a_row_of_touching_cells_one_comb_field", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/engine/src/tests.rs::detecting_comb_boxes_adds_one_comb_field_per_row", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/automation/tests/automation.rs::detecting_comb_boxes_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
+notes = "Underscore runs, rules, empty boxes, small squares (check boxes) and rows of two or more touching cells of one size (one comb text field per row, the comb flag set and the character limit the number of cells; drawn forms only); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Not yet: comb rows read from a scan, tables of cells, scanned forms (needs OCR first), radio groups."
 
 [[feature]]
 id = "form.auto-name-fields"
