@@ -331,9 +331,12 @@ impl Session {
             };
             edits.push(Edit::AddField { page, rect: c.rect, kind, name: Some(c.name.clone()) });
             if let Some(cells) = comb {
-                let mut props = FieldProps::default();
-                props.max_len = Some(Some(cells));
-                props.flags = vec![(pdfcraft_forms::flags::COMB, true)];
+                let props = FieldProps {
+                    // One character per cell, and the comb flag that draws them.
+                    max_len: Some(Some(cells)),
+                    flags: vec![(pdfcraft_forms::flags::COMB, true)],
+                    ..Default::default()
+                };
                 edits.push(Edit::SetFieldProps { name: c.name, props: Box::new(props) });
             }
         }
