@@ -1713,7 +1713,8 @@ fn dragging_with_the_copy_modifier_copies_the_pages_into_the_gap() {
     let before = page_texts(h.state());
     let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
     let (from, to) = (grab(&h, "Page 1").center(), grab(&h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
-    page_drag(&mut h, from, to, copy_modifiers(&h));
+    let modifiers = copy_modifiers(&h);
+    page_drag(&mut h, from, to, modifiers);
     // The original stays first; a copy of page 1 lands after page 3 (#2997).
     let after = page_texts(h.state());
     assert_eq!(after, vec![before[0].clone(), before[1].clone(), before[2].clone(), before[0].clone()], "{after:?}");
