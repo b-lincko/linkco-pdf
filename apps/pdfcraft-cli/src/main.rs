@@ -478,7 +478,8 @@ fn render(args: &[String]) -> Result<(), CliError> {
         return Err(e.into());
     }
     let bytes = match format {
-        Some(f) => pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, f)?,
+        // With `reject_oversize` the page is drawn at `--dpi` or not at all, so the file can say so.
+        Some(f) => pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, f, f64::from(dpi))?,
         None => {
             // PAM (netpbm RGB_ALPHA): the raw premultiplied pixels, for tools that read it.
             let mut pam = format!("P7\nWIDTH {}\nHEIGHT {}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", p.width, p.height).into_bytes();
@@ -550,7 +551,7 @@ fn preview(args: &[String]) -> Result<(), CliError> {
         return Ok(());
     }
 
-    let png_bytes = pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, ImageFormat::Png)?;
+    let png_bytes = pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, ImageFormat::Png, scale * 72.0)?;
     std::fs::write(out, png_bytes).map_err(|e| format!("{out}: {e}"))?;
     stdout_line(format_args!("STATUS\tOK\t{total_pages}\t{clamped_page}\t{}\t{}", p.width, p.height))?;
     Ok(())
