@@ -23,7 +23,6 @@ pub mod links;
 pub mod ocr;
 pub mod optimizer;
 pub mod signature_image;
-mod upright_image;
 pub mod xfa;
 
 pub use signature_image::{ImageSignaturePreview, SignatureImage};
@@ -3354,7 +3353,7 @@ fn embed_image(
     name: &str,
     bytes: &[u8],
 ) -> Result<(pdfcraft_cos::ObjRef, (f64, f64)), pdfcraft_create::CreateError> {
-    pdfcraft_create::image_xobject(doc, name, &upright_image::upright(bytes))
+    pdfcraft_create::image_xobject(doc, name, bytes)
 }
 
 /// Bring a mark's picture into `doc`: a PDF page as a form XObject, or an image.
