@@ -396,14 +396,14 @@ impl PdfCraftApp {
                     let dialog = rfd::AsyncFileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name);
                     // The bytes are taken once the user has chosen, so edits made meanwhile are saved too.
                     self.ask_one(crate::pickers::Ask::Save(dialog), None, move |app, dest| {
-                        if app.save_doc_to(id, &dest.to_string_lossy()) {
+                        if app.save_doc_to(id, &dest.to_string_lossy(), target) {
                             after(app);
                         }
                     });
                     return false;
                 }
             };
-            let saved = self.save_doc_to(id, &destination);
+            let saved = self.save_doc_to(id, &destination, target);
             if saved {
                 after(self);
             }
@@ -458,17 +458,27 @@ impl PdfCraftApp {
 
     /// Write document `id` to `dest` and make it the document's file. Returns `true` if written.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str) -> bool {
+    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget) -> bool {
         // Save As answers on a later frame: commit what was typed meanwhile, too (#166), even
         // if another tab is active by then.
         if !self.commit_typing_in(id) || !self.flatten_fill_sign_for_save(id) {
             return false;
         }
-        let Some(name) = self.session.get(id).map(|d| d.name.clone()) else {
+        let Some((name, full)) = self.session.get(id).map(|d| {
+            // Save As to another file is a clean copy, without the earlier revisions that still
+            // hold deleted pages or replaced text (#2165). A signed document stays incremental so
+            // its signatures keep covering the file.
+            let full = target == SaveTarget::As
+                && !d.path.as_deref().is_some_and(|p| crate::same_file(p, dest))
+                && d.read_only_reason.is_none()
+                && !d.is_signed();
+            (d.name.clone(), full)
+        }) else {
             self.notify_tr("The document was closed before it could be saved.");
             return false;
         };
-        let bytes = match self.session.save_bytes(id) {
+        let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) };
+        let bytes = match bytes {
             Ok(b) => b,
             Err(e) => {
                 self.notify_fmt("Couldn't save {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
