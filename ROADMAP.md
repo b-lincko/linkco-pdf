@@ -135,6 +135,15 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 Newest first: the date, what moved, and the new overall estimate.
 
+- **2026-10-19 (upstream ports):** Four features from storytold/pdfcraft, each with its tests.
+  Organize: **Reverse pages** swaps two or more selected pages among their own positions, or the
+  whole document when fewer than two are selected (#1720). Redact: a card number followed by an
+  expiry, a year or a CVV is still found, and a longer grouped number no longer matches on a
+  card-shaped prefix (#2969). Create: a JPEG tagged with an EXIF Orientation becomes an upright
+  page, since the uprighting now happens on the one path every embedded JPEG takes (#2951).
+  Forms: a push button's visible label is editable per widget — Field Properties → Options →
+  Label, or `form_set_props` with `caption` and `widget` — independently of the field name, and
+  clearing it is allowed (#3064). Estimates unchanged.
 - **2026-10-17 (upstream ports):** Seven fixes from storytold/pdfcraft, each with its tests. Print: 4 × 6 in label paper and a Label layout that cuts a shipping label to its printed area, turns it upright and tells the spooler which sheet to feed (#1583), with A6 in the Paper menu (#1849). Parsing: an unfiltered inline image whose samples happen to look like the `EI` terminator keeps its pixels (#1562). Opening: a file whose page tree is lost can be edited, on the pages the reader finds by scanning, unless it is signed (#1664). Wayland: a wheel that reports no discrete steps no longer starts a gesture that never ends, so Ctrl + wheel stops zooming once Ctrl is released (#1569). Form data: exported XML tags stay inside the NCName grammar (#1588), XFDF values keep the text around XML comments and processing instructions (#1647), and CSV export quotes carriage returns (#1563). Estimates unchanged.
 - **2026-10-15 (L Print, ports from upstream):** Three fixes and one feature carried over from
   storytold/pdfcraft. **Current page** now prints the page on screen instead of the page
@@ -333,6 +342,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Upstream ports: reverse pages (#1720), credit cards followed by a number (#2969), EXIF orientation in Create from images (#2951), editable push-button labels (#3064); estimates unchanged |
 | 2026-10-17 | minor | Upstream ports (#1583, #1562, #1664, #1569, #1588, #1647, #1563) with A6 paper (#1849); estimates unchanged |
 | 2026-10-10 | minor | Readiness table with hours per audience; full number restated as the additive weighted sum over dimensions (47% → 49%; method aligned with the standard, no new evidence) |
 | 2026-10-10 | minor | Essentials-user score added (≈ 66%) |

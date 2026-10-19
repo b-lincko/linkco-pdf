@@ -1,5 +1,6 @@
 # PdfCraft roadmap: milestones and what's next
 
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (M6 #3064: push-button normal labels are editable per widget, through Options and form_set_props, independently of field names; M4 #1720 reverse pages; #2969 and #2951. Estimates unchanged)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (localized shortcut labels, #496; alpha gate added; convert-and-share re-judged with the cross-app rule → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 Forward-looking: the milestones, the current focus and what comes next. The parity numbers behind
