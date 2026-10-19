@@ -143,7 +143,11 @@ Newest first: the date, what moved, and the new overall estimate.
   page, since the uprighting now happens on the one path every embedded JPEG takes (#2951).
   Forms: a push button's visible label is editable per widget — Field Properties → Options →
   Label, or `form_set_props` with `caption` and `widget` — independently of the field name, and
-  clearing it is allowed (#3064). Estimates unchanged.
+  clearing it is allowed (#3064). Forms again: a custom document property is any /Info
+  entry the spec does not name, now set, cleared and listed by the tools after Acrobat's own
+  checks (#2076). CLI: `info` names the PDF/A or PDF/UA level a file declares (#3328). Organize:
+  Ctrl-drag (Option on macOS) drops copies at the gap instead of moving the pages, with `at`
+  for agents (#2997). Estimates unchanged.
 - **2026-10-17 (upstream ports):** Seven fixes from storytold/pdfcraft, each with its tests. Print: 4 × 6 in label paper and a Label layout that cuts a shipping label to its printed area, turns it upright and tells the spooler which sheet to feed (#1583), with A6 in the Paper menu (#1849). Parsing: an unfiltered inline image whose samples happen to look like the `EI` terminator keeps its pixels (#1562). Opening: a file whose page tree is lost can be edited, on the pages the reader finds by scanning, unless it is signed (#1664). Wayland: a wheel that reports no discrete steps no longer starts a gesture that never ends, so Ctrl + wheel stops zooming once Ctrl is released (#1569). Form data: exported XML tags stay inside the NCName grammar (#1588), XFDF values keep the text around XML comments and processing instructions (#1647), and CSV export quotes carriage returns (#1563). Estimates unchanged.
 - **2026-10-15 (L Print, ports from upstream):** Three fixes and one feature carried over from
   storytold/pdfcraft. **Current page** now prints the page on screen instead of the page

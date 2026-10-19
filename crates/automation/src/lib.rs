@@ -300,7 +300,8 @@ impl Automation {
             }
             "page_duplicate" => {
                 let pages = self.pages(&a, "pages")?;
-                self.apply(&a, Edit::DuplicatePages { pages })?
+                let at = self.opt_position(&a, "at")?;
+                self.apply(&a, Edit::DuplicatePages { pages, at })?
             }
             "page_set_box" => self.page_set_box(&a)?,
             "doc_create" => self.doc_create(&a)?,
@@ -1462,6 +1463,16 @@ impl Automation {
             return Err(ToolError::InvalidArgs(format!("{key} must be between 1 and {} (the document has {n} pages)", n + 1)));
         }
         Ok(at as usize - 1)
+    }
+
+    /// `position`, but `None` when the key is left out.
+    fn opt_position(&self, a: &Args, key: &str) -> Result<Option<usize>> {
+        let Some(at) = a.opt_int(key)? else { return Ok(None) };
+        let n = self.doc(a)?.info.pages.len();
+        if at < 1 || at as usize > n + 1 {
+            return Err(ToolError::InvalidArgs(format!("{key} must be between 1 and {} (the document has {n} pages)", n + 1)));
+        }
+        Ok(Some(at as usize - 1))
     }
 
     fn renderer(&mut self, id: DocId) -> Result<&mut PageRenderer> {

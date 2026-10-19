@@ -1490,7 +1490,7 @@ fn page_boxes_default_inherit_and_set() {
 #[test]
 fn duplicate_pages_inserts_copies_after_the_last() {
     let mut doc = open(fixture());
-    duplicate_pages(&mut doc, &[0, 1]).unwrap();
+    duplicate_pages(&mut doc, &[0, 1], None).unwrap();
     let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
     assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 1", "Page 2", "Page 3"]);
 }
@@ -1733,4 +1733,17 @@ fn custom_document_properties_drop_padding_before_the_cap() {
     })
     .unwrap();
     assert_eq!(custom_info(&doc), [("Mixed".to_string(), "Lab".to_string()), ("Keep".to_string(), "yes".to_string())]);
+}
+
+#[test]
+fn duplicate_pages_at_inserts_the_copies_there() {
+    let mut doc = open(fixture());
+    duplicate_pages(&mut doc, &[2], Some(0)).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(labels(&doc), ["Page 3", "Page 1", "Page 2", "Page 3"]);
+    // An index past the end lands at the end.
+    let mut doc = open(fixture());
+    duplicate_pages(&mut doc, &[0], Some(99)).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3", "Page 1"]);
 }
