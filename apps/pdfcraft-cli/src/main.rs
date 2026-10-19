@@ -551,7 +551,7 @@ fn preview(args: &[String]) -> Result<(), CliError> {
         return Ok(());
     }
 
-    let png_bytes = pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, ImageFormat::Png, scale * 72.0)?;
+    let png_bytes = pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, ImageFormat::Png, f64::from(scale) * 72.0)?;
     std::fs::write(out, png_bytes).map_err(|e| format!("{out}: {e}"))?;
     stdout_line(format_args!("STATUS\tOK\t{total_pages}\t{clamped_page}\t{}\t{}", p.width, p.height))?;
     Ok(())
