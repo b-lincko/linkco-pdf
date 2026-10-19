@@ -742,7 +742,6 @@ fn an_attachment_comment_offers_its_file_from_the_page_menu() {
         a.source == pdfcraft_render::AttachmentSource::Annotation { page: 0, index: 0 }
     });
     assert!(listed, "the comment's file is listed: {:?}", s.session.get(s.views[0].id).unwrap().info.attachments);
-    drop(s);
     click_pt(&mut h, (110.0, 112.0));
     assert_eq!(h.state().views[0].comments.selected, Some((0, 0)), "the attachment comment is selected");
     let p = at(&h, 110.0, 112.0);
