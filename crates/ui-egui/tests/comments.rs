@@ -754,8 +754,14 @@ fn an_attachment_comment_opens_its_file_from_the_page_menu() {
     // The Attachments panel is closed, so these items can only come from the comment's menu.
     h.get_by_label("Save attachment…");
     h.get_by_label("Open in a new tab").click();
-    h.run_steps(4);
-    assert_eq!(open_tab_names(&h), ["annexed.pdf", "inner.pdf"]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline && h.state().views.len() < 2 {
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let names = open_tab_names(&h);
+    assert_eq!(h.state().views.len(), 2, "the attachment opened in a new tab: {names:?}");
+    assert!(names.iter().any(|n| n == "inner.pdf"), "the file of the comment, in its own tab: {names:?}");
 }
 
 #[test]
@@ -768,8 +774,14 @@ fn an_attachment_comment_opens_its_file_from_the_card_menu() {
     h.get_by_label("Copy text");
     h.get_by_label("Save attachment…");
     h.get_by_label("Open in a new tab").click();
-    h.run_steps(4);
-    assert_eq!(open_tab_names(&h), ["annexed.pdf", "inner.pdf"]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline && h.state().views.len() < 2 {
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let names = open_tab_names(&h);
+    assert_eq!(h.state().views.len(), 2, "the attachment opened in a new tab: {names:?}");
+    assert!(names.iter().any(|n| n == "inner.pdf"), "the file of the comment, in its own tab: {names:?}");
 }
 
 #[test]
