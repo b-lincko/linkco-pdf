@@ -22,6 +22,14 @@ UI panels and language catalogs — not from reading commit subjects.
 
 ## 0.00 Update — 19 Oct 2026: 126 commits since d8b2705
 
+**Ported (Oct 2026 batch, PR [#2](https://github.com/b-lincko/linkco-pdf/pull/2)):** every
+Take and every Ask above is in — #1720, #2969, #2951, #2997, #2076, #3064, #3328, then #2111,
+#3294, #2165, #3332, #2806, one commit each, with the Czech catalog (#1720) and two build fixes
+along the way. The four Defer rows are still out: each is a rewrite of a file that has drifted far
+(`ui-egui/canvas.rs`, `ui-egui/comments.rs`, `edit/src/text.rs`) or a new module that only pays
+off with the #3081 work it belongs to. The #3332 port needed `tiff` as a direct dependency of
+`pdfcraft-engine`; it was already in the lock file through `image`, so nothing new was fetched.
+
 Upstream `main` moved `d8b2705` -> **`4db6ac4`**: 126 non-merge commits (66 merges), 150 files,
 **+7,994 / -785**, dated 13-19 Oct. Still version 0.9.0. This is the first survey taken with a
 green build behind it (§0.0 "Built"), so the drift numbers below are the only thing standing
@@ -39,21 +47,21 @@ alone; upstream renamed it to `view.continuous`.
 
 | Feature | Where | Drift | Verdict |
 |---|---|---|---|
-| **Reverse pages** (`page.reverse`, #1720) | `organize` +32, `commands` +41, `catalog` +53 | small | **Take.** Additive: one function, one command, one tool |
-| **Credit card followed by an expiry, year or CVV** (#2969) | `redact/src/patterns.rs` +49 | small | **Take.** 37 lines, self-contained; also stops an IBAN matching on a card-shaped prefix |
-| **Apply JPEG EXIF orientation when creating PDFs from images** (#2951) | `create/src/lib.rs` +64 | small | **Take.** We already upright images *placed into a page* (`engine/src/upright_image.rs`); this extends it to Create from images |
-| **Ctrl-drag copies pages in the Organize grid** (#2997) | `engine` +1,574, `automation` | small patch, big file | **Take.** 240 lines, mostly test |
-| **Custom document properties through the engine and the tools** (#2076) | `organize` +32 | small | **Take.** We have no custom-property support at all |
-| **Detect a row of comb boxes as one comb text field** (#2111) | `forms/src/detect.rs` +130 | moderate | **Ask.** Form recognition; 194 lines with new tests |
-| **Edit button labels in field properties** (#3064) | `automation/src/forms.rs` +1 | tiny | **Take.** The automation side is nearly identical to ours |
-| **Attachment comment's menu saves or opens its file** (#2565) | `ui-egui/comments.rs` +598 | large | **Defer.** UI crate has drifted most |
-| **Cmd/Ctrl-G steps through matches from the find field** (#2669) | `ui-egui/canvas.rs` +1,557 | large | **Defer.** Same crate; the patch is small but the file is not |
-| **Accelerate coarse wheel scrolling** (#1094) | new `wheel_boost.rs`, `canvas.rs` +2,049 | large | **Defer.** 559 lines; a new module, so the seam is clean, but canvas.rs is not |
-| **Find and edit images whose Do or cm spans two content streams** (#3294) | `edit/src/images.rs` +458 | moderate | **Ask.** Builds on the #3081 content half we just took |
-| **Read /ActualText from named property lists in edit text and export** (#3301) | `edit/src/text.rs` +1,123 | very large | **Defer**, with #3084 and the #3081 export half |
-| **Save As writes a clean copy without earlier revisions** (#2165) | `ui-egui/editing.rs` +411 | moderate | **Ask.** Touches the save path we changed for #981 |
-| **Exported TIFF/JPEG record the resolution drawn at** (#3332); **component Decode in lossless export**; **running text is not a table row in Word/HTML/PowerPoint** (#2806) | `export`, `create` | small | **Ask.** Export fidelity, low risk |
-| **cli: info names the standard a document declares** (#3328) | `apps/pdfcraft-cli` | small | **Take** if the CLI matters here |
+| **Reverse pages** (`page.reverse`, #1720) | `organize` +32, `commands` +41, `catalog` +53 | small | **Take.** Additive: one function, one command, one tool | **✅ ported `05b6f3c`.**
+| **Credit card followed by an expiry, year or CVV** (#2969) | `redact/src/patterns.rs` +49 | small | **Take.** 37 lines, self-contained; also stops an IBAN matching on a card-shaped prefix | **✅ ported `3086537`.**
+| **Apply JPEG EXIF orientation when creating PDFs from images** (#2951) | `create/src/lib.rs` +64 | small | **Take.** We already upright images *placed into a page* (`engine/src/upright_image.rs`); this extends it to Create from images | **✅ ported `9979972`.**
+| **Ctrl-drag copies pages in the Organize grid** (#2997) | `engine` +1,574, `automation` | small patch, big file | **Take.** 240 lines, mostly test | **✅ ported `782504c`.**
+| **Custom document properties through the engine and the tools** (#2076) | `organize` +32 | small | **Take.** We have no custom-property support at all | **✅ ported `410c2da`.**
+| **Detect a row of comb boxes as one comb text field** (#2111) | `forms/src/detect.rs` +130 | moderate | **Ask.** Form recognition; 194 lines with new tests | **✅ ported `6eba2c4`.**
+| **Edit button labels in field properties** (#3064) | `automation/src/forms.rs` +1 | tiny | **Take.** The automation side is nearly identical to ours | **✅ ported `43efe29`.**
+| **Attachment comment's menu saves or opens its file** (#2565) | `ui-egui/comments.rs` +598 | large | **Defer.** UI crate has drifted most | **⏳ deferred.**
+| **Cmd/Ctrl-G steps through matches from the find field** (#2669) | `ui-egui/canvas.rs` +1,557 | large | **Defer.** Same crate; the patch is small but the file is not | **⏳ deferred.**
+| **Accelerate coarse wheel scrolling** (#1094) | new `wheel_boost.rs`, `canvas.rs` +2,049 | large | **Defer.** 559 lines; a new module, so the seam is clean, but canvas.rs is not | **⏳ deferred.**
+| **Find and edit images whose Do or cm spans two content streams** (#3294) | `edit/src/images.rs` +458 | moderate | **Ask.** Builds on the #3081 content half we just took | **✅ ported `33e66a1`.**
+| **Read /ActualText from named property lists in edit text and export** (#3301) | `edit/src/text.rs` +1,123 | very large | **Defer**, with #3084 and the #3081 export half | **⏳ deferred.**
+| **Save As writes a clean copy without earlier revisions** (#2165) | `ui-egui/editing.rs` +411 | moderate | **Ask.** Touches the save path we changed for #981 | **✅ ported `87bbffd`.**
+| **Exported TIFF/JPEG record the resolution drawn at** (#3332); **component Decode in lossless export**; **running text is not a table row in Word/HTML/PowerPoint** (#2806) | `export`, `create` | small | **Ask.** Export fidelity, low risk | **✅ ported `c6f88cc` (#3332) and `571eae5` (#2806).**
+| **cli: info names the standard a document declares** (#3328) | `apps/pdfcraft-cli` | small | **Take** if the CLI matters here | **✅ ported `e1ff984`.**
 
 ### Fixes worth having
 

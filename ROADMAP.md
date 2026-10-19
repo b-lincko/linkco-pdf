@@ -147,7 +147,15 @@ Newest first: the date, what moved, and the new overall estimate.
   entry the spec does not name, now set, cleared and listed by the tools after Acrobat's own
   checks (#2076). CLI: `info` names the PDF/A or PDF/UA level a file declares (#3328). Organize:
   Ctrl-drag (Option on macOS) drops copies at the gap instead of moving the pages, with `at`
-  for agents (#2997). Estimates unchanged.
+  for agents (#2997). Prepare a form: a row of two or more touching cells of one size is one comb
+  text field, not one check box per character (#2111). Edit image: an image whose operands end one
+  content stream and whose `Do` starts the next is found, selected, moved and deleted, the way
+  text already was (#3294). Save As to another file writes one revision: a copy no longer carries
+  the pages you deleted earlier, though saving over its own path stays incremental and a signed
+  document stays appended to (#2165). Export: TIFF and JPEG pages record the resolution they were
+  drawn at, so other programs show and print them at the page's size (#3332), and a sentence whose
+  link runs on into another block is text again, not a table row — its later lines were being
+  dropped (#2806). Estimates unchanged.
 - **2026-10-17 (upstream ports):** Seven fixes from storytold/pdfcraft, each with its tests. Print: 4 × 6 in label paper and a Label layout that cuts a shipping label to its printed area, turns it upright and tells the spooler which sheet to feed (#1583), with A6 in the Paper menu (#1849). Parsing: an unfiltered inline image whose samples happen to look like the `EI` terminator keeps its pixels (#1562). Opening: a file whose page tree is lost can be edited, on the pages the reader finds by scanning, unless it is signed (#1664). Wayland: a wheel that reports no discrete steps no longer starts a gesture that never ends, so Ctrl + wheel stops zooming once Ctrl is released (#1569). Form data: exported XML tags stay inside the NCName grammar (#1588), XFDF values keep the text around XML comments and processing instructions (#1647), and CSV export quotes carriage returns (#1563). Estimates unchanged.
 - **2026-10-15 (L Print, ports from upstream):** Three fixes and one feature carried over from
   storytold/pdfcraft. **Current page** now prints the page on screen instead of the page
@@ -346,7 +354,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | Upstream ports: reverse pages (#1720), credit cards followed by a number (#2969), EXIF orientation in Create from images (#2951), editable push-button labels (#3064); estimates unchanged |
+| 2026-10-19 | minor | Upstream ports: reverse pages (#1720), credit cards followed by a number (#2969), EXIF orientation in Create from images (#2951), editable push-button labels (#3064), custom document properties (#2076), the PDF/A level in `cli info` (#3328), Ctrl-drag to copy pages (#2997), comb rows as one field (#2111), images split across two content streams (#3294), Save As as a clean copy (#2165), TIFF/JPEG resolution (#3332), running text kept out of tables (#2806); estimates unchanged |
 | 2026-10-17 | minor | Upstream ports (#1583, #1562, #1664, #1569, #1588, #1647, #1563) with A6 paper (#1849); estimates unchanged |
 | 2026-10-10 | minor | Readiness table with hours per audience; full number restated as the additive weighted sum over dimensions (47% → 49%; method aligned with the standard, no new evidence) |
 | 2026-10-10 | minor | Essentials-user score added (≈ 66%) |
