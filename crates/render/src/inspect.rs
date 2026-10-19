@@ -2303,7 +2303,7 @@ trailer << /Root 1 0 R /Info 4 0 R >>
 
     #[test]
     fn custom_document_properties_are_listed_apart_from_the_standard_ones() {
-        let info = inspect(Arc::new(CUSTOM_INFO.to_vec()), None).expect("opens");
+        let info = super::inspect(std::sync::Arc::new(CUSTOM_INFO.to_vec()), None).expect("opens");
         assert_eq!((info.title.as_deref(), info.producer.as_deref()), (Some("Report"), Some("Test")));
         let mut custom = info.custom.clone();
         custom.sort();
