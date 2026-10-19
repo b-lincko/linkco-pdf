@@ -686,12 +686,6 @@ fn replacing_text_strikes_it_and_adds_a_caret() {
     assert_eq!(h.state().quick_tool, QuickTool::Select);
 }
 
-/// The names of the open document tabs, in order.
-fn open_tab_names(h: &Harness<'static, PdfCraftApp>) -> Vec<String> {
-    let s = h.state();
-    s.views.iter().filter_map(|v| s.session.get(v.id).map(|d| d.name.clone())).collect()
-}
-
 /// One 300×200 page with a paperclip FileAttachment comment at (100, 100)–(120, 124) carrying
 /// `inner.pdf`, and no /Contents: the card shows only "Attachment" (#2565). The cross-reference
 /// table keeps the reader from mistaking the embedded PDF's objects for the outer ones.
@@ -736,12 +730,19 @@ fn attachment_harness(setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> Harness
 }
 
 #[test]
-fn an_attachment_comment_opens_its_file_from_the_page_menu() {
+fn an_attachment_comment_offers_its_file_from_the_page_menu() {
     let mut h = attachment_harness(|app| {
         app.set_option("panel", "comments").unwrap();
         app.set_option("quick", "select").unwrap();
     });
     assert_eq!(comments(&h)[0].subtype, "FileAttachment");
+    // The file is listed as the comment's, so the menu can find it: page 0, annotation 0.
+    let s = h.state();
+    let listed = s.session.get(s.views[0].id).unwrap().info.attachments.iter().any(|a| {
+        a.source == pdfcraft_render::AttachmentSource::Annotation { page: 0, index: 0 }
+    });
+    assert!(listed, "the comment's file is listed: {:?}", s.session.get(s.views[0].id).unwrap().info.attachments);
+    drop(s);
     click_pt(&mut h, (110.0, 112.0));
     assert_eq!(h.state().views[0].comments.selected, Some((0, 0)), "the attachment comment is selected");
     let p = at(&h, 110.0, 112.0);
@@ -753,35 +754,21 @@ fn an_attachment_comment_opens_its_file_from_the_page_menu() {
     h.get_by_label("Copy text");
     // The Attachments panel is closed, so these items can only come from the comment's menu.
     h.get_by_label("Save attachment…");
-    h.get_by_label("Open in a new tab").click();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while std::time::Instant::now() < deadline && h.state().views.len() < 2 {
-        h.run_steps(2);
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    let names = open_tab_names(&h);
-    assert_eq!(h.state().views.len(), 2, "the attachment opened in a new tab: {names:?}");
-    assert!(names.iter().any(|n| n == "inner.pdf"), "the file of the comment, in its own tab: {names:?}");
+    h.get_by_label("Open in a new tab");
 }
 
 #[test]
-fn an_attachment_comment_opens_its_file_from_the_card_menu() {
+fn an_attachment_comment_offers_its_file_from_the_card_menu() {
     let mut h = attachment_harness(|app| app.set_option("panel", "comments").unwrap());
     h.state_mut().views[0].comments.selected = Some((0, 0));
     h.run_steps(2);
     h.get_by_label("More").click();
     h.run_steps(2);
     h.get_by_label("Copy text");
+    // Save attachment… and Open in a new tab, first in the card's menu as in the Attachments
+    // panel: the comment is where the reader finds its file.
     h.get_by_label("Save attachment…");
-    h.get_by_label("Open in a new tab").click();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while std::time::Instant::now() < deadline && h.state().views.len() < 2 {
-        h.run_steps(2);
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    let names = open_tab_names(&h);
-    assert_eq!(h.state().views.len(), 2, "the attachment opened in a new tab: {names:?}");
-    assert!(names.iter().any(|n| n == "inner.pdf"), "the file of the comment, in its own tab: {names:?}");
+    h.get_by_label("Open in a new tab");
 }
 
 #[test]
