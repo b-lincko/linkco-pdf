@@ -800,6 +800,10 @@ pub enum Edit {
         pages: Vec<usize>,
         to: usize,
     },
+    /// `pages` reversed among the positions they occupy.
+    ReversePages {
+        pages: Vec<usize>,
+    },
     InsertBlankPage {
         at: usize,
         width: f64,
@@ -1224,6 +1228,7 @@ impl Edit {
             Edit::RotatePages { pages, .. } => plural("Rotate page", pages.len()),
             Edit::DeletePages { pages } => plural("Delete page", pages.len()),
             Edit::MovePages { pages, .. } => plural("Move page", pages.len()),
+            Edit::ReversePages { .. } => "Reverse pages".into(),
             Edit::InsertBlankPage { .. } => "Insert blank page".into(),
             Edit::DuplicatePages { pages } => plural("Duplicate page", pages.len()),
             Edit::ReplacePages { pages, .. } => plural("Replace page", pages.len()),
@@ -1361,6 +1366,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         Edit::RotatePages { .. }
         | Edit::DeletePages { .. }
         | Edit::MovePages { .. }
+        | Edit::ReversePages { .. }
         | Edit::InsertBlankPage { .. }
         | Edit::DuplicatePages { .. }
         | Edit::ReplacePages { .. }
@@ -1555,6 +1561,7 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::RotatePages { pages, degrees } => pdfcraft_organize::rotate_pages(doc, pages, *degrees)?,
         Edit::DeletePages { pages } => pdfcraft_organize::delete_pages(doc, pages)?,
         Edit::MovePages { pages, to } => pdfcraft_organize::move_pages(doc, pages, *to)?,
+        Edit::ReversePages { pages } => pdfcraft_organize::reverse_pages(doc, pages)?,
         Edit::InsertBlankPage { at, width, height } => {
             pdfcraft_organize::insert_blank_page(doc, *at, *width, *height)?;
         }

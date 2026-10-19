@@ -570,6 +570,12 @@ impl PdfCraftApp {
             "page.duplicate" => {
                 self.apply_edit(Edit::DuplicatePages { pages: targets });
             }
+            // Two or more selected pages reverse among themselves; otherwise the whole document.
+            "page.reverse" => {
+                let all = active.and_then(|i| self.session.get(self.views[i].id)).map_or(0, |d| d.info.pages.len());
+                let pages = if targets.len() >= 2 { targets } else { (0..all).collect() };
+                self.apply_edit(Edit::ReversePages { pages });
+            }
             "page.crop" => {
                 self.quick_tool = crate::QuickTool::Crop;
                 self.notify_tr("Drag a rectangle on a page to crop it; double-click a page for Set Page Boxes");
