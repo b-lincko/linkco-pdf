@@ -1,8 +1,9 @@
 # Upstream delta — storytold/pdfcraft → b-lincko/linkco-pdf
 
 Checked **2026-10-14** against `storytold/pdfcraft` `main` (`c1a41cc`), re-checked **2026-10-15**
-against `9b6dab1`, **2026-10-17** against `924c4da` and **2026-10-18** against `d8b2705`. Section
-0.0 is the newest survey; 0.1–0.2 list what has landed and what we have taken.
+against `9b6dab1`, **2026-10-17** against `924c4da`, **2026-10-18** against `d8b2705` and
+**2026-10-19** against `4db6ac4`. Section 0.00 is the newest survey; 0.0 and below are the
+older ones; 0.1–0.2 list what has landed and what we have taken.
 This is the **functional** list: what a user or an agent can do upstream that they cannot do here.
 Counts come from comparing command ids, automation tool ids, the engine's public API, crate lists,
 UI panels and language catalogs — not from reading commit subjects.
@@ -18,6 +19,65 @@ UI panels and language catalogs — not from reading commit subjects.
 | Right-hand panels | ours 10 → upstream 11 (**new: Tags**) |
 | UI languages | ours 16 → upstream 21 (**new: el, kk, lt, sl, tr**) |
 | Files changed upstream | 434 files, **+82,089 / −7,013**; 88 new files, none of them here |
+
+## 0.00 Update — 19 Oct 2026: 126 commits since d8b2705
+
+Upstream `main` moved `d8b2705` -> **`4db6ac4`**: 126 non-merge commits (66 merges), 150 files,
+**+7,994 / -785**, dated 13-19 Oct. Still version 0.9.0. This is the first survey taken with a
+green build behind it (§0.0 "Built"), so the drift numbers below are the only thing standing
+between a port and a compile.
+
+**One new command id:** `page.reverse` — *Reverse pages* (PAGES, Assembly, `arrow-up-down`),
+from `eeadc79` (#1720). Every other upstream command id that we lack (`a11y.autotag`,
+`a11y.autotag_fields`, `a11y.find_untagged`, `a11y.tags`, `create.multiple_separate`, `edit.copy`,
+`export.pptx`, `file.word_count`, `help.*`, `ocr.enhance_camera`, `protect.unlock`,
+`view.continuous`, `view.next_tab`, `view.next_view`, `view.previous_tab`, `view.previous_view`)
+predates this batch: they are gaps we have carried, not news. `view.layout.continuous` is ours
+alone; upstream renamed it to `view.continuous`.
+
+### New features, and what it would take to carry each
+
+| Feature | Where | Drift | Verdict |
+|---|---|---|---|
+| **Reverse pages** (`page.reverse`, #1720) | `organize` +32, `commands` +41, `catalog` +53 | small | **Take.** Additive: one function, one command, one tool |
+| **Credit card followed by an expiry, year or CVV** (#2969) | `redact/src/patterns.rs` +49 | small | **Take.** 37 lines, self-contained; also stops an IBAN matching on a card-shaped prefix |
+| **Apply JPEG EXIF orientation when creating PDFs from images** (#2951) | `create/src/lib.rs` +64 | small | **Take.** We already upright images *placed into a page* (`engine/src/upright_image.rs`); this extends it to Create from images |
+| **Ctrl-drag copies pages in the Organize grid** (#2997) | `engine` +1,574, `automation` | small patch, big file | **Take.** 240 lines, mostly test |
+| **Custom document properties through the engine and the tools** (#2076) | `organize` +32 | small | **Take.** We have no custom-property support at all |
+| **Detect a row of comb boxes as one comb text field** (#2111) | `forms/src/detect.rs` +130 | moderate | **Ask.** Form recognition; 194 lines with new tests |
+| **Edit button labels in field properties** (#3064) | `automation/src/forms.rs` +1 | tiny | **Take.** The automation side is nearly identical to ours |
+| **Attachment comment's menu saves or opens its file** (#2565) | `ui-egui/comments.rs` +598 | large | **Defer.** UI crate has drifted most |
+| **Cmd/Ctrl-G steps through matches from the find field** (#2669) | `ui-egui/canvas.rs` +1,557 | large | **Defer.** Same crate; the patch is small but the file is not |
+| **Accelerate coarse wheel scrolling** (#1094) | new `wheel_boost.rs`, `canvas.rs` +2,049 | large | **Defer.** 559 lines; a new module, so the seam is clean, but canvas.rs is not |
+| **Find and edit images whose Do or cm spans two content streams** (#3294) | `edit/src/images.rs` +458 | moderate | **Ask.** Builds on the #3081 content half we just took |
+| **Read /ActualText from named property lists in edit text and export** (#3301) | `edit/src/text.rs` +1,123 | very large | **Defer**, with #3084 and the #3081 export half |
+| **Save As writes a clean copy without earlier revisions** (#2165) | `ui-egui/editing.rs` +411 | moderate | **Ask.** Touches the save path we changed for #981 |
+| **Exported TIFF/JPEG record the resolution drawn at** (#3332); **component Decode in lossless export**; **running text is not a table row in Word/HTML/PowerPoint** (#2806) | `export`, `create` | small | **Ask.** Export fidelity, low risk |
+| **cli: info names the standard a document declares** (#3328) | `apps/pdfcraft-cli` | small | **Take** if the CLI matters here |
+
+### Fixes worth having
+
+`38999b3` isolate added marks from unfinished marked content (#3279, 452 lines — the sibling of
+the #3084 work we deferred) · `104411d` read doubled-sign integers like `--280` (#3299) · `6666483`
+drop U+FFFE/U+FFFF from XFDF/XML export (#3330) · `c30fce5` distinguish CSV header tabs from TSV
+delimiters · `25495b9` keep a sub/superscript in its line when extracting text (#3174) · `5377a22`
+extract RTL lines in logical order (#2736) · `1cd7...`/`271cb61` read an xref table numbered from 1
+(#2676, 176 lines) · `f057640` saving refuses to replace a read-only file (#2658) · `6fd49d6` a
+saved file keeps its creation date (#2658) · `bd0b3fd` Save As writes a clean copy (#2165) ·
+`bb65179` remove security from files with /Encrypt in the trailer (#2661) · `7cce659` the control
+channel no longer loses a refusal reply to a TCP reset (#3165) · `17ddc87` an `i64::MIN` index no
+longer overflows in content_update/delete (#2979).
+
+Also in the batch: performance work (wheel scrolling #1094, font space widths once per paragraph
+#2616, the text-blocks cache across edits #2504, folded group moves #2476, no oversized page
+textures #3149) and a `crates/render/src/inspect.rs` -> `crates/audit` move with /OpenAction
+JavaScript reporting (`b4af74d`, `0d35035`).
+
+### Not for us
+
+`docs` (5), `ci` (Dependabot config, cachix bump), 12 `Integration:` commits (branch merges),
+`test(...)`-only commits, and the i18n ones for languages we do not ship (zh-hant Taiwan
+vocabulary #2856, Turkish dotted/dotless I #3114, web Auto language #2954).
 
 ## 0.0 Update — 18 Oct 2026: 30 commits since 924c4da (Release 0.9.0)
 
