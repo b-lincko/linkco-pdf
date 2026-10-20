@@ -2122,10 +2122,7 @@ fn detecting_comb_boxes_adds_one_comb_field_per_row() {
         d.form.iter().map(|f| (f.name.as_str(), f.kind, f.has(pdfcraft_forms::flags::COMB), f.max_len)).collect();
     assert_eq!(
         combs,
-        [
-            ("Postcode A", pdfcraft_forms::FieldKind::Text, true, Some(5)),
-            ("Postcode B", pdfcraft_forms::FieldKind::Text, true, Some(10))
-        ]
+        [("Postcode A", pdfcraft_forms::FieldKind::Text, true, Some(5)), ("Postcode B", pdfcraft_forms::FieldKind::Text, true, Some(10))]
     );
     assert_eq!(d.can_undo(), Some("Detect form fields"));
 }
