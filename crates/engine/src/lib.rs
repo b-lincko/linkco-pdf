@@ -3542,7 +3542,8 @@ pub fn render_imposed_sheets(imposed_pdf: &[u8], dpi: u32, max_dpi: u32, graysca
         if grayscale {
             print::spool::apply_grayscale_rgba(rendered.rgba.bytes_mut());
         }
-        let png = export::encode_image(rendered.width, rendered.height, &rendered.rgba, export::ImageFormat::Png, f64::from(effective_dpi)).map_err(EditError::Write)?;
+        let png = export::encode_image(rendered.width, rendered.height, &rendered.rgba, export::ImageFormat::Png, f64::from(effective_dpi))
+            .map_err(EditError::Write)?;
         out.push(print::spool::RenderedSheet { width_pt, height_pt, width_px: rendered.width, height_px: rendered.height, dpi: effective_dpi, png });
     }
     Ok(out)
