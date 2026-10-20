@@ -161,7 +161,15 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
         ctm: Matrix,
         stack: Vec<Matrix>,
     }
-    fn walk(doc: &Document, ops: &[Op], resources: &Dict, st: &mut State, stream: &dyn Fn(&Op) -> usize, forms: &mut Forms, out: &mut Vec<PageImage>) {
+    fn walk(
+        doc: &Document,
+        ops: &[Op],
+        resources: &Dict,
+        st: &mut State,
+        stream: &dyn Fn(&Op) -> usize,
+        forms: &mut Forms,
+        out: &mut Vec<PageImage>,
+    ) {
         let xo = resources.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned()).unwrap_or_default();
         let (ctm, stack) = (&mut st.ctm, &mut st.stack);
         for (i, op) in ops.iter().enumerate() {
