@@ -1028,6 +1028,7 @@ mod revert_draft_tests {
             select_all: false,
             calendar: None,
             calendar_rect: None,
+            calendar_text: None,
         }
     }
 
