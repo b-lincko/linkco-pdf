@@ -1,9 +1,10 @@
 # Upstream delta — storytold/pdfcraft → b-lincko/linkco-pdf
 
 Checked **2026-10-14** against `storytold/pdfcraft` `main` (`c1a41cc`), re-checked **2026-10-15**
-against `9b6dab1`, **2026-10-17** against `924c4da`, **2026-10-18** against `d8b2705` and
-**2026-10-19** against `4db6ac4`. Section 0.00 is the newest survey; 0.0 and below are the
-older ones; 0.1–0.2 list what has landed and what we have taken.
+against `9b6dab1`, **2026-10-17** against `924c4da`, **2026-10-18** against `d8b2705`,
+**2026-10-19** against `4db6ac4` and **2026-10-20** against `d695bc5`. Section 0.000 is the
+newest survey; 0.00 and below are the older ones; 0.1–0.2 list what has landed and what we
+have taken.
 This is the **functional** list: what a user or an agent can do upstream that they cannot do here.
 Counts come from comparing command ids, automation tool ids, the engine's public API, crate lists,
 UI panels and language catalogs — not from reading commit subjects.
@@ -19,6 +20,68 @@ UI panels and language catalogs — not from reading commit subjects.
 | Right-hand panels | ours 10 → upstream 11 (**new: Tags**) |
 | UI languages | ours 16 → upstream 21 (**new: el, kk, lt, sl, tr**) |
 | Files changed upstream | 434 files, **+82,089 / −7,013**; 88 new files, none of them here |
+
+## 0.000 Update — 20 Oct 2026: 36 commits since 4db6ac4 (0.9.0 → 0.10.1)
+
+Upstream `main` moved `4db6ac4` → **`d695bc5`**: 36 non-merge commits (1 merge), 66 files,
+**+4,167 / −479**, dated 19–20 Oct. The version went **0.9.0 → 0.10.1** in two release commits;
+ours is 1.0.0, so there is no version work to carry. **No new command ids, no new automation
+tools, no new languages.** This batch is depth in what already exists — redaction, FDF export,
+forms and the vendored renderer — not new surface.
+
+Eleven of the 36 sit between `4db6ac4` and `43550c4` and were not in the last survey; the rest
+are one day's work. Taken against a green build (§0.00) and with a formatter that can now be run
+here, so the drift column is the only unknown.
+
+### New features, and what it would take to carry each
+
+| Feature | Where | Drift | Verdict |
+|---|---|---|---|
+| **FDF exports preserve nested annotation values** (#1971) | `xfdf/src/lib.rs` +292/−50, `engine` 1 line; 374 of the 716 are tests | moderate | **Ask.** We have `export_fdf` (`xfdf/src/lib.rs:381`), so the seam exists; whether we carry the same defect is unread |
+| **Fills and border widths on text boxes and callouts** (#3366) | `annot/appearance.rs`, `ui-egui/comments.rs`, `comment_props.rs`, `forms_ui.rs`, automation; +191/−28 | small | **Take.** An extension of the fill and thickness we already have in `comment_props.rs` |
+| **Office export follows forms 50 deep, up to 50 000 a page, and says where it stops** (#3120, #3426) | `edit` + `automation/src/a11y.rs`; +273/−38 | moderate | **Ask.** Bounds a walk that is currently unbounded, and reports `truncated_pages`; needs our a11y export read first |
+| **A date typed without separators fills a `yyyymmdd` field** (#3388) | `forms/src/af.rs` (keystroke, :806 here), `ui-egui`; +250/−29 | small | **Take.** Self-contained in the format keystroke we already run |
+| **Tracked glyphs retain their word boundaries** (#3477) | `edit/src/text.rs`; +170/−7 | moderate | **Ask.** Text extraction we have touched for #3081 |
+| **A secured form's notice bar still says it is a form** (#3404) | `ui-egui`; +65/−10 | small | **Take.** Small, user-facing, and the notice bar is ours to keep |
+| **The date picker follows a whole date typed while it is open** (#3393) | `ui-egui/forms_ui.rs`; +52/−6 | small | **Take.** Small; pairs with #3388 |
+| **Document scroll position kept across viewer modes** (#3362) | `ui-egui`; +68/−3 | moderate | **Ask.** `canvas.rs` is our most drifted file at 4,374 lines |
+
+### Fixes worth having
+
+**Redaction, one arc across five commits.** `d695bc5` evaluates OCMD visibility during
+sanitization (#3522, +667 — 414 of it tests; `redact/src/interp.rs` +251, `sanitize.rs` +32). We
+handle OCMD at `redact/src/interp.rs:97`, so the hook is there; a sanitizer that ignores
+visibility can strip content the reader can see. Then #3302 in three commits: tag cleanup
+**refuses what it can't finish** instead of removing the tree (+168/−140), **keeps inherited
+pages and fails closed** over replaced streams and in-place elements (+134), and redaction
+**clears tag text** of elements reached only through the parent or ID tree (+108). With #2447:
+redaction **drops OBJRs** of elements reached the same way (+44).
+
+Also: `236ce9a` clear image pixels intersected by redaction marks (#3368, +34) · `6733e07` keep
+long menus usable in short windows (#3374, +129/−86) · `7d9adcb` identify PDF standards by XML
+namespace in preflight (#3364, +194) · `459379e` refuse a rewrite of text that is a clipping path
+(#3447, +110 — we already refuse it for a group move, `edit/src/text.rs:1477`, so this may be
+half-present) · `b955c2e` a tiling pattern drawn once shows its cell at full scale (#3349/#3356,
++238, vendored `hayro` + `render`) · `43550c4` a JP2 image in a colour space the decoder refuses
+is drawn by its component count (#3306, +227, `render` + vendored `hayro-syntax`) · `cbbeb61`
+accept spaces between `stream` and its line break (#3378, +72, `cos` + `render`) · `8b88a2d` fix
+shading bounds in Type 3 glyphs (#3178/#3412, +34, vendored `hayro-interpret`, which we carry) ·
+`9d23505` clamp the zoom-anchor scroll so zooming out no longer jolts the page (#3266, +22) ·
+`4d42b48` offer only certificates that may sign documents, from the Windows store (#3365, +34) ·
+`2f21f92` name the Windows single-instance socket by session id (+53) · `6e61b50` fix a
+clock-dependent form properties test (#3367, +3).
+
+### Not for us
+
+`b113896` a never-crash gate on `crates/oracle` and `crates/testkit` (#3435) — **we have neither
+crate**. `6fb6b7c` Release 0.10.0 and `b77d570` Release 0.10.1 (version bumps; ours is 1.0.0) ·
+`59a5a83` SonarCloud/CodeRabbit README badges (#3271) · `22bedbf` skip CodeRabbit on Dependabot
+PRs (#3692) · `1bb3e91` docs: install the CLI and register it with MCP clients (#3478, +48) ·
+`aebb333` docs: base the XFA page-area observations on a synthetic form (#3431, +3) · `cece9f5`
+docs: discard-on-error for public redaction calls (#3302, +35) and `e6de108` a note on in-place
+structure elements (#2447, +4) · `e45d5dc` test-only: the parser-cancel test guards against a
+hang, not a 2 s limit (#3462, +13). Upstream also vendored a crate we do not carry,
+`vendor/vello_common`.
 
 ## 0.00 Update — 19 Oct 2026: 126 commits since d8b2705
 
