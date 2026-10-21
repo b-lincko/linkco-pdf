@@ -33,6 +33,16 @@ Eleven of the 36 sit between `4db6ac4` and `43550c4` and were not in the last su
 are one day's work. Taken against a green build (§0.00) and with a formatter that can now be run
 here, so the drift column is the only unknown.
 
+**Ported (Oct 2026 batch, PR #2):** #3404 (`1a8763e`), #3393 (`dd6fea4`), #3266 (`5ac2bf4`) and
+#3178 (`b1cc7f0`).
+
+**Two rows are blocked on code this tree does not have, not on the patches' size.** `crates/edit/src/text.rs`
+is 1,572 lines against upstream's 2,850: it has no `clear_block`, no `TextLine::actual_text`, and
+a `coincident_ops` that takes rectangles rather than lines. #3447 and #3477 both build on that, so
+they join #3301 and the #3084 work rather than standing on their own. #3388 has the same shape in
+miniature: it expects an `order()` that returns literal digits (`Vec<(char, u32)>`), where ours
+still returns `Vec<char>`, so the literal-digit change has to come first.
+
 ### New features, and what it would take to carry each
 
 | Feature | Where | Drift | Verdict |
