@@ -1505,14 +1505,6 @@ pub(crate) fn pick_preview_texture(have: &[(usize, egui::TextureId)], want: f32)
         .map(|(_, id)| *id)
 }
 
-/// The scroll offset that puts `point` (content coordinates) at `rel` in the viewport, kept within
-/// the content as egui keeps it. egui clamps only after drawing, so an offset past the end showed
-/// the page misplaced for a frame and then jumped (zooming out beside a page that fits).
-fn anchored_scroll(point: Pos2, rel: Vec2, content: Vec2, viewport: Vec2) -> Vec2 {
-    let max = vec2((content.x - viewport.x).max(0.0), (content.y - viewport.y).max(0.0));
-    vec2((point.x - rel.x).clamp(0.0, max.x), (point.y - rel.y).clamp(0.0, max.y))
-}
-
 /// The request tag for a raster at `scale`: equal tags mean the same scale (to 1/65536).
 fn scale_tag(scale: f32) -> u64 {
     (f64::from(scale) * 65536.0).round() as u64
@@ -1948,7 +1940,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((page, fx, fy, rel)) = view.zoom_anchor.take() {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
-        scroll = scroll.scroll_offset(anchored_scroll(point, rel, vec2(content_w, content_h), avail.size()));
+        scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
@@ -3081,8 +3073,9 @@ fn notices(
     let mut open_security = false;
     let mut open_repairs = false;
     let mut toggled = None;
-    // What the document is as a form, if it is one: what the bar says first, secured or not.
-    let form = if let Some(x) = xfa {
+    let msg = if secured {
+        Some(("lock", tl!("This document is secured. Some changes are restricted by its security settings.").to_string(), false))
+    } else if let Some(x) = xfa {
         let lang = crate::i18n::current();
         let pages = crate::i18n::trn(lang, x.pages as u64, "{n} page", "{n} pages");
         let fields = crate::i18n::trn(lang, x.fields as u64, "{n} field", "{n} fields");
@@ -3113,19 +3106,6 @@ fn notices(
             crate::i18n::fmt(tl!("This document contains {n} interactive form fields."), &[("n", &info.fields.len().to_string())]),
             true,
         ))
-    } else {
-        None
-    };
-    let msg = if secured {
-        // A secured form still says what it is, and keeps Highlight fields: the security
-        // sentence follows the form's.
-        let security = tl!("This document is secured. Some changes are restricted by its security settings.");
-        Some(match form {
-            Some((icon, text, fields)) => (icon, format!("{text} {security}"), fields),
-            None => ("lock", security.to_string(), false),
-        })
-    } else if form.is_some() {
-        form
     } else if repaired {
         Some(("bandage", tl!("This file was damaged and has been repaired. Saving keeps the repaired version.").to_string(), false))
     } else if !info.warnings.is_empty() {
@@ -3768,19 +3748,6 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn zoom_anchor_scroll_stays_within_the_content() {
-        let (content, viewport) = (vec2(1000.0, 2000.0), vec2(800.0, 600.0));
-        // Past the end: clamped to the maximum (200, 1400), not left for egui to snap back.
-        assert_eq!(anchored_scroll(pos2(900.0, 1900.0), vec2(0.0, 0.0), content, viewport), vec2(200.0, 1400.0));
-        // Before the start.
-        assert_eq!(anchored_scroll(pos2(10.0, 10.0), vec2(300.0, 300.0), content, viewport), Vec2::ZERO);
-        // Inside: unchanged.
-        assert_eq!(anchored_scroll(pos2(150.0, 800.0), vec2(100.0, 100.0), content, viewport), vec2(50.0, 700.0));
-        // Content smaller than the viewport: no scrolling.
-        assert_eq!(anchored_scroll(pos2(400.0, 400.0), Vec2::ZERO, vec2(500.0, 500.0), viewport), vec2(0.0, 0.0));
-    }
 
     #[test]
     fn rendered_rasters_become_texture_images_without_a_copy() {
