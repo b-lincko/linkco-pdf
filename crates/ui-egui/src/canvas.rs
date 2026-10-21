@@ -3073,9 +3073,8 @@ fn notices(
     let mut open_security = false;
     let mut open_repairs = false;
     let mut toggled = None;
-    let msg = if secured {
-        Some(("lock", tl!("This document is secured. Some changes are restricted by its security settings.").to_string(), false))
-    } else if let Some(x) = xfa {
+    // What the document is as a form, if it is one: what the bar says first, secured or not.
+    let form = if let Some(x) = xfa {
         let lang = crate::i18n::current();
         let pages = crate::i18n::trn(lang, x.pages as u64, "{n} page", "{n} pages");
         let fields = crate::i18n::trn(lang, x.fields as u64, "{n} field", "{n} fields");
@@ -3106,6 +3105,19 @@ fn notices(
             crate::i18n::fmt(tl!("This document contains {n} interactive form fields."), &[("n", &info.fields.len().to_string())]),
             true,
         ))
+    } else {
+        None
+    };
+    let msg = if secured {
+        // A secured form still says what it is, and keeps Highlight fields: the security
+        // sentence follows the form's.
+        let security = tl!("This document is secured. Some changes are restricted by its security settings.");
+        Some(match form {
+            Some((icon, text, fields)) => (icon, format!("{text} {security}"), fields),
+            None => ("lock", security.to_string(), false),
+        })
+    } else if form.is_some() {
+        form
     } else if repaired {
         Some(("bandage", tl!("This file was damaged and has been repaired. Saving keeps the repaired version.").to_string(), false))
     } else if !info.warnings.is_empty() {
