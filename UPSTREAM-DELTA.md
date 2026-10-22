@@ -21,6 +21,51 @@ UI panels and language catalogs — not from reading commit subjects.
 | UI languages | ours 16 → upstream 21 (**new: el, kk, lt, sl, tr**) |
 | Files changed upstream | 434 files, **+82,089 / −7,013**; 88 new files, none of them here |
 
+## 0.0000 Update — 22 Oct 2026: 19 commits since d695bc5 (0.10.1 → 0.11.0)
+
+Upstream HEAD was `88dad98` when this was taken; the window below is `d695bc5..88dad98` (19 non-merge
+commits, 108 files, +10554/−685). Version goes 0.10.1 → 0.11.0.
+
+**Ported (3).**
+
+| # | Commit | What | Where it landed |
+|---|---|---|---|
+| #2244 | `1937545` | Tools docked on its own is drawn with no tab strip, as Acrobat's tool pane has none; grouped or floating it keeps its tab | `478de86` |
+| #2240 | `583c1ec` | The mode bar drops its Read tab (Acrobat's is All tools, Edit, Convert, E-Sign); Read mode stays a View command and a default workspace | `19dfb0b` |
+| #2282 | `18b61e2` | Organize pages remembers its grid size: one value for every document, saved with the settings, `‑‑grid-zoom` sets it, damaged values ignored or clamped to 50–300% | `07df64b` |
+
+**Not for us (6).** `3e30645` (Release 0.11.0 — a version bump we don't take), `cfb71d8` (switch CI to a
+shared Nix workflow), `30b8c60` + `b1bf1cf` (SonarCloud scan and `sonar-project.properties`), `dbc7130`
+(pin GitHub Actions to full commit SHAs), `78ef666` (packaging: enforce HTTPS on curl downloads — we
+carry no such packaging script).
+
+**Not yet started (10).** Ordered by size, smallest first.
+
+| Commit | Size | What | Note |
+|---|---|---|---|
+| `8f3456f` | +106/−39 | PNG export writes opaque pages as RGB at deflate level 3 (3–5× faster, same size) | `crates/engine/src/export.rs` |
+| `d90cee4` | +188/−19 | Read each object stream's index once (vendored `hayro-syntax` patch 22) | our vendor README is at patch (23) for hayro-interpret; a syntax row needs checking |
+| `322a1b2` | +295/−63 | M7: lay out the Edit panel as Acrobat's | new assets + `ATTRIBUTION.toml` |
+| `6898094` | +732/−83 | M6: renaming a field renames it in the calculations that read it | `crates/forms` |
+| `6dec57b` | +862/−154 | M7: lay out Format text as Acrobat's panel | new assets + `ATTRIBUTION.md` |
+| `e451934` | +885/−88 | M6: calculation order — read, check, fix and set the order fields calculate in | `crates/forms` |
+| `ffaf312` | +1980/−33 | M6: Prepare a form ▸ Calculation order page | large new UI surface |
+| `d676fd4` | +2274/−45 | M6: Prepare a form ▸ Text field table | large new UI surface |
+| `88dad98` | +2773/−24 | M14: Norwegian Bokmål interface and date language | 16 i18n catalogs; `ATTRIBUTION.md` |
+| `606c560` | +314/−104 | Use `chrono` instead of a hand-rolled UTC conversion | adds a dependency — needs a `deny.toml` and lockfile pass first |
+
+**Why the three that were taken.** All three are Acrobat-parity fixes in files where our tree is
+byte-identical to upstream's pre-patch text (`docking.rs`, `chrome.rs`, `canvas.rs`, `lib.rs`,
+`tests/control.rs`), so they port with no rework and no new strings. Two of them (#2240, #2244) are
+removals — usually the safest kind of port, since they can't strand a translation — but #2240 does
+move the keyboard tab order (with Read gone, Tab from Convert reaches E-Sign), so the focus tests were
+rewritten rather than relabelled.
+
+**Two things left alone deliberately.** `crates/ui-egui/tests/ui.rs:657` clicks a **RadioButton** named
+`Read` in the Preferences dialog ("Default workspace mode"), and `tests/control.rs` sets Read mode
+through `ui.set {"key":"mode","value":"read"}`. Neither is the mode-bar tab, so both still work and
+`Mode::Read` stays reachable.
+
 ## 0.000 Update — 20 Oct 2026: 36 commits since 4db6ac4 (0.9.0 → 0.10.1)
 
 Upstream `main` moved `4db6ac4` → **`d695bc5`**: 36 non-merge commits (1 merge), 66 files,
