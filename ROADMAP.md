@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~26% (ready for real work 49% → 75%) and ~400–700 h away
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (localized shortcut labels, #496; readiness table with hours per audience; full number as weighted sum 49%; earlier: second look: ready 40% → 47%, mainstream 55% added; core-workflow gate applied → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-15 · **Change:** minor (print ports: current page, the poster sheet limit, architectural paper presets and scale, #1411/#1376/#1123; earlier: localized shortcut labels, #496; readiness table with hours per audience; full number as weighted sum 49%; earlier: second look: ready 40% → 47%, mainstream 55% added; core-workflow gate applied → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 PdfCraft's one-page summary: how close it is to Adobe Acrobat Pro's offline feature set, and what
 comes next. Adobe's cloud services (Document Cloud, Acrobat Sign requests, shared review, the AI
@@ -134,6 +134,47 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 ## Progress log
 
 Newest first: the date, what moved, and the new overall estimate.
+
+- **2026-10-24 (release hardening):** Selected upstream parser/resource caps, column reading order, shading alpha, signature validation and forms/XFA fixes imported. Patched certificate-verification advisory RUSTSEC-2026-0382 and replaced a yanked Windows clipboard dependency. Release gates and untested platform/hardware requirements are tracked in [release readiness](docs/production-readiness.md). Stage and readiness estimates unchanged; production approval is pending validation.
+
+- **2026-10-19 (upstream ports):** Fourteen features from storytold/pdfcraft, each with its tests.
+  Organize: **Reverse pages** swaps two or more selected pages among their own positions, or the
+  whole document when fewer than two are selected (#1720). Redact: a card number followed by an
+  expiry, a year or a CVV is still found, and a longer grouped number no longer matches on a
+  card-shaped prefix (#2969). Create: a JPEG tagged with an EXIF Orientation becomes an upright
+  page, since the uprighting now happens on the one path every embedded JPEG takes (#2951).
+  Forms: a push button's visible label is editable per widget — Field Properties → Options →
+  Label, or `form_set_props` with `caption` and `widget` — independently of the field name, and
+  clearing it is allowed (#3064). Forms again: a custom document property is any /Info
+  entry the spec does not name, now set, cleared and listed by the tools after Acrobat's own
+  checks (#2076). CLI: `info` names the PDF/A or PDF/UA level a file declares (#3328). Organize:
+  Ctrl-drag (Option on macOS) drops copies at the gap instead of moving the pages, with `at`
+  for agents (#2997). Prepare a form: a row of two or more touching cells of one size is one comb
+  text field, not one check box per character (#2111). Edit image: an image whose operands end one
+  content stream and whose `Do` starts the next is found, selected, moved and deleted, the way
+  text already was (#3294). Save As to another file writes one revision: a copy no longer carries
+  the pages you deleted earlier, though saving over its own path stays incremental and a signed
+  document stays appended to (#2165). Export: TIFF and JPEG pages record the resolution they were
+  drawn at, so other programs show and print them at the page's size (#3332), and a sentence whose
+  link runs on into another block is text again, not a table row — its later lines were being
+  dropped (#2806). Comments: a file-attachment comment's menu, on the page and in the Comments
+  panel, saves the file it carries or opens a PDF in a new tab (#2565). Find: ⌘G and ⇧⌘G step to
+  the next and previous match while the find field still has focus (#2669). Estimates unchanged.
+- **2026-10-17 (upstream ports):** Seven fixes from storytold/pdfcraft, each with its tests. Print: 4 × 6 in label paper and a Label layout that cuts a shipping label to its printed area, turns it upright and tells the spooler which sheet to feed (#1583), with A6 in the Paper menu (#1849). Parsing: an unfiltered inline image whose samples happen to look like the `EI` terminator keeps its pixels (#1562). Opening: a file whose page tree is lost can be edited, on the pages the reader finds by scanning, unless it is signed (#1664). Wayland: a wheel that reports no discrete steps no longer starts a gesture that never ends, so Ctrl + wheel stops zooming once Ctrl is released (#1569). Form data: exported XML tags stay inside the NCName grammar (#1588), XFDF values keep the text around XML comments and processing instructions (#1647), and CSV export quotes carriage returns (#1563). Estimates unchanged.
+- **2026-10-15 (L Print, ports from upstream):** Three fixes and one feature carried over from
+  storytold/pdfcraft. **Current page** now prints the page on screen instead of the page
+  labelled with its number, which mattered as soon as a document's front matter is numbered
+  i, ii, iii (#1411). A **poster** scale large enough to saturate the tile counts is refused
+  with the 1024-sheet error instead of overflowing the sheet count (#1376). The **Paper**
+  menu, `doc_print` and the dialog gained the architectural sheets — ARCH A/B/C/D/E1/E,
+  ANSI C/D/E and ISO A0/A1/A2 — with **Match page at 100%** (the standard sheet the page on
+  screen fits, Actual size, auto orientation, page range left alone; disabled for a custom
+  page size) and a **PDF scale** readout of the sheet being previewed, which also no longer
+  shows sheet 1's size while another sheet is on screen (#1123). Covered by unit tests, a
+  tool test over every preset and two real-shell kitests. Milestone and effort estimates
+  unchanged; the upstream printing backend itself is deliberately not ported.
+
+- **2026-10-14 (L Print, print preview):** Print ▸ preview has a **Print both sides** button under the sheet navigation: one click turns two-sided printing on (flipped on the long edge), another goes back to one side, and the Two-sided dropdown in the settings stays in step with it. It is off and disabled for cut and stack, whose sheets are printed single-sided, but stays clickable there while two-sided is on, so it is also the way out of the error the preview shows for that combination. Covered by a real-shell kittest and unit tests; milestone and effort estimates unchanged.
 
 - **2026-10-10 (M14, interface size):** Preferences ▸ Interface size scales the whole interface (50–250 %, setting `ui_scale`, control option `ui-scale`); 50 % brings an interface the system draws at 200 % back to 100 % (#456). Auto, the default, follows the desktop's text scaling: on Linux and the BSDs the desktop app reads GNOME's `text-scaling-factor` once at launch, so with Large Text (1.25) on a 1× display the interface no longer draws 13 px labels that show their pixels next to the system's text. The size is egui's zoom factor, so `pixels_per_point` grows with it and page rasters stay one texel per screen pixel; egui's own ⌘+/⌘− interface zoom is turned off so those keys stay page zoom. Still missing: KDE's font DPI and Windows' "Make text bigger" aren't read (both scale only text there), and egui's text is still greyscale-antialiased without the system's gamma, so small text looks rougher than GTK's at 100 %.
 - **2026-10-10 (M14, #496):** Shortcut displays share a UI formatter across toolbar search, registry menus, command palette, Help and tooltips. Modifier and key names use a dedicated catalog context in every bundled translation; missing entries keep the English key name rather than a command translation. German shows Strg/Umschalt/Entf, macOS retains its symbols, and runtime language changes refresh the display. Regression coverage checks localized layout widths, English/German switching, platform conventions and unchanged command execution. Milestone and effort estimates unchanged.
@@ -317,6 +358,8 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Upstream ports: reverse pages (#1720), credit cards followed by a number (#2969), EXIF orientation in Create from images (#2951), editable push-button labels (#3064), custom document properties (#2076), the PDF/A level in `cli info` (#3328), Ctrl-drag to copy pages (#2997), comb rows as one field (#2111), images split across two content streams (#3294), Save As as a clean copy (#2165), TIFF/JPEG resolution (#3332), running text kept out of tables (#2806); estimates unchanged |
+| 2026-10-17 | minor | Upstream ports (#1583, #1562, #1664, #1569, #1588, #1647, #1563) with A6 paper (#1849); estimates unchanged |
 | 2026-10-10 | minor | Readiness table with hours per audience; full number restated as the additive weighted sum over dimensions (47% → 49%; method aligned with the standard, no new evidence) |
 | 2026-10-10 | minor | Essentials-user score added (≈ 66%) |
 | 2026-10-10 | minor | Gate consistency check: convert and share re-judged partial, not blocking; stage pre-alpha → alpha |

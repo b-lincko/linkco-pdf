@@ -112,8 +112,10 @@ fn view_history_select_all_and_find_options() {
     h.state_mut().views[0].rerun_find();
     // Find runs in the background: wait for it by a deadline, not a frame count, which a loaded
     // machine (the whole workspace testing at once, or the slow FreeBSD VM) can use up before the
-    // last page is searched. The loop ends as soon as the search is done.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // last page is searched. The loop ends as soon as the search is done. The FreeBSD VM, with
+    // every other test binary running beside it, got three quarters of the way through four
+    // pages in the minute this allowed, so the deadline is three minutes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     while std::time::Instant::now() < deadline && h.state().views[0].find.as_ref().unwrap().matches.len() < 15 {
         h.run_steps(2);
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -170,6 +172,36 @@ fn find_shortcuts_advance_and_retreat_matches() {
     h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::G);
     h.run_steps(2);
     assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some((start + n - 1) % n));
+}
+
+/// #2669: ⌘G and ⇧⌘G step through the matches while the find field still has the focus.
+#[test]
+fn find_shortcuts_work_from_the_find_field() {
+    let mut h = harness();
+    h.state_mut().active = Some(0);
+    h.run_steps(2);
+    h.state_mut().views[0].open_find();
+    h.state_mut().views[0].find.as_mut().unwrap().query = "page".into();
+    h.state_mut().views[0].rerun_find();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        if h.state().views[0].find.as_ref().unwrap().matches.len() >= 15 {
+            break;
+        }
+    }
+    let n = h.state().views[0].find.as_ref().unwrap().matches.len();
+    assert_eq!(n, 15);
+    assert!(h.ctx.egui_wants_keyboard_input(), "the find field has the focus");
+    let start = h.state().views[0].find.as_ref().unwrap().current.unwrap();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some((start + 1) % n));
+    h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some(start));
+    assert!(h.ctx.egui_wants_keyboard_input(), "and keeps it");
 }
 
 #[test]

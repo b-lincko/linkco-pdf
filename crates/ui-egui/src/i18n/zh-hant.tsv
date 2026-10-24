@@ -2097,4 +2097,16 @@ key	Space	空格
 	Driver: {driver}	驅動程式：{driver}
 	Printer status: {status}. Check the printer's connection before printing.	列印機狀態：{status}。列印前請檢查列印機的連線。
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	找不到列印機。請開啟列印機並連接，然後選擇「重新檢驗」。您仍可另存為 PDF。
+	Print both sides	雙面列印
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	在紙張兩面列印，若印表機支援則沿長邊翻面。
+	Printing on both sides of the sheet. Click to print on one side only.	正在紙張兩面列印。按一下可只列印單面。
+	Match page at 100%	以 100% 符合頁面
+	Print at 100% on the paper of the same size, leaving the page range alone.	以 100% 在相同尺寸的紙張上列印，不改變頁面範圍。
+	PDF page: {w} × {h} in	PDF 頁面：{w} × {h} 英寸
+	PDF scale: {scale}%	PDF 比例：{scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	頁面的繪製比例；印表機驅動程式仍可能更換紙張或縮小列印工作。
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	「裁切並堆疊」會列印單面紙張。若要雙面列印，請選擇其他頁面順序。
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	將每頁裁切至其列印區域，轉正後不拉伸地符合紙張。每張紙一個標籤。
+	Turn upside down (180°)	上下顛倒 (180°)
+	the name is not a plain file name	名稱不是單純的檔案名稱
 	Developer: {name}	開發者：{name}

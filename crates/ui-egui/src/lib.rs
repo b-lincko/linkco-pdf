@@ -7,6 +7,12 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+/// Whether two paths name the same file: equal as written, or equal once made absolute (the
+/// destination a file dialog returns is absolute, a document's own path need not be).
+pub(crate) fn same_file(a: &str, b: &str) -> bool {
+    a == b || matches!((std::path::absolute(a), std::path::absolute(b)), (Ok(x), Ok(y)) if x == y)
+}
+
 /// Translate an English UI string into the current language (see [`i18n`]).
 macro_rules! tl {
     ($s:expr) => {
@@ -544,6 +550,9 @@ pub struct PdfCraftApp {
     /// How large the Combine grid draws its cards (1.0 = the usual; kept in the settings). Set
     /// with [`PdfCraftApp::set_combine_zoom`].
     pub combine_zoom: f32,
+    /// How large Organize pages draws its grid, for every document (1.0 = the usual; kept in
+    /// the settings).
+    pub organize_zoom: f32,
     /// The Combine grid's thumbnails: rendered off the UI thread, a few at a time.
     pub(crate) combine_thumbs: combine_grid::Thumbs,
     /// Images waiting for the resolution choice (released on cancel).
@@ -803,6 +812,7 @@ impl PdfCraftApp {
             combine_columns: Default::default(),
             combine_view: Default::default(),
             combine_zoom: 1.0,
+            organize_zoom: 1.0,
             combine_thumbs: Default::default(),
             image_import: None,
             custom_stamps: Vec::new(),
@@ -1087,6 +1097,15 @@ impl PdfCraftApp {
     }
 
     /// Save an attachment to disk, or open a PDF attachment in a new tab.
+    /// [`Self::attachment_action`] for the file of the attachment comment at (page, index).
+    pub fn comment_attachment_action(&mut self, doc: DocId, page: usize, index: usize, open: bool) {
+        let source = pdfcraft_render::AttachmentSource::Annotation { page, index };
+        // The menus offer the items only for a listed file, so a miss is a comment gone since.
+        if let Some(i) = self.session.get(doc).and_then(|d| d.info.attachments.iter().position(|a| a.source == source)) {
+            self.attachment_action(doc, i, open);
+        }
+    }
+
     pub fn attachment_action(&mut self, doc: DocId, index: usize, open: bool) {
         let Some(d) = self.session.get(doc) else { return };
         let Some(att) = d.info.attachments.get(index).cloned() else { return };
@@ -1385,7 +1404,7 @@ impl PdfCraftApp {
     /// Serialize the user's persistent state (recent files, theme). Local only.
     pub fn persist(&self) -> String {
         let trusted: Vec<String> = self.session.trusted_certificates().iter().map(pdfcraft_engine::sign::x509::to_pem).collect();
-        serde_json::json!({
+        let mut persisted = serde_json::json!({
             "docking": self.docking,
             "docking_left_open": self.left_open,
             "docking_right": self.right,
@@ -1435,8 +1454,10 @@ impl PdfCraftApp {
             "combine_view": self.combine_view.as_str(),
             "combine_zoom": self.combine_zoom,
             "comments_panel_closed": self.comments_panel_closed,
-        })
-        .to_string()
+        });
+        // Set outside json! above, which is at serde_json's macro recursion limit.
+        persisted["organize_zoom"] = serde_json::json!(self.organize_zoom);
+        persisted.to_string()
     }
 
     /// Restore state written by `persist`. Unknown or malformed data is ignored.
@@ -1457,6 +1478,10 @@ impl PdfCraftApp {
         }
         if let Some(zoom) = v["combine_zoom"].as_f64() {
             self.set_combine_zoom(zoom as f32);
+        }
+        // Clamped like any grid zoom when the grid next shows; nonsense keeps the usual size.
+        if let Some(zoom) = v["organize_zoom"].as_f64().map(|z| z as f32).filter(|z| z.is_finite()) {
+            self.organize_zoom = zoom.clamp(*canvas::GRID_ZOOM_RANGE.start(), *canvas::GRID_ZOOM_RANGE.end());
         }
         if let Ok(r) = serde_json::from_value::<Vec<RecentFile>>(v["recent"].clone()) {
             // Only keep entries whose files still exist.
@@ -1698,6 +1723,8 @@ impl PdfCraftApp {
                     return Err("grid-zoom must be between 50 and 300".into());
                 }
                 v.set_grid_zoom(percent / 100.0);
+                // The grid's size is one for every document, as it is remembered.
+                self.organize_zoom = v.grid_zoom();
             }
             ("rotate", Some(v)) => {
                 let deg: u16 = value.parse().map_err(|_| "rotate: 0, 90, 180 or 270")?;

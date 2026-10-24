@@ -203,6 +203,13 @@ impl Automation {
                 let to = self.position(&a, "to")?;
                 self.apply(&a, Edit::MovePages { pages, to })?
             }
+            "page_reverse" => {
+                let pages = match a.opt_ints("pages")? {
+                    Some(_) => self.pages(&a, "pages")?,
+                    None => (0..self.doc(&a)?.info.pages.len()).collect(),
+                };
+                self.apply(&a, Edit::ReversePages { pages })?
+            }
             "page_insert_blank" => self.insert_blank(&a)?,
             "page_insert_file" => self.insert_file(&a)?,
             "page_extract" => self.page_extract(&a)?,
@@ -293,7 +300,8 @@ impl Automation {
             }
             "page_duplicate" => {
                 let pages = self.pages(&a, "pages")?;
-                self.apply(&a, Edit::DuplicatePages { pages })?
+                let at = self.opt_position(&a, "at")?;
+                self.apply(&a, Edit::DuplicatePages { pages, at })?
             }
             "page_set_box" => self.page_set_box(&a)?,
             "doc_create" => self.doc_create(&a)?,
@@ -1457,6 +1465,16 @@ impl Automation {
         Ok(at as usize - 1)
     }
 
+    /// `position`, but `None` when the key is left out.
+    fn opt_position(&self, a: &Args, key: &str) -> Result<Option<usize>> {
+        let Some(at) = a.opt_int(key)? else { return Ok(None) };
+        let n = self.doc(a)?.info.pages.len();
+        if at < 1 || at as usize > n + 1 {
+            return Err(ToolError::InvalidArgs(format!("{key} must be between 1 and {} (the document has {n} pages)", n + 1)));
+        }
+        Ok(Some(at as usize - 1))
+    }
+
     fn renderer(&mut self, id: DocId) -> Result<&mut PageRenderer> {
         let doc = self.session.get(id).ok_or_else(|| failed("no such document"))?;
         let fresh = || {
@@ -1818,6 +1836,9 @@ fn info(d: &Document) -> Value {
         "creator": i.creator, "producer": i.producer,
         "tagged": i.tagged,
         "has_javascript": i.has_javascript,
+        // Custom document properties (Document Properties > Custom): /Info entries beyond the
+        // ones the spec names, set and cleared with doc_set_info.
+        "custom": i.custom.iter().map(|(name, value)| json!({ "name": name, "value": value })).collect::<Vec<_>>(),
         // XFA forms: "static" (the PDF's own fields work; the XFA data is ignored) or "dynamic"
         // (laid out from the template by PdfCraft, see xfa_layout; placeholder pages when that failed).
         "xfa": i.xfa.map(|x| match x { pdfcraft_render::Xfa::Static => "static", pdfcraft_render::Xfa::Dynamic => "dynamic" }),

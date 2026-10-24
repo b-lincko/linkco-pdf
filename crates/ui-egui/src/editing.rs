@@ -50,6 +50,12 @@ impl PdfCraftApp {
                         let to = to.min(info.pages.len() - n);
                         view.select_pages(&(to..to + n).collect::<Vec<_>>());
                     }
+                    // A copy dropped by a Ctrl-drag: select the copies where they landed.
+                    Edit::DuplicatePages { pages, at: Some(at) } => {
+                        let n = pages.iter().collect::<std::collections::BTreeSet<_>>().len();
+                        let at = at.min(info.pages.len().saturating_sub(n));
+                        view.select_pages(&(at..at + n).collect::<Vec<_>>());
+                    }
                     Edit::InsertBlankPage { at, .. } => view.select_pages(&[at.min(info.pages.len() - 1)]),
                     Edit::DeletePages { .. } => view.select_pages(&[]),
                     // A stroke drawn with the pen stays unselected, so the selection box and
@@ -390,14 +396,14 @@ impl PdfCraftApp {
                     let dialog = rfd::AsyncFileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name);
                     // The bytes are taken once the user has chosen, so edits made meanwhile are saved too.
                     self.ask_one(crate::pickers::Ask::Save(dialog), None, move |app, dest| {
-                        if app.save_doc_to(id, &dest.to_string_lossy()) {
+                        if app.save_doc_to(id, &dest.to_string_lossy(), target) {
                             after(app);
                         }
                     });
                     return false;
                 }
             };
-            let saved = self.save_doc_to(id, &destination);
+            let saved = self.save_doc_to(id, &destination, target);
             if saved {
                 after(self);
             }
@@ -452,17 +458,27 @@ impl PdfCraftApp {
 
     /// Write document `id` to `dest` and make it the document's file. Returns `true` if written.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str) -> bool {
+    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget) -> bool {
         // Save As answers on a later frame: commit what was typed meanwhile, too (#166), even
         // if another tab is active by then.
         if !self.commit_typing_in(id) || !self.flatten_fill_sign_for_save(id) {
             return false;
         }
-        let Some(name) = self.session.get(id).map(|d| d.name.clone()) else {
+        let Some((name, full)) = self.session.get(id).map(|d| {
+            // Save As to another file is a clean copy, without the earlier revisions that still
+            // hold deleted pages or replaced text (#2165). A signed document stays incremental so
+            // its signatures keep covering the file.
+            let full = target == SaveTarget::As
+                && !d.path.as_deref().is_some_and(|p| crate::same_file(p, dest))
+                && d.read_only_reason.is_none()
+                && !d.is_signed();
+            (d.name.clone(), full)
+        }) else {
             self.notify_tr("The document was closed before it could be saved.");
             return false;
         };
-        let bytes = match self.session.save_bytes(id) {
+        let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) };
+        let bytes = match bytes {
             Ok(b) => b,
             Err(e) => {
                 self.notify_fmt("Couldn't save {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
@@ -668,6 +684,17 @@ pub fn write_atomically(path: &str, bytes: &[u8]) -> std::io::Result<()> {
 
 /// [`write_atomically`], trying the staging names that `suffixes` give.
 fn write_atomically_with(path: &str, bytes: &[u8], suffixes: impl IntoIterator<Item = u64>) -> std::io::Result<()> {
+    write_atomically_syncing(path, bytes, suffixes, std::fs::File::sync_all)
+}
+
+/// [`write_atomically_with`], flushing the staging file with `sync_all` (the standard library's
+/// in the app, a failing one in tests).
+fn write_atomically_syncing(
+    path: &str,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     use std::io::Write;
     let target = std::path::Path::new(path);
     let dir = target.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
@@ -678,7 +705,7 @@ fn write_atomically_with(path: &str, bytes: &[u8], suffixes: impl IntoIterator<I
         {
             let mut f = f;
             f.write_all(bytes)?;
-            f.sync_all()?;
+            sync_staged(&f, sync_all)?;
         }
         std::fs::rename(&tmp, target)
     })();
@@ -686,6 +713,23 @@ fn write_atomically_with(path: &str, bytes: &[u8], suffixes: impl IntoIterator<I
         let _ = std::fs::remove_file(&tmp);
     }
     result
+}
+
+/// Flush the staging file to the disk before it replaces the original. On macOS `sync_all` asks
+/// for a full flush (`F_FULLFSYNC`), which SMB and FUSE volumes, such as a mounted Cryptomator
+/// vault, refuse as unsupported: there a plain `fsync` is the strongest flush the volume offers.
+/// Any other failure still fails the save.
+fn sync_staged(f: &std::fs::File, sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use rustix::io::Errno;
+        match sync_all(f) {
+            Err(e) if matches!(Errno::from_io_error(&e), Some(Errno::NOTSUP | Errno::NOTTY)) => Ok(rustix::fs::fsync(f)?),
+            other => other,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    sync_all(f)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -773,7 +817,7 @@ fn bookmark_at<'a>(items: &'a [pdfcraft_render::OutlineItem], path: &[usize]) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{write_atomically, write_atomically_with};
+    use super::{write_atomically, write_atomically_syncing, write_atomically_with};
     use pdfcraft_platform::staging::{STAGING_ATTEMPTS, staging_suffixes};
     use std::path::{Path, PathBuf};
 
@@ -895,6 +939,42 @@ mod tests {
         names
     }
 
+    /// On macOS `sync_all` asks for a full flush, which SMB and FUSE volumes (a Cryptomator vault,
+    /// #981) refuse as unsupported: ENOTSUP (45) or ENOTTY (25). The save still goes through.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_volume_without_full_flush_still_saves() {
+        for errno in [45, 25] {
+            let dir = staging_dir(&format!("nofullsync-{errno}"));
+            let target = dir.join("out.pdf");
+            std::fs::write(&target, "OLD").unwrap();
+            let asked = std::cell::Cell::new(false);
+            let refuse = |_: &std::fs::File| {
+                asked.set(true);
+                Err(std::io::Error::from_raw_os_error(errno))
+            };
+            write_atomically_syncing(&target.to_string_lossy(), b"NEW", [7], refuse).unwrap();
+            assert!(asked.get(), "the full flush was tried");
+            assert_eq!(read(&target), "NEW");
+            assert_eq!(listing(&dir), ["out.pdf"], "no staging file is left behind");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Only "not supported" is let through: any other flush failure fails the save and keeps the
+    /// original.
+    #[test]
+    fn a_failed_flush_keeps_the_original() {
+        let dir = staging_dir("syncfails");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, "OLD").unwrap();
+        let e = write_atomically_syncing(&target.to_string_lossy(), b"NEW", [7], |_| Err(std::io::Error::other("disk gone"))).unwrap_err();
+        assert_eq!(e.to_string(), "disk gone");
+        assert_eq!(read(&target), "OLD");
+        assert_eq!(listing(&dir), ["out.pdf"], "the staging file was removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn saving_a_long_name_leaves_only_the_saved_file() {
         assert_ne!(staging_suffixes().next(), staging_suffixes().next(), "each save draws new names");
@@ -948,6 +1028,7 @@ mod revert_draft_tests {
             select_all: false,
             calendar: None,
             calendar_rect: None,
+            calendar_text: None,
         }
     }
 

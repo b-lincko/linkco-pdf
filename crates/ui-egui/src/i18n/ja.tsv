@@ -2211,4 +2211,16 @@ key	Space	スペース
 	Driver: {driver}	ドライバー: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	プリンターの状態: {status}。印刷する前にプリンターの接続を確認してください。
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	プリンターが見つかりませんでした。プリンターの電源を入れて接続し、[再チェック] を選択してください。PDF として保存することもできます。
+	Print both sides	両面印刷
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	用紙の両面に印刷します。プリンターが対応していれば長辺で反転します。
+	Printing on both sides of the sheet. Click to print on one side only.	用紙の両面に印刷します。片面だけに印刷するにはクリックします。
+	Match page at 100%	ページに合わせて100%に設定
+	Print at 100% on the paper of the same size, leaving the page range alone.	同じサイズの用紙に100%で印刷します。ページ範囲は変更しません。
+	PDF page: {w} × {h} in	PDFのページ: {w} × {h} インチ
+	PDF scale: {scale}%	PDFの倍率: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	ページを描画する倍率です。プリンタードライバーが用紙を代替したり、ジョブを縮小したりする場合もあります。
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	「カット＆スタック」は片面印刷の用紙を出力します。両面印刷するには別のページ順序を選んでください。
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	各ページを印刷領域で切り抜き、正しい向きに回転して、伸縮させずに用紙に合わせます。1 枚に 1 ラベル。
+	Turn upside down (180°)	上下反転 (180°)
+	the name is not a plain file name	名前が単独のファイル名ではありません
 	Developer: {name}	開発者: {name}

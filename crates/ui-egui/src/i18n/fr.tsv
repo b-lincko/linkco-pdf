@@ -2211,4 +2211,16 @@ key	Space	Espace
 	Driver: {driver}	Pilote : {driver}
 	Printer status: {status}. Check the printer's connection before printing.	État de l'imprimante : {status}. Vérifiez la connexion de l'imprimante avant d'imprimer.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Aucune imprimante n'a été trouvée. Allumez l'imprimante et connectez-la, puis sélectionnez « Vérifier à nouveau ». Vous pouvez toujours enregistrer comme PDF.
+	Print both sides	Recto verso
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Imprime sur les deux faces de la feuille, en la retournant sur son grand côté, si l'imprimante le peut.
+	Printing on both sides of the sheet. Click to print on one side only.	Impression sur les deux faces de la feuille. Cliquez pour n'imprimer que sur une face.
+	Match page at 100%	Adapter le papier à la page à 100 %
+	Print at 100% on the paper of the same size, leaving the page range alone.	Imprime à 100 % sur un papier de la même taille, sans modifier la plage de pages.
+	PDF page: {w} × {h} in	Page du PDF : {w} × {h} po
+	PDF scale: {scale}%	Échelle PDF : {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	L'échelle à laquelle la page est dessinée ; un pilote d'imprimante peut encore remplacer le papier ou réduire le travail.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	« Découper et empiler » imprime des feuilles recto seul. Choisissez un autre ordre de pages pour imprimer recto verso.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Rogne chaque page à sa zone imprimée, la redresse et l’ajuste à la feuille sans la déformer. Une étiquette par feuille.
+	Turn upside down (180°)	Retourner (180°)
+	the name is not a plain file name	le nom n'est pas un simple nom de fichier
 	Developer: {name}	Développeur : {name}

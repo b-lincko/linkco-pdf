@@ -664,6 +664,21 @@ fn preferences_selects_default_workspace_for_next_open() {
     assert_eq!(h.state().mode, Mode::Read);
 }
 
+/// The mode bar matches Acrobat's: All tools, Edit, Convert and E-Sign, with no Read tab. Read
+/// mode is still a View command.
+#[test]
+fn the_mode_bar_has_no_read_tab() {
+    use pdfcraft_ui_egui::Mode;
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    for label in ["All tools", "Edit", "Convert", "E-Sign"] {
+        assert!(h.query_all_by_label(label).next().is_some(), "the {label} tab is there");
+    }
+    assert!(h.query_all_by_label("Read").next().is_none(), "no Read tab");
+    h.state_mut().run_command("view.read_mode");
+    h.run_steps(2);
+    assert_eq!(h.state().mode, Mode::Read);
+}
+
 #[test]
 fn explicit_mode_preserves_independent_tool_and_panel_options() {
     use pdfcraft_ui_egui::LeftPanel;

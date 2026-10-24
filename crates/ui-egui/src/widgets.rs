@@ -264,6 +264,25 @@ pub fn split_pill(ui: &mut egui::Ui, icon: &str, label: &str, more: &str) -> (Re
     (main.on_hover_text(label), arrow.on_hover_text(more))
 }
 
+/// A pill button that stays pressed: `on` fills it with the accent, and the state is told to
+/// assistive technology as a selected button (the Print dialog's "Print both sides").
+pub fn toggle_pill(ui: &mut egui::Ui, icon: &str, label: &str, on: bool) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::medium(12.5);
+    let w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), t.text).size().x);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w + 46.0, 30.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, label));
+    let (fill, stroke, text) = if on {
+        (if resp.hovered() { t.accent_text } else { t.accent }, Stroke::NONE, Color32::WHITE)
+    } else {
+        (if resp.hovered() { t.hover } else { t.card }, Stroke::new(1.2, t.text_muted), t.text)
+    };
+    ui.painter().rect(rect, CornerRadius::same(15), fill, stroke, egui::StrokeKind::Inside);
+    crate::icons::paint(ui, Rect::from_min_size(rect.min + vec2(12.0, 7.0), vec2(16.0, 16.0)), icon, 15.0, text);
+    ui.painter().text(rect.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, label, font, text);
+    resp
+}
+
 /// A pill button with an icon (primary = filled accent).
 pub fn icon_pill(ui: &mut egui::Ui, icon: &str, label: &str, primary: bool) -> Response {
     let t = Tokens::get(ui.ctx());

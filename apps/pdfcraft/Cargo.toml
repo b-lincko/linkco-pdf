@@ -28,9 +28,18 @@ log = { workspace = true }
 # behind a safe API. Same version as PhotoCraft. Pinned exactly: review the diff before bumping.
 fmv-macos-events = "=0.1.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The Wayland protocol types the vendored winit's scroll policy is written against, for the test
+# below. Already in the lockfile through winit.
+wayland-client = "0.31"
+
 [dev-dependencies]
 # Waits for wgpu's adapter, device and error-scope futures in tests (already in the tree through wgpu).
 pollster = "1.0"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# Exercise the vendored Wayland scroll policy with the actual winit event type.
+winit = { version = "0.30", default-features = false, features = ["wayland"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # Which GPU drives which display (EnumDisplayDevices), so the window is drawn on the GPU that

@@ -195,6 +195,18 @@ impl Parser<'_> {
                         b'n' => out.push(b'\n'),
                         b'r' => out.push(b'\r'),
                         b't' => out.push(b'\t'),
+                        b'b' => out.push(0x08),
+                        b'f' => out.push(0x0C),
+                        b'v' => out.push(0x0B),
+                        b'0' => out.push(0),
+                        b'x' => {
+                            let digits = self.s.get(self.i..self.i.checked_add(2)?)?;
+                            let code = hex4(&[b'0', b'0', digits[0], digits[1]])?;
+                            self.i += 2;
+                            let ch = char::from_u32(u32::from(code)).unwrap_or('\u{FFFD}');
+                            let mut encoded = [0u8; 4];
+                            out.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
+                        }
                         b'u' => {
                             let code = hex4(self.s.get(self.i..self.i.checked_add(4)?)?)?;
                             self.i += 4;
@@ -805,7 +817,8 @@ pub fn format_value(f: &Format, value: &str) -> String {
 /// (numbers are normalised), or Acrobat's message.
 pub fn keystroke(f: &Format, field: &str, value: &str) -> Result<String, String> {
     let bad = || format!("The value entered does not match the format of the field [ {field} ]");
-    if value.trim().is_empty() {
+    // Blank input clears a formatted field; without a format, whitespace is text like any other.
+    if *f != Format::None && value.trim().is_empty() {
         return Ok(String::new());
     }
     match f {
@@ -962,6 +975,15 @@ pub fn calculate(c: &Calculate, values: &dyn Fn(&str) -> Vec<String>) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn javascript_escapes_are_decoded() {
+        assert_eq!(
+            parse_format("AFNumber_Format(2, 0, 0, 0, \"\\x24\", true);"),
+            Some(Format::Number { decimals: 2, sep: 0, neg: 0, currency: "$".into(), prepend: true })
+        );
+        assert_eq!(parse_format("AFDate_FormatEx(\"\\b\\f\\v\\0\\q\");"), Some(Format::Date("\u{8}\u{c}\u{b}\0q".into())));
+    }
 
     #[test]
     fn scripts_are_recognised_and_written_back() {

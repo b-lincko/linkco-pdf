@@ -106,8 +106,8 @@ milestone = "M1"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/filters/src/lib.rs::chain_three_filters_with_predictor", "crates/filters/src/lzw.rs::spec_example", "crates/filters/src/predictor.rs::png_hand_vectors"]
-notes = ""
+evidence = ["crates/filters/src/lib.rs::chain_three_filters_with_predictor", "crates/filters/src/lzw.rs::spec_example", "crates/filters/src/predictor.rs::png_hand_vectors", "crates/filters/src/lib.rs::raw_flate_fallback_preserves_output_limits", "crates/cos/src/object.rs::raw_flate_fallback_streams_preserve_the_caller_limit"]
+notes = "Raw-deflate fallback preserves output limits in strict and tolerant decoding, including misleading zlib headers. Image codecs remain outside this general-purpose filter implementation."
 
 [[feature]]
 id = "core.image-filters"
@@ -1070,8 +1070,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.read_mode"]
 tools = []
-evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented"]
-notes = ""
+evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented", "crates/ui-egui/tests/ui.rs::the_mode_bar_has_no_read_tab"]
+notes = "View ▸ Read mode (and the Read mode workspace) hides the panes and tool chrome. The mode bar has no Read tab, as in Acrobat, where reading is the viewer with no tool in use: its tabs are All tools, Edit, Convert and E-Sign"
 
 [[feature]]
 id = "view.full-screen"
@@ -1754,8 +1754,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/editing.rs::restricted_documents_show_a_notice_and_block_page_changes"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::restricted_documents_show_a_notice_and_block_page_changes", "crates/ui-egui/tests/editing.rs::a_secured_form_shows_its_form_notice_and_its_security"]
+notes = "On a secured form, the security sentence follows the form's notice instead of replacing it, which keeps Highlight fields."
 
 [[feature]]
 id = "view.pdfa-view-mode"
@@ -1819,7 +1819,7 @@ status = "partial"
 commands = ["edit.edit_text"]
 tools = ["text_lines", "text_paragraphs", "text_edit"]
 evidence = ["crates/edit/src/tests.rs::paragraphs_are_found_and_rewrapped", "crates/edit/src/tests.rs::text_lines_are_found_and_replaced_in_place", "crates/ui-egui/tests/editing.rs::editing_existing_text_in_place", "crates/automation/tests/automation.rs::editing_existing_text_through_tools", "crates/edit/src/tests.rs::a_line_whose_operator_starts_the_next_stream_can_be_edited", "crates/automation/tests/automation.rs::a_line_split_across_content_streams_is_listed_and_edited"]
-notes = "click a paragraph box and retype it in place (font reused or Helvetica substituted, colour and spacing kept, rewrapped); a page's /Contents pieces are parsed joined, so a line whose operands and operator sit in different pieces is listed and edited (lines and paragraphs still don't join across pieces; Edit image still parses each piece alone); drag a box to move it or its right-edge handle to rewrap it (edit.text-move-resize); per-character formatting changes are next"
+notes = "click a paragraph box and retype it in place (font reused or Helvetica substituted, colour and spacing kept, rewrapped); a page's /Contents pieces are parsed joined, so a line whose operands and operator sit in different pieces is listed and edited (lines and paragraphs still don't join across pieces; Edit image parses its pieces joined too (#3294)); drag a box to move it or its right-edge handle to rewrap it (edit.text-move-resize); per-character formatting changes are next"
 
 [[feature]]
 id = "edit.text-reflow"
@@ -2034,7 +2034,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text", "edit.image"]
 tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
 notes = "existing page images (right-click ▸ Replace Image) and added images: the new picture is drawn in the same place"
 
 [[feature]]
@@ -2058,7 +2058,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
 notes = "existing raster images and grouped Form artwork: rotate either way about the centre, flip horizontally or vertically (a q/cm/Q wrapper); Forms stay intact as groups; added images too"
 
 [[feature]]
@@ -2070,7 +2070,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::form_artwork_edits_only_the_selected_placement", "crates/ui-egui/tests/editing.rs::editing_existing_form_artwork_on_the_page", "crates/automation/tests/automation.rs::editing_form_artwork_through_tools", "crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+evidence = ["crates/edit/src/tests.rs::form_artwork_edits_only_the_selected_placement", "crates/ui-egui/tests/editing.rs::editing_existing_form_artwork_on_the_page", "crates/automation/tests/automation.rs::editing_form_artwork_through_tools", "crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
 notes = "existing raster images and grouped Form artwork: select, drag to move, drag a corner to resize keeping proportions; Delete removes one placement. Forms include their nested content as a group; individual internal elements and inline images are not supported. See docs/editing-images.md; added images too"
 
 [[feature]]
@@ -2082,7 +2082,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["image_save"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/create/src/tests.rs::images_export_as_jpeg_unchanged_and_others_as_png"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/create/src/tests.rs::images_export_as_jpeg_unchanged_and_others_as_png"]
 notes = "right-click an image ▸ Save Image As: JPEG unchanged, others PNG"
 
 [[feature]]
@@ -2770,8 +2770,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.duplicate"]
 tools = ["page_duplicate"]
-evidence = ["crates/ui-egui/tests/pageboxes.rs::duplicate_pages_copies_the_current_page", "crates/organize/src/tests.rs::duplicate_pages_inserts_copies_after_the_last"]
-notes = "copies share fonts and images with the originals"
+evidence = ["crates/ui-egui/tests/pageboxes.rs::duplicate_pages_copies_the_current_page", "crates/ui-egui/tests/editing.rs::dragging_with_the_copy_modifier_copies_the_pages_into_the_gap", "crates/organize/src/tests.rs::duplicate_pages_inserts_copies_after_the_last", "crates/organize/src/tests.rs::duplicate_pages_at_inserts_the_copies_there", "crates/automation/tests/automation.rs::page_duplicate_at_inserts_the_copies_there"]
+notes = "copies share fonts and images with the originals; Ctrl-drag (Option on macOS) in the page grid drops the copies at the gap instead of moving the pages, with a \"+\" badge and the copies selected (#2997); page_duplicate takes `at` for where the first copy goes (left out: after the last of them)"
 
 [[feature]]
 id = "organize.reverse-pages"
@@ -2779,11 +2779,11 @@ title = "Reverse page order"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["page.reverse"]
+tools = ["page_reverse"]
+evidence = ["crates/organize/src/tests.rs::reverse_pages_reorders", "crates/organize/src/tests.rs::cannot_reverse_missing_or_fewer_than_two_pages", "crates/automation/tests/automation.rs::reversing_pages_through_tools", "crates/ui-egui/tests/editing.rs::reverse_pages_reverses_the_selection_or_else_the_whole_document"]
+notes = "Organize Pages ▸ More ▸ Reverse pages, or the command palette: two or more selected pages swap among their own positions, otherwise the whole document reverses. One undo step. Not yet: an entry in the page thumbnails' right-click menu"
 
 [[feature]]
 id = "organize.cut-copy-paste-pages"
@@ -2830,8 +2830,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.organize"]
 tools = []
-evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn"]
-notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. Missing: a slider as in Acrobat; the size is per document view and not remembered between sessions; the Pages side panel has no size control."
+evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn", "crates/ui-egui/tests/editing.rs::page_grid_size_is_remembered_for_every_document_and_restart"]
+notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. As in Acrobat, the size last chosen is one for every document and kept in the settings across restarts (also set by --grid-zoom). Missing: a slider as in Acrobat; the Pages side panel has no size control."
 
 [[feature]]
 id = "organize.split-every-n"
@@ -3427,11 +3427,11 @@ title = "Custom document properties"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info", "doc_set_info"]
+evidence = ["crates/organize/src/tests.rs::custom_document_properties_are_listed_set_removed_and_their_names_checked", "crates/organize/src/tests.rs::custom_document_properties_drop_padding_before_the_cap", "crates/render/src/inspect.rs::custom_document_properties_are_listed_apart_from_the_standard_ones", "crates/automation/tests/automation.rs::custom_document_properties_are_set_listed_and_cleared_through_the_tools", "crates/automation/tests/automation.rs::custom_document_properties_do_not_change_after_an_unrelated_edit"]
+notes = "Through the tools: doc_set_info sets or clears an /Info entry under any name the spec does not use (names checked as Acrobat does: no standard name, no empty name, no spaces or delimiters, at most 127 bytes), and doc_info lists them under custom, apart from the standard entries. Not yet: the Custom tab in Document Properties, and mirroring them into XMP (pdfx:) as Acrobat does"
 
 [[feature]]
 id = "organize.xmp-editor"
@@ -3758,8 +3758,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.attach"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::files_attach_as_comments", "crates/ui-egui/tests/comments.rs::attaching_a_file_as_a_comment", "crates/automation/tests/automation.rs::drawing_comments_through_tools"]
-notes = "push pin, paperclip, graph or tag icon; the file is embedded and listed in the Attachments panel"
+evidence = ["crates/annot/src/tests.rs::files_attach_as_comments", "crates/ui-egui/tests/comments.rs::attaching_a_file_as_a_comment", "crates/ui-egui/tests/comments.rs::an_attachment_comment_opens_its_file_from_the_page_menu", "crates/ui-egui/tests/comments.rs::an_attachment_comment_opens_its_file_from_the_card_menu", "crates/automation/tests/automation.rs::drawing_comments_through_tools"]
+notes = "push pin, paperclip, graph or tag icon; the file is embedded and listed in the Attachments panel. The comment's menu, on the page and in the Comments panel, saves the file or opens a PDF in a new tab (#2565)"
 
 [[feature]]
 id = "comment.record-audio"
@@ -4338,8 +4338,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::highlight_fields_tints_the_field_area", "crates/ui-egui/tests/view.rs::required_radio_buttons_get_a_round_red_border", "crates/ui-egui/tests/view.rs::field_highlighting_is_remembered"]
-notes = "remembered for the next document and session; required fields get a red border (round for radio buttons); the tint is drawn over the field, where Acrobat paints the highlight colour behind it"
+evidence = ["crates/ui-egui/tests/view.rs::highlight_fields_tints_the_field_area", "crates/ui-egui/tests/view.rs::required_radio_buttons_get_a_round_red_border", "crates/ui-egui/tests/view.rs::field_highlighting_is_remembered", "crates/ui-egui/tests/editing.rs::a_secured_form_shows_its_form_notice_and_its_security"]
+notes = "offered on secured forms too; remembered for the next document and session; required fields get a red border (round for radio buttons); the tint is drawn over the field, where Acrobat paints the highlight colour behind it"
 
 [[feature]]
 id = "form.field-appearance-display"
@@ -4566,8 +4566,8 @@ milestone = "M6"
 status = "shipped"
 commands = []
 tools = ["form_fill"]
-evidence = ["crates/ui-egui/tests/forms.rs::date_fields_offer_a_calendar"]
-notes = "a month calendar under date fields; the pick is written in the field's own date format"
+evidence = ["crates/ui-egui/tests/forms.rs::date_fields_offer_a_calendar", "crates/ui-egui/tests/forms.rs::the_calendar_follows_a_complete_date_typed_while_it_is_open"]
+notes = "a month calendar under date fields; the pick is written in the field's own date format; it opens on the field's date and moves to a whole date typed while it is open, staying on the month its arrows turned to otherwise"
 
 [[feature]]
 id = "form.auto-complete"
@@ -4626,8 +4626,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.import_data"]
 tools = ["doc_import_data"]
-evidence = ["crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/xfdf/src/tests.rs::fdf_round_trips_values_and_comments", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text"]
-notes = "XFDF, FDF; values go through formats and validation; read-only fields take data"
+evidence = ["crates/xfdf/src/tests.rs::xfdf_import_keeps_text_around_xml_comments_and_instructions", "crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/xfdf/src/tests.rs::fdf_round_trips_values_and_comments", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text"]
+notes = "XFDF, FDF; XFDF text survives XML comments and processing instructions; values go through formats and validation; read-only fields take data"
 
 [[feature]]
 id = "form.export-data"
@@ -4650,8 +4650,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.export_data", "form.import_data"]
 tools = ["doc_export_data", "doc_import_data"]
-evidence = ["crates/xfdf/src/tests.rs::form_data_as_xml_csv_and_text", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text"]
-notes = "Acrobat's XML (xfdf:original), CSV, tab-delimited"
+evidence = ["crates/xfdf/src/tests.rs::form_data_as_xml_csv_and_text", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xml_form_import_preserves_text_around_comments_and_instructions"]
+notes = "Acrobat's XML (xfdf:original), CSV, tab-delimited; Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Nested-element and XFA interpretation remain outside this flat exchange format."
 
 [[feature]]
 id = "form.merge-to-spreadsheet"
@@ -4866,8 +4866,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props"]
-evidence = ["crates/forms/src/tests.rs::properties_rename_and_delete", "crates/automation/tests/automation.rs::preparing_a_form_through_tools", "crates/forms/src/tests.rs::options_tab_flags_alignment_and_defaults", "crates/ui-egui/tests/prepare.rs::options_tab_sets_flags_alignment_and_defaults", "crates/automation/tests/form_bulk.rs::bulk_options_apply_per_field_and_refuse_an_invalid_comb_atomically"]
-notes = "text: alignment, default, multi-line, scroll, rich text flag, limit, password, file selection, spell check, comb; choices: items, default, sort, custom text, multiple selection, commit immediately; check boxes and radios: checked by default, radios in unison. Shared GUI offers applicable text/choice flags, alignment, text limits and check styles; choices/defaults remain individual GUI edits"
+evidence = ["crates/forms/src/tests.rs::button_caption_preserves_other_widgets_and_shared_dictionaries", "crates/ui-egui/tests/prepare.rs::button_label_is_editable_without_renaming_the_field", "crates/automation/tests/button_caption.rs::button_caption_can_be_changed_after_creation", "crates/forms/src/tests.rs::button_caption_rejects_wrong_type_and_index_before_mutation", "crates/forms/src/tests.rs::properties_rename_and_delete", "crates/automation/tests/automation.rs::preparing_a_form_through_tools", "crates/forms/src/tests.rs::options_tab_flags_alignment_and_defaults", "crates/ui-egui/tests/prepare.rs::options_tab_sets_flags_alignment_and_defaults", "crates/automation/tests/form_bulk.rs::bulk_options_apply_per_field_and_refuse_an_invalid_comb_atomically"]
+notes = "push buttons: per-widget normal label independent of the field name, including clearing and save/reopen; icon-only layout and existing Helvetica limits retained, rollover/down labels and icon layout editing remain unavailable; text: alignment, default, multi-line, scroll, rich text flag, limit, password, file selection, spell check, comb; choices: items, default, sort, custom text, multiple selection, commit immediately; check boxes and radios: checked by default, radios in unison. Shared GUI offers applicable text/choice flags, alignment, text limits and check styles; choices/defaults remain individual GUI edits"
 
 [[feature]]
 id = "form.props-actions"
@@ -5034,8 +5034,8 @@ milestone = "M6"
 status = "partial"
 commands = ["form.detect", "form.prepare"]
 tools = ["form_detect_fields"]
-evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
-notes = "Underscore runs, rules, empty boxes and small squares (check boxes); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Not yet: comb boxes, tables of cells, scanned forms (needs OCR first), radio groups."
+evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/forms/src/tests.rs::detection_makes_a_row_of_touching_cells_one_comb_field", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/engine/src/tests.rs::detecting_comb_boxes_adds_one_comb_field_per_row", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/automation/tests/automation.rs::detecting_comb_boxes_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
+notes = "Underscore runs, rules, empty boxes, small squares (check boxes) and rows of two or more touching cells of one size (one comb text field per row, the comb flag set and the character limit the number of cells; drawn forms only); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Not yet: comb rows read from a scan, tables of cells, scanned forms (needs OCR first), radio groups."
 
 [[feature]]
 id = "form.auto-name-fields"
@@ -6910,8 +6910,8 @@ milestone = "M10"
 status = "partial"
 commands = ["export.docx"]
 tools = ["doc_export_office"]
-evidence = ["crates/export/src/lib.rs::docx_is_a_word_package", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/engine/src/tests.rs::exporting_office_files_keeps_text_colour", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::word_opens_text_with_control_characters_and_long_pages", "crates/engine/src/tests.rs::exporting_office_files_keeps_images", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
-notes = "Flowing Word document: paragraphs, Heading 1/2 from larger text, bold/italic, text colour (fill as sRGB; gray/CMYK converted naively, colour spaces via cs/sc read as black), images inline, page breaks, and detected tables with spans/empty cells; checked with macOS textutil and opened in Microsoft Word (Windows). Characters XML forbids are dropped; the page size stays within Word's 22 in. Not yet: columns, fonts, colour per run within a paragraph, exact layout mode."
+evidence = ["crates/export/src/lib.rs::docx_is_a_word_package", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/engine/src/tests.rs::exporting_office_files_keeps_text_colour", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::a_link_inside_a_sentence_is_not_a_table_column", "crates/export/src/lib.rs::sentences_that_run_on_into_links_are_not_a_table", "crates/export/src/lib.rs::a_superscript_beside_a_number_keeps_its_table", "crates/export/src/lib.rs::word_opens_text_with_control_characters_and_long_pages", "crates/engine/src/tests.rs::exporting_office_files_keeps_images", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
+notes = "Flowing Word document: paragraphs, Heading 1/2 from larger text, bold/italic, text colour (fill as sRGB; gray/CMYK converted naively, colour spaces via cs/sc read as black), images inline, page breaks, and detected tables with spans/empty cells (a row whose blocks run on into each other, such as a link inside a sentence or a superscript, or overlap as a paragraph's lines do, is text and not a table row, #2806); checked with macOS textutil and opened in Microsoft Word (Windows). Characters XML forbids are dropped; the page size stays within Word's 22 in. Not yet: columns, fonts, colour per run within a paragraph, exact layout mode."
 
 [[feature]]
 id = "create.export-rtf"
@@ -7006,8 +7006,8 @@ milestone = "M10"
 status = "partial"
 commands = ["export.html"]
 tools = ["doc_export_office"]
-evidence = ["crates/export/src/lib.rs::html_has_headings_paragraphs_and_images_in_order", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
-notes = "Single HTML file with headings, paragraphs (with text colour), inline images, and detected tables with spans/empty cells. Not yet: multi-page folder output, CSS from fonts."
+evidence = ["crates/export/src/lib.rs::html_has_headings_paragraphs_and_images_in_order", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::a_link_inside_a_sentence_is_not_a_table_column", "crates/export/src/lib.rs::sentences_that_run_on_into_links_are_not_a_table", "crates/export/src/lib.rs::a_superscript_beside_a_number_keeps_its_table", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
+notes = "Single HTML file with headings, paragraphs (with text colour), inline images, and detected tables with spans/empty cells (a row whose blocks run on into each other, such as a link inside a sentence or a superscript, or overlap as a paragraph's lines do, is text and not a table row, #2806). Not yet: multi-page folder output, CSS from fonts."
 
 [[feature]]
 id = "create.export-text"
@@ -7914,8 +7914,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::size_modes"]
-notes = "fit, actual size, shrink oversized, custom %"
+evidence = ["crates/print/src/tests.rs::size_modes", "crates/print/src/tests.rs::architectural_sheets_preserve_full_scale", "crates/automation/tests/automation.rs::architectural_and_iso_papers_through_tools", "crates/ui-egui/tests/print.rs::architectural_page_can_be_matched_at_100_percent"]
+notes = "fit, actual size, shrink oversized, custom %; ARCH A/B/C/D/E1/E, ANSI C/D/E, ISO A0/A1/A2 and A6 presets; Match page at 100% matches the current page to a standard sheet. PDF scale shows the previewed source-to-sheet transform, not calibrated physical output; driver substitution/scaling remains possible"
 
 [[feature]]
 id = "print.paper-source-by-size"
@@ -7938,8 +7938,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::the_windows_job_is_the_environment_of_the_print_script", "crates/print/src/tests.rs::the_print_script_renders_the_job_and_reaches_the_spooler"]
-notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting"
+evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::the_windows_job_is_the_environment_of_the_print_script", "crates/print/src/tests.rs::the_print_script_renders_the_job_and_reaches_the_spooler", "crates/ui-egui/tests/print.rs::the_preview_switches_two_sided_printing_on_and_off"]
+notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting; the preview's \"Print both sides\" button switches it on and off (flip on long edge), and stays off for cut and stack"
 
 [[feature]]
 id = "print.n-up"

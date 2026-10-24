@@ -4,7 +4,7 @@
 
 Every asset PdfCraft includes, bundles or uses to build its published material, with its author, source and licence. The policy is in [AGENTS.md](AGENTS.md) §1. The machine-readable list, with SHA-256 hashes, is [ATTRIBUTION.toml](ATTRIBUTION.toml). Licence texts are kept beside the assets and summarised in [NOTICE](NOTICE).
 
-## In this repository (245)
+## In this repository (246)
 
 | Asset | Title | Author | Licence | Source | Used for |
 |---|---|---|---|---|---|
@@ -253,6 +253,7 @@ Every asset PdfCraft includes, bundles or uses to build its published material, 
 | `crates/sign/tests/data/x509-rsa-sha1.pdf` | One-page PDF with a legacy adbe.x509.rsa_sha1 signature by the RSA test key | PdfCraft contributors | MIT OR Apache-2.0 | Contributor-original: hand-written PDF objects; signature made with `openssl dgst -sha1 -sign` over its byte ranges (see crates/sign/tests/data/README.md) | Signature validation tests (crates/sign/tests/pdf.rs): the legacy adbe.x509.rsa_sha1 format |
 | `docs/images/linkco-home-dashboard.png` | Linkco PDF Editor screenshot: Home dashboard and Recommended Tools | Al Rawabet Commercial Services & Contracting Company W.L.L. | MIT OR Apache-2.0 | this repository | README: Home dashboard and Recommended Tools screenshot |
 | `docs/images/linkco-organize-pages.png` | Linkco PDF Editor screenshot: Organize pages view | Al Rawabet Commercial Services & Contracting Company W.L.L. | MIT OR Apache-2.0 | this repository | README: Organize pages screenshot |
+| `crates/sign/tests/data/chain-legacy.p12` | Legacy PKCS #12 test certificate chain | PdfCraft contributors | MIT OR Apache-2.0 | Contributor-original: re-export of crates/sign/tests/data/chain.p12 using OpenSSL 3; recipe in crates/sign/tests/data/README.md | Test-only keys, password test; ignored macOS Keychain issuer-chain regression test |
 
 ## Compiled in through dependencies (6)
 

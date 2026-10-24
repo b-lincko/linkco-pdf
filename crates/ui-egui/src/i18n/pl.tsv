@@ -2206,4 +2206,16 @@ key	Space	Spacja
 	Driver: {driver}	Sterownik: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Stan drukarki: {status}. Przed drukowaniem sprawdź połączenie z drukarką.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Nie znaleziono żadnej drukarki. Włącz drukarkę i podłącz ją, a następnie wybierz „Sprawdź ponownie”. Nadal możesz zapisać jako PDF.
+	Print both sides	Drukuj dwustronnie
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Drukuj na obu stronach arkusza, obracając go wzdłuż dłuższego boku, jeśli drukarka to obsługuje.
+	Printing on both sides of the sheet. Click to print on one side only.	Drukowanie na obu stronach arkusza. Kliknij, aby drukować tylko na jednej stronie.
+	Match page at 100%	Dopasuj stronę przy 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Drukuj w 100% na papierze o tym samym rozmiarze, nie zmieniając zakresu stron.
+	PDF page: {w} × {h} in	Strona PDF: {w} × {h} cala
+	PDF scale: {scale}%	Skala PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Skala, w jakiej jest rysowana strona; sterownik drukarki nadal może zamienić papier lub zmniejszyć zadanie.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	„Tnij i układaj” drukuje arkusze jednostronne. Aby drukować dwustronnie, wybierz inny porządek stron.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Przycina każdą stronę do zadrukowanego obszaru, obraca ją pionowo i dopasowuje do arkusza bez rozciągania. Jedna etykieta na arkusz.
+	Turn upside down (180°)	Obróć do góry nogami (180°)
+	the name is not a plain file name	nazwa nie jest zwykłą nazwą pliku
 	Developer: {name}	Programista: {name}

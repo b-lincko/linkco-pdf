@@ -2175,4 +2175,16 @@ key	Space	空格
 	Driver: {driver}	驱动程序：{driver}
 	Printer status: {status}. Check the printer's connection before printing.	打印机状态：{status}。打印前请检查打印机的连接。
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	未找到打印机。请打开打印机并连接，然后选择“重新检查”。你仍可以另存为 PDF。
+	Print both sides	双面打印
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	在纸张两面打印，若打印机支持则沿长边翻转。
+	Printing on both sides of the sheet. Click to print on one side only.	正在纸张两面打印。单击可只打印一面。
+	Match page at 100%	匹配页面并设为 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	以 100% 在相同尺寸的纸张上打印，不改变页面范围。
+	PDF page: {w} × {h} in	PDF 页面：{w} × {h} 英寸
+	PDF scale: {scale}%	PDF 缩放：{scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	页面的绘制比例；打印机驱动程序仍可能更换纸张或缩小打印作业。
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	“剪切并堆叠”打印单面纸张。若要双面打印，请选择其他页面顺序。
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	将每页裁切到其打印区域，转正后不拉伸地适合纸张。每张纸一个标签。
+	Turn upside down (180°)	上下颠倒 (180°)
+	the name is not a plain file name	名称不是单纯的文件名
 	Developer: {name}	开发者：{name}

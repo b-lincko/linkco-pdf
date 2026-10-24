@@ -112,6 +112,21 @@ fn shift_click_selects_a_range_and_moves_it() {
 }
 
 #[test]
+fn reverse_pages_reverses_the_selection_or_else_the_whole_document() {
+    let mut h = organize(4);
+    assert!(h.state_mut().execute("page.reverse"));
+    h.run_steps(3);
+    assert_eq!(page_texts(h.state()), ["Page 4", "Page 3", "Page 2", "Page 1"]);
+    h.get_by_label("Page 1").click();
+    h.run_steps(1);
+    h.get_by_label("Page 3").click_modifiers(Modifiers::COMMAND);
+    h.run_steps(2);
+    assert!(h.state_mut().execute("page.reverse"));
+    h.run_steps(3);
+    assert_eq!(page_texts(h.state()), ["Page 2", "Page 3", "Page 4", "Page 1"]);
+}
+
+#[test]
 fn command_click_toggles_and_rotation_applies_to_selection() {
     let mut h = organize(3);
     h.get_by_label("Page 1").click();
@@ -254,6 +269,28 @@ fn insert_blank_page_after_selection() {
     let app = h.state();
     let info = &app.session.get(app.views[0].id).unwrap().info;
     assert_eq!((info.pages[1].width, info.pages[1].height), (200.0, 300.0), "matches the neighbouring page");
+}
+
+#[test]
+fn save_as_to_a_new_file_drops_earlier_revisions() {
+    // #2165: Save As appended a revision, so a deleted page stayed in the new file's first one.
+    let out = temp_path("save-as-clean.pdf");
+    let mut h = organize(3);
+    h.get_by_label("Page 2").click();
+    h.run_steps(2);
+    h.get_by_label_contains("1 page selected");
+    h.get_by_label("Delete pages (Delete)").click();
+    h.run_steps(3);
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    assert!(h.state_mut().save_active(pdfcraft_ui_egui::SaveTarget::As));
+    let saved = std::fs::read(&out).expect("file written");
+    let count = |needle: &[u8]| saved.windows(needle.len()).filter(|w| *w == needle).count();
+    assert_eq!(count(b"%%EOF"), 1, "one revision only");
+    assert_eq!((count(b"(Page 1)"), count(b"(Page 2)")), (1, 0), "the deleted page's content is gone");
+    assert!(!dirty(&h));
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().bytes.as_slice(), saved.as_slice());
+    assert_eq!(page_texts(h.state()), ["Page 1", "Page 3"]);
+    let _ = std::fs::remove_file(out);
 }
 
 #[test]
@@ -1334,6 +1371,39 @@ fn page_grid_zooms_with_its_buttons_keys_and_pinch() {
     assert!(!dirty(&h), "zooming is not an edit");
 }
 
+/// As in Acrobat, Organize pages keeps the size last chosen: every document's grid opens at it,
+/// and so does the next start of the app.
+#[test]
+fn page_grid_size_is_remembered_for_every_document_and_restart() {
+    let mut h = organize(3);
+    h.get_by_label("Larger pages").click();
+    h.run_steps(3);
+    assert_eq!(grid_zoom(&h), 1.25);
+    h.state_mut().open_bytes("other.pdf", None, fixture(2)).expect("second fixture opens");
+    h.state_mut().set_option("organize", "on").unwrap();
+    h.run_steps(4);
+    let other = h.state().active.expect("the new document is active");
+    assert_ne!(other, 0);
+    assert_eq!(h.state().views[other].grid_zoom(), 1.25, "the other document");
+    let settings = h.state().persist();
+    let h = harness(3, move |app| {
+        app.restore(&settings);
+        app.set_option("organize", "on").unwrap();
+    });
+    assert_eq!(grid_zoom(&h), 1.25, "after a restart");
+}
+
+#[test]
+fn a_damaged_remembered_page_grid_size_is_ignored_or_clamped() {
+    let mut app = PdfCraftApp::new();
+    app.restore(r#"{"organize_zoom": "huge"}"#);
+    assert_eq!(app.organize_zoom, 1.0);
+    app.restore(r#"{"organize_zoom": 40.0}"#);
+    assert_eq!(app.organize_zoom, 3.0);
+    app.restore(r#"{"organize_zoom": -2}"#);
+    assert_eq!(app.organize_zoom, 0.5);
+}
+
 #[test]
 fn zoomed_pages_in_view_are_rendered_at_the_size_drawn() {
     // A long document: sharpness must not depend on how many pages there are.
@@ -1476,7 +1546,12 @@ fn protected(user: &str, owner: &str, permissions: i32) -> Vec<u8> {
 }
 
 fn protected_with(algorithm: pdfcraft_cos::Algorithm, user: &str, owner: &str, permissions: i32) -> Vec<u8> {
-    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(fixture(2))).unwrap();
+    encrypted(fixture(2), algorithm, user, owner, permissions)
+}
+
+/// `bytes` rewritten encrypted.
+fn encrypted(bytes: Vec<u8>, algorithm: pdfcraft_cos::Algorithm, user: &str, owner: &str, permissions: i32) -> Vec<u8> {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap();
     doc.set_encryption(&pdfcraft_cos::NewEncryption {
         algorithm,
         user_password: user,
@@ -1487,6 +1562,24 @@ fn protected_with(algorithm: pdfcraft_cos::Algorithm, user: &str, owner: &str, p
     })
     .unwrap();
     pdfcraft_cos::write_full(&doc, &Default::default()).unwrap()
+}
+
+/// A secured form still says it is one and offers Highlight fields: the security notice joins
+/// the form's instead of replacing it (#3404).
+#[test]
+fn a_secured_form_shows_its_form_notice_and_its_security() {
+    // Changing and assembling withheld, filling allowed (as government forms are often set).
+    let bytes = encrypted(include_bytes!("data/form.pdf").to_vec(), pdfcraft_cos::Algorithm::Aes256, "", "owner", -1036);
+    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("form.pdf", None, bytes).unwrap();
+        app
+    });
+    h.run_steps(4);
+    h.get_by_label_contains("interactive form fields. This document is secured. Some changes are restricted by its security settings.");
+    h.get_by_label("Highlight fields");
+    h.get_by_label("Security settings");
 }
 
 #[test]
@@ -1643,6 +1736,65 @@ fn dragging_thumbnails_reorders_pages() {
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Move page"));
     let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
     assert_eq!(sel, vec![2], "the moved page stays selected");
+}
+
+/// Drag the page under `from` to `to` with `modifiers` held for the whole gesture: modifiers are
+/// input state, so the pointer events carry them too.
+fn page_drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2, modifiers: Modifiers) {
+    h.event(egui::Event::ModifiersChanged(modifiers));
+    h.run_steps(1);
+    h.hover_at(from);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers });
+    h.run_steps(1);
+    for k in 1..=5 {
+        h.hover_at(from + (to - from) * (k as f32 / 5.0));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers });
+    h.run_steps(4);
+    h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(1);
+}
+
+/// The copy modifier of the OS the app reports: Option on macOS, Ctrl elsewhere. That is the OS
+/// the gesture itself reads, so a Mac browser — a wasm build, where `cfg!(target_os = "macos")` is
+/// false — is covered by asking the context rather than the target.
+fn copy_modifiers(h: &Harness<'static, PdfCraftApp>) -> Modifiers {
+    if h.ctx.os() == egui::os::OperatingSystem::Mac { Modifiers::ALT } else { Modifiers::CTRL }
+}
+
+#[test]
+fn dragging_with_the_copy_modifier_copies_the_pages_into_the_gap() {
+    let mut h = organize(3);
+    let before = page_texts(h.state());
+    let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
+    let (from, to) = (grab(&h, "Page 1").center(), grab(&h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
+    let modifiers = copy_modifiers(&h);
+    page_drag(&mut h, from, to, modifiers);
+    // The original stays first; a copy of page 1 lands after page 3 (#2997).
+    let after = page_texts(h.state());
+    assert_eq!(after, vec![before[0].clone(), before[1].clone(), before[2].clone(), before[0].clone()], "{after:?}");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Duplicate page"));
+    let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
+    assert_eq!(sel, vec![3], "the copy is selected");
+}
+
+/// macOS is not only `cfg!(target_os = "macos")`: the wasm build runs in a Mac browser, where the
+/// cfg is false but the context says Mac. The gesture must follow the context, or Option-drag
+/// there moves the pages instead of copying them.
+#[test]
+fn option_copies_and_ctrl_moves_when_the_context_reports_macos() {
+    let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
+    let points = |h: &Harness<'static, PdfCraftApp>| (grab(h, "Page 1").center(), grab(h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
+
+    // Ctrl is not the copy modifier on macOS, so that drag moves the page.
+    let mut h = organize(3);
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    let before = page_texts(h.state());
+    let (from, to) = points(&h);
+    page_drag(&mut h, from, to, Modifiers::CTRL);
+    assert_eq!(page_texts(h.state()), vec![before[1].clone(), before[2].clone(), before[0].clone()], "Ctrl moves on macOS");
 }
 
 #[test]

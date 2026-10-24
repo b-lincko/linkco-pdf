@@ -43,6 +43,21 @@ ignore = [
     # private-key operations use aws-lc-rs on native targets and are refused in the browser
     # (ADR-0009). Revisit when a fixed `rsa` ships.
     { id = "RUSTSEC-2023-0071", reason = "rsa is used for verification only (ADR-0009)" },
+    # zvariant, zbus_names and zvariant_derive are unmaintained (no vulnerability, and no fixed
+    # release to move to). They reach the tree as the D-Bus stack that `pdfcraft-platform` pins
+    # for single instance (#282) and behind `accesskit_unix` -> `atspi`, which is Linux
+    # accessibility only. Revisit when the accesskit/zbus chain moves to a maintained successor.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained; Linux a11y stack via accesskit_unix" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; Linux a11y stack via accesskit_unix" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained; Linux a11y stack via accesskit_unix" },
+    # `ring` is unmaintained, with no vulnerability and no successor release to move to. It is the
+    # crypto provider behind rustls (Help > Check for updates), pinned through rustls-webpki.
+    # Revisit if rustls moves to aws-lc-rs on every target.
+    { id = "RUSTSEC-2025-0007", reason = "ring unmaintained; crypto provider of our rustls stack" },
+    # xml-rs is unmaintained, with no vulnerability. It reaches the tree only as a build dependency
+    # of gl_generator (the OpenGL bindings generator), so it runs at compile time and ships in no
+    # binary.
+    { id = "RUSTSEC-2022-0048", reason = "xml-rs unmaintained; build-time only, via gl_generator" },
 ]
 
 # egui's default UI fonts (Ubuntu-Light, Hack, emoji-icon-font): font licences on the AGENTS.md

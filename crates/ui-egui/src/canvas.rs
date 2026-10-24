@@ -1505,6 +1505,14 @@ pub(crate) fn pick_preview_texture(have: &[(usize, egui::TextureId)], want: f32)
         .map(|(_, id)| *id)
 }
 
+/// The scroll offset that puts `point` (content coordinates) at `rel` in the viewport, kept within
+/// the content as egui keeps it. egui clamps only after drawing, so an offset past the end showed
+/// the page misplaced for a frame and then jumped (zooming out beside a page that fits).
+fn anchored_scroll(point: Pos2, rel: Vec2, content: Vec2, viewport: Vec2) -> Vec2 {
+    let max = vec2((content.x - viewport.x).max(0.0), (content.y - viewport.y).max(0.0));
+    vec2((point.x - rel.x).clamp(0.0, max.x), (point.y - rel.y).clamp(0.0, max.y))
+}
+
 /// The request tag for a raster at `scale`: equal tags mean the same scale (to 1/65536).
 fn scale_tag(scale: f32) -> u64 {
     (f64::from(scale) * 65536.0).round() as u64
@@ -1644,11 +1652,20 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
         view.open_find();
     }
+    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
+    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
+    // ⌘G / ⇧⌘G step through the matches from the find field too, as in Acrobat and Preview
+    // (#2669): ahead of the text-input check, but only while there is a search to step.
+    if view.find.is_some() {
+        if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
+            view.find_step(false);
+        } else if pressed(cmd(Key::G)) {
+            view.find_step(true);
+        }
+    }
     if ctx.egui_wants_keyboard_input() {
         return;
     }
-    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
-    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
     // Rotation first: egui matches ⌘+ loosely with respect to Shift.
     if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus))
         || pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Equals))
@@ -1688,11 +1705,6 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     if pressed(cmd(Key::Num2)) {
         view.fit = Fit::Width;
         view.goto = Some((view.current, 0.0));
-    }
-    if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
-        view.find_step(false);
-    } else if pressed(cmd(Key::G)) {
-        view.find_step(true);
     }
     if pressed(cmd(Key::OpenBracket)) {
         view.view_history(false);
@@ -1805,9 +1817,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     // No dialog, close prompt or palette over the page: only then does page input count.
     let unobstructed = !app.modal_open() && !app.palette_open;
+    let organize_zoom = app.organize_zoom;
     let view = &mut app.views[index];
     if view.organize {
+        // One remembered grid size for every document, kept in the settings.
+        view.set_grid_zoom(organize_zoom);
         organize_grid(view, info, doc.allows_assembly(), doc.dirty, unobstructed, ui, &t);
+        app.organize_zoom = view.grid_zoom();
         return;
     }
 
@@ -1936,7 +1952,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((page, fx, fy, rel)) = view.zoom_anchor.take() {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
-        scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
+        scroll = scroll.scroll_offset(anchored_scroll(point, rel, vec2(content_w, content_h), avail.size()));
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
@@ -3069,9 +3085,8 @@ fn notices(
     let mut open_security = false;
     let mut open_repairs = false;
     let mut toggled = None;
-    let msg = if secured {
-        Some(("lock", tl!("This document is secured. Some changes are restricted by its security settings.").to_string(), false))
-    } else if let Some(x) = xfa {
+    // What the document is as a form, if it is one: what the bar says first, secured or not.
+    let form = if let Some(x) = xfa {
         let lang = crate::i18n::current();
         let pages = crate::i18n::trn(lang, x.pages as u64, "{n} page", "{n} pages");
         let fields = crate::i18n::trn(lang, x.fields as u64, "{n} field", "{n} fields");
@@ -3102,6 +3117,19 @@ fn notices(
             crate::i18n::fmt(tl!("This document contains {n} interactive form fields."), &[("n", &info.fields.len().to_string())]),
             true,
         ))
+    } else {
+        None
+    };
+    let msg = if secured {
+        // A secured form still says what it is, and keeps Highlight fields: the security
+        // sentence follows the form's.
+        let security = tl!("This document is secured. Some changes are restricted by its security settings.");
+        Some(match form {
+            Some((icon, text, fields)) => (icon, format!("{text} {security}"), fields),
+            None => ("lock", security.to_string(), false),
+        })
+    } else if form.is_some() {
+        form
     } else if repaired {
         Some(("bandage", tl!("This file was damaged and has been repaired. Saving keeps the repaired version.").to_string(), false))
     } else if !info.warnings.is_empty() {
@@ -3460,6 +3488,15 @@ pub(crate) fn drop_gap(cells: &[(usize, Rect)], p: Pos2) -> Option<usize> {
     Some(if p.x < r.center().x { *i } else { i + 1 })
 }
 
+/// Ctrl (Option on macOS) held when a page drag drops copies the dragged pages into the gap
+/// instead of moving them, as Acrobat's Organize Pages does.
+///
+/// The OS comes from the context, not `cfg!`: the wasm build runs on macOS too, where
+/// `cfg!(target_os = "macos")` is false, so Option has to copy there as well.
+fn copy_modifier(ctx: &egui::Context, m: &egui::Modifiers) -> bool {
+    if crate::commands::mac_shortcuts(ctx) { m.alt } else { m.ctrl }
+}
+
 /// A "+" on a gap of the page grid: insert files there. Returns whether it was clicked.
 fn gap_button(ui: &mut egui::Ui, gap: usize, at: Pos2, height: f32, label: String, t: &Tokens) -> bool {
     let resp = ui.interact(Rect::from_center_size(at, Vec2::splat(22.0)), ui.id().with(("org-gap", gap)), Sense::click());
@@ -3617,6 +3654,8 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
             }
         }
         // While dragging: the gap the pages would go to, drawn as a bar.
+        // Ctrl (Option on macOS) held over the drop copies the pages; see #2997.
+        let copying = copy_modifier(ui.ctx(), &ui.input(|i| i.modifiers));
         if let (Some(pages), Some(p)) = (view.org_drag.clone(), ui.input(|i| i.pointer.hover_pos())) {
             if let Some(gap) = drop_gap(&cells, p) {
                 let x = match cells.iter().find(|(i, _)| *i == gap) {
@@ -3625,8 +3664,18 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 };
                 let row = cells.iter().find(|(i, _)| *i == gap).or(cells.last()).map(|(_, r)| r.y_range()).unwrap_or(egui::Rangef::new(0.0, 0.0));
                 ui.painter().line_segment([pos2(x, row.min + 10.0), pos2(x, row.max - 10.0)], Stroke::new(3.0, t.accent));
+                let mut text_at = p + vec2(14.0, 14.0);
+                if copying {
+                    // A "+" by the pointer: this drop copies the pages, it doesn't move them.
+                    let badge = p + vec2(12.0, 12.0);
+                    ui.painter().circle(badge, 9.0, t.accent, Stroke::new(1.0, t.accent));
+                    let ink = Stroke::new(1.5, Color32::WHITE);
+                    ui.painter().line_segment([badge - vec2(4.0, 0.0), badge + vec2(4.0, 0.0)], ink);
+                    ui.painter().line_segment([badge - vec2(0.0, 4.0), badge + vec2(0.0, 4.0)], ink);
+                    text_at.x += 18.0;
+                }
                 ui.painter().text(
-                    p + vec2(14.0, 14.0),
+                    text_at,
                     Align2::LEFT_TOP,
                     if pages.len() == 1 { tl!("1 page").to_string() } else { crate::i18n::fmt(tl!("{n} pages"), &[("n", &pages.len().to_string())]) },
                     theme::medium(12.0),
@@ -3636,13 +3685,19 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
             if drop {
                 view.org_drag = None;
                 if let Some(gap) = drop_gap(&cells, p) {
-                    // `to` counts positions without the moving pages.
-                    let to = gap - pages.iter().filter(|x| **x < gap).count();
-                    let first = pages[0];
-                    let contiguous = pages.windows(2).all(|w| w[1] == w[0] + 1);
-                    if !(contiguous && to == first) {
-                        view.pending_edit = Some(Edit::MovePages { pages: pages.clone(), to });
-                        view.selected = (to..to + pages.len()).collect();
+                    if copying {
+                        // The copies land at the gap as it is: nothing leaves its place.
+                        view.pending_edit = Some(Edit::DuplicatePages { pages: pages.clone(), at: Some(gap) });
+                        view.selected = (gap..gap + pages.len()).collect();
+                    } else {
+                        // `to` counts positions without the moving pages.
+                        let to = gap - pages.iter().filter(|x| **x < gap).count();
+                        let first = pages[0];
+                        let contiguous = pages.windows(2).all(|w| w[1] == w[0] + 1);
+                        if !(contiguous && to == first) {
+                            view.pending_edit = Some(Edit::MovePages { pages: pages.clone(), to });
+                            view.selected = (to..to + pages.len()).collect();
+                        }
                     }
                 }
             }
@@ -3717,6 +3772,19 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoom_anchor_scroll_stays_within_the_content() {
+        let (content, viewport) = (vec2(1000.0, 2000.0), vec2(800.0, 600.0));
+        // Past the end: clamped to the maximum (200, 1400), not left for egui to snap back.
+        assert_eq!(anchored_scroll(pos2(900.0, 1900.0), vec2(0.0, 0.0), content, viewport), vec2(200.0, 1400.0));
+        // Before the start.
+        assert_eq!(anchored_scroll(pos2(10.0, 10.0), vec2(300.0, 300.0), content, viewport), Vec2::ZERO);
+        // Inside: unchanged.
+        assert_eq!(anchored_scroll(pos2(150.0, 800.0), vec2(100.0, 100.0), content, viewport), vec2(50.0, 700.0));
+        // Content smaller than the viewport: no scrolling.
+        assert_eq!(anchored_scroll(pos2(400.0, 400.0), Vec2::ZERO, vec2(500.0, 500.0), viewport), vec2(0.0, 0.0));
+    }
 
     #[test]
     fn rendered_rasters_become_texture_images_without_a_copy() {

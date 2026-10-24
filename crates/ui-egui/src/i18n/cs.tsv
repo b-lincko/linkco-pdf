@@ -51,6 +51,20 @@
 	Close all	Zavřít vše
 	Revert	Vrátit k uložené verzi
 	Print…	Tisk…
+	Print both sides	Tisk na obě strany
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Tisk na obě strany listu s převrácením podél delší hrany, pokud to tiskárna umí.
+	Printing on both sides of the sheet. Click to print on one side only.	Tisk na obě strany listu. Kliknutím přepnete na tisk pouze z jedné strany.
+	Match page at 100%	Papír podle stránky, 100 %
+	Print at 100% on the paper of the same size, leaving the page range alone.	Tisk při 100 % na papír stejné velikosti, beze změny rozsahu stran.
+	PDF page: {w} × {h} in	Stránka PDF: {w} × {h} in
+	PDF scale: {scale}%	Měřítko PDF: {scale} %
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Měřítko, ve kterém je stránka kreslena; ovladač tiskárny může přesto nahradit papír nebo zmenšit tisk.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	„Ořezání a skládání“ tiskne jednostranné listy. Pro oboustranný tisk zvolte jiné pořadí stran.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Ořízne každou stránku na potištěnou oblast, otočí ji svisle a přizpůsobí listu bez deformace. Jeden štítek na list.
+	Field names with + - * / and parentheses; put \\ before spaces in names.	Názvy polí s + - * / a závorkami; mezery v názvech uvozujte znakem \\.
+	This page couldn't be displayed.\n{e}	Tuto stránku nelze zobrazit.\n{e}
+	Turn upside down (180°)	Otočit vzhůru nohama (180°)
+	the name is not a plain file name	název není prostý název souboru
 	Document properties…	Vlastnosti dokumentu…
 	Export to image…	Exportovat jako obrázek…
 	Reduce file size…	Zmenšit velikost souboru…
@@ -93,6 +107,7 @@
 	Insert blank page	Vložit prázdnou stránku
 	Rotate pages…	Otočit stránky…
 	Duplicate pages	Duplikovat stránky
+	Reverse pages	Obrátit pořadí stránek
 	Crop pages	Oříznout stránky
 	Set page boxes…	Nastavit rámečky stránek…
 	Insert pages from file…	Vložit stránky ze souboru…

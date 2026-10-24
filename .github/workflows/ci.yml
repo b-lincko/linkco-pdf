@@ -111,9 +111,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          command: check
+          key: cargo-deny
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.20.2 --locked
+      - name: Audit dependencies
+        shell: bash
+        run: .github/scripts/run-annotated.sh "dependency audit" cargo deny --all-features check
 
   fuzz:
     name: fuzz (mutation, 15 min)
