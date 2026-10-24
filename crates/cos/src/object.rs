@@ -89,12 +89,14 @@ const INDEX_FROM: usize = 32;
 
 /// An ordered dictionary.
 #[derive(Clone, Default)]
+// The key index is a `Box<HashMap<..>>` on purpose: it is absent for every dictionary below
+// `INDEX_FROM` entries, which is most of them, and boxing keeps the struct itself small.
+#[allow(clippy::redundant_allocation)]
 pub struct Dict {
     entries: Vec<(Name, Object)>,
     /// Key to position in `entries`, kept once the dictionary reaches [`INDEX_FROM`] entries.
-    // Boxed to keep `Dict` itself small: most dictionaries stay below [`INDEX_FROM`] entries and
-    // so never carry an index at all.
-    #[allow(clippy::redundant_allocation)]
+    /// Boxed to keep `Dict` itself small: most dictionaries stay below [`INDEX_FROM`] entries and
+    /// so never carry an index at all.
     index: Option<Box<std::collections::HashMap<Name, usize>>>,
 }
 
