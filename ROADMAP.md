@@ -135,6 +135,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 Newest first: the date, what moved, and the new overall estimate.
 
+- **2026-10-24 (release hardening):** Selected upstream parser/resource caps, column reading order, shading alpha, signature validation and forms/XFA fixes imported. Patched certificate-verification advisory RUSTSEC-2026-0382 and replaced a yanked Windows clipboard dependency. Release gates and untested platform/hardware requirements are tracked in [release readiness](docs/production-readiness.md). Stage and readiness estimates unchanged; production approval is pending validation.
+
 - **2026-10-19 (upstream ports):** Fourteen features from storytold/pdfcraft, each with its tests.
   Organize: **Reverse pages** swaps two or more selected pages among their own positions, or the
   whole document when fewer than two are selected (#1720). Redact: a card number followed by an
