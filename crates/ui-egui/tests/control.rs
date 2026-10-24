@@ -175,8 +175,8 @@ fn control_focus_rejects_missing_ambiguous_disabled_and_nonfocusable_targets() {
     let widgets = ok(&mut h, &c, "ui.inspect", json!({}));
     let nonfocusable = widgets["widgets"].as_array().unwrap().iter().find(|w| w["focusable"] == false).unwrap();
     assert!(call(&mut h, &c, "ui.focus", json!({"id": nonfocusable["id"]})).is_err());
-    let read = widgets["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert").unwrap();
-    ok(&mut h, &c, "ui.focus", json!({"id": read["id"]}));
+    let convert = widgets["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert").unwrap();
+    ok(&mut h, &c, "ui.focus", json!({"id": convert["id"]}));
     assert_eq!(ok(&mut h, &c, "ui.inspect", json!({"query": "Convert", "role": "Button"}))["widgets"][0]["focused"], true);
     // Home has no active document, so its document-only toolbar controls are disabled.
     ok(&mut h, &c, "ui.click", json!({"label": "Home"}));
@@ -911,9 +911,9 @@ fn simplified_chinese_signature_prompts_and_errors_keep_document_state() {
 #[test]
 fn inspect_and_click_by_label_and_id() {
     let (mut h, c) = harness();
-    let found = ok(&mut h, &c, "ui.inspect", json!({ "query": "read" }));
-    let read = found["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert" && w["clickable"] == true).cloned().expect("a Read tab");
-    let rect = read["rect"].as_array().unwrap();
+    let found = ok(&mut h, &c, "ui.inspect", json!({ "query": "convert" }));
+    let convert = found["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert" && w["clickable"] == true).cloned().expect("a Convert tab");
+    let rect = convert["rect"].as_array().unwrap();
     assert!(rect[2].as_f64().unwrap() > rect[0].as_f64().unwrap());
 
     ok(&mut h, &c, "ui.click", json!({ "label": "Convert" }));
@@ -924,7 +924,7 @@ fn inspect_and_click_by_label_and_id() {
     ok(&mut h, &c, "ui.click", json!({ "id": id }));
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "AllTools");
 
-    // Clicking a point works too (here: the Read tab's centre).
+    // Clicking a point works too (here: the Convert tab's centre).
     let [x0, y0, x1, y1] = [0, 1, 2, 3].map(|i| rect[i].as_f64().unwrap());
     ok(&mut h, &c, "ui.click", json!({ "x": (x0 + x1) / 2.0, "y": (y0 + y1) / 2.0 }));
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Convert");
@@ -1122,7 +1122,8 @@ fn control_default_workspace_and_session_override() {
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Edit");
     ok(&mut h, &c, "ui.set", json!({"key": "mode", "value": "read"}));
     h.state_mut().open_bytes("another.pdf", None, fixture(1)).unwrap();
-    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Convert");
+    // Read mode was entered by command here, not by the mode-bar tab that is gone.
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Read");
 }
 
 #[test]
