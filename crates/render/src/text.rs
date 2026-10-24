@@ -924,6 +924,10 @@ fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
 mod tests {
     use super::*;
 
+    fn em_box(text: &str, x0: f32, y0: f32, x1: f32, y1: f32) -> TextGlyph {
+        TextGlyph { text: text.into(), rect: [x0, y0, x1, y1], quad: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], direction: [1.0, 0.0] }
+    }
+
     #[test]
     fn identity_v_columns_are_searchable_in_reading_order() {
         use lopdf::{Document, Object, Stream, dictionary};
