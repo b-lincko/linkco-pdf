@@ -26,13 +26,24 @@ UI panels and language catalogs — not from reading commit subjects.
 Upstream HEAD was `88dad98` when this was taken; the window below is `d695bc5..88dad98` (19 non-merge
 commits, 108 files, +10554/−685). Version goes 0.10.1 → 0.11.0.
 
-**Ported (3).**
+**Ported (2), one reverted.**
 
 | # | Commit | What | Where it landed |
 |---|---|---|---|
-| #2244 | `1937545` | Tools docked on its own is drawn with no tab strip, as Acrobat's tool pane has none; grouped or floating it keeps its tab | `478de86` |
+| #2244 | `1937545` | Tools docked on its own is drawn with no tab strip | **reverted** — see below |
 | #2240 | `583c1ec` | The mode bar drops its Read tab (Acrobat's is All tools, Edit, Convert, E-Sign); Read mode stays a View command and a default workspace | `19dfb0b` |
 | #2282 | `18b61e2` | Organize pages remembers its grid size: one value for every document, saved with the settings, `‑‑grid-zoom` sets it, damaged values ignored or clamped to 50–300% | `07df64b` |
+
+**Why #2244 is out, and should not be retried as written.** It passes Format and Clippy, but it
+quietly stalls the background find. `view_history_select_all_and_find_options`
+(`crates/ui-egui/tests/viewer.rs:123`) hit its full 180 s deadline and failed on Linux twice in a row
+on two separate runs, and passed again the moment the change came out. Find only matches pages whose
+text has already been extracted, and that test needs all five pages of its document including two it
+never visits, so anything that stops off-screen pages being rendered starves it. The change marks the
+Tools panel `Permissions::PROTECTED` when it is docked alone. `Permissions` comes from the external
+`craft_ui` crate, which is not vendored here, so the mechanism could not be inspected from this repo.
+If this is ever wanted, the first thing to check is whether drawing the panel bare changes the canvas
+rect, and with it which pages the renderer treats as in view.
 
 **Not for us (6).** `3e30645` (Release 0.11.0 — a version bump we don't take), `cfb71d8` (switch CI to a
 shared Nix workflow), `30b8c60` + `b1bf1cf` (SonarCloud scan and `sonar-project.properties`), `dbc7130`
