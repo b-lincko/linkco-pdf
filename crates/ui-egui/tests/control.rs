@@ -912,7 +912,8 @@ fn simplified_chinese_signature_prompts_and_errors_keep_document_state() {
 fn inspect_and_click_by_label_and_id() {
     let (mut h, c) = harness();
     let found = ok(&mut h, &c, "ui.inspect", json!({ "query": "convert" }));
-    let convert = found["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert" && w["clickable"] == true).cloned().expect("a Convert tab");
+    let convert =
+        found["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert" && w["clickable"] == true).cloned().expect("a Convert tab");
     let rect = convert["rect"].as_array().unwrap();
     assert!(rect[2].as_f64().unwrap() > rect[0].as_f64().unwrap());
 
