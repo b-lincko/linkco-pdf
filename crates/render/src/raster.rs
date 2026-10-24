@@ -4871,7 +4871,7 @@ trailer << /Root 1 0 R >>
             content.len()
         );
         let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
-        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0 });
         assert!(p.error.is_none(), "{:?}", p.error);
         let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
         // Red at 25% over white is about (255, 191, 191); opaque red would be (255, 0, 0).
