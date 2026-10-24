@@ -75,6 +75,19 @@ Diffed the command registry against `crates/ui-egui/src/commands.rs`: upstream 1
 - `view.previous_tab`
 - `view.previous_view`
 
+## B.2 Security — two dependency advisories (verified)
+
+Our lockfile is behind on two crates upstream bumped for published advisories. Both are pure version
+bumps with no call-site changes, which makes them the cheapest items on this list to take.
+
+| Crate | Ours | Upstream | Advisory | Upstream commit |
+|---|---|---|---|---|
+| `ctutils` | 0.4.2 | **0.4.5** | RUSTSEC-2026-0385 | `1f88117` |
+| `crypto-bigint` | 0.7.5 | **0.7.6** | RUSTSEC-2026-0387 | `0b670ca` |
+
+Worth knowing: our `dependency licences and advisories` CI job is already red, and it also fails on
+`main`, so these two may be part of what it is reporting.
+
 ## C. Feature work — 181 milestone commits
 
 These carry the Acrobat-parity milestones (M1–M14; there is no M13 in this window).
