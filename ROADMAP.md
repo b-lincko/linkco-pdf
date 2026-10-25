@@ -135,6 +135,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 Newest first: the date, what moved, and the new overall estimate.
 
+- **2026-10-25 (B001 verification repair):** Fresh main/ARM64/packaging/preview checks passed at `821f8fa`. The serial FreeBSD rerun no longer reported the renderer deadline failure, but exposed a CUPS child-harness output defect. Reproduced the unchanged printer-default assertion failure locally; quiet child output and a one/two-thread regression fix the fixture without modifying production printer code or weakening assertions. B001 remains CI-blocked and B002 remains unstarted; estimates unchanged.
+
 - **2026-10-25 (B001 verification):** Main CI and Windows ARM64 passed. FreeBSD exposed a deadline failure in the existing large-memory renderer regression; isolate VM tests with a serial harness without changing security budgets/assertions/deadlines. B001 remains verification-blocked; B002 is approved by the user but not started.
 
 - **2026-10-25 (B001, basic safety):** Added the [complete live implementation queue](docs/implementation/README.md) and the user-required implement → audit → fix → re-audit → test → push → CI → confirmation workflow. Hardened shared save-staging filename validation with regression tests. Local staging tests and direct clippy checks passed; full workspace/platform verification remains tracked in the live component record. R01 and overall readiness estimates are not marked complete.

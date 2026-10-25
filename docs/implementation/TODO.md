@@ -671,15 +671,17 @@ pending: 65, scope_review: 23
 - Status: **ci_blocked**; parent(s): REC-R01.
 - Acceptance: Reject traversal, absolute paths, empty/dot names and NUL before filesystem access or suffix consumption; reject Windows streams; preserve valid native Unicode/hidden filenames and both existing naming schemes.
 - Audit: First audit reproduced a real escape from the selected directory. Added validation before truncation; second audit checked native filename semantics, Windows streams, call sites, side effects and existing collision/attempt behavior.
-- Verification Limit: Cargo workspace clippy/test were attempted but blocked by unavailable dependency checkouts in offline mode. Windows/macOS/FreeBSD execution require CI; local standalone tests do not replace those gates. The prior research commit had a Windows byte-comparison test failure; its clock is now pinned without weakening assertions, awaiting workspace CI.
-- Ci: main_and_arm64_passed_freebsd_failed
+- Verification Limit: Local workspace clippy/test/xtask gates remain blocked by the missing craft-libs checkout in offline mode. Main Linux/Windows/wasm CI and ARM64 passed at 821f8fa, but that does not verify the subsequent CUPS fixture change; a fresh CI run is required. macOS/hardware acceptance is not claimed.
+- Ci: main_and_arm64_passed_freebsd_fixture_failed
 - Local evidence: 7 staging tests passed on Linux using rustc 1.92.0-nightly.
 - Local evidence: Production and test modules passed standalone clippy-driver with warnings denied.
 - Local evidence: Two new regression tests failed before the fix and passed afterward.
 - Local evidence: cargo fmt --all -- --check passed.
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40182762353
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40182762417
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40182762390
+- Local evidence: CUPS fixture: existing default assertion and new regression reproduced failures with one harness thread before the fix; all 4 actual CUPS tests passed with both 1 and 2 threads after the fix.
+- Local evidence: Actual spool module and extracted CUPS tests passed standalone clippy-driver with warnings denied.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40190242106
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40190242115
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40190242102
 
 ### B002: Audit and harden flush-before-replace in automation saves
 

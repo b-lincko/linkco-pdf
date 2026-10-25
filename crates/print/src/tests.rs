@@ -604,7 +604,9 @@ mod cups_options {
 
     fn command(record: &std::path::Path, answer: &str) -> std::process::Command {
         let mut c = std::process::Command::new(std::env::current_exe().unwrap());
-        c.args(["--exact", "tests::cups_options::stand_in_for_lpoptions", "--nocapture", "--"]).env(RECORD, record).env(ANSWER, answer);
+        // Serial libtest otherwise prefixes the first output line with the test name,
+        // corrupting the mocked lpoptions key. Quiet mode leaves the answer on its own line.
+        c.args(["--quiet", "--exact", "tests::cups_options::stand_in_for_lpoptions", "--nocapture", "--"]).env(RECORD, record).env(ANSWER, answer);
         c
     }
 
@@ -625,6 +627,20 @@ mod cups_options {
             }
         }
         panic!("could not create a unique CUPS test directory");
+    }
+
+    #[test]
+    fn lpoptions_child_output_is_independent_of_harness_threads() {
+        let dir = folder();
+        for threads in ["1", "2"] {
+            let output =
+                command(&dir, "InputSlot/Paper tray: *Tray2").env("RUST_TEST_THREADS", threads).args(["-p", "Office/duplex", "-l"]).output().unwrap();
+            assert!(output.status.success(), "threads={threads}: {output:?}");
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(spool::parse_lpoptions(&stdout), [("InputSlot".into(), "Tray2".into())], "threads={threads}: {stdout}");
+            assert_eq!(std::fs::read_to_string(dir.join("args")).unwrap(), "-p\nOffice/duplex\n-l");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -49,7 +49,7 @@ Acceptance includes both name formats, empty/dot/absolute/traversal/NUL inputs, 
 
 **Not claimed:** full filesystem sandboxing against hostile parent-directory changes, complete crash/power-loss durability, scanner/printer/hardware acceptance, or completion of all R01. The live record distinguishes local tests from full CI. The user has confirmed continuation to B002, but it remains blocked until B001 verification passes.
 
-Verification update: main Linux/Windows/wasm CI and Windows ARM64 passed for `184146f`; FreeBSD failed in the existing large-memory renderer regression at its 60-second receive deadline. FreeBSD tests now run serially to isolate competing stress fixtures. No test is skipped, no assertion is removed, no timeout or production budget is increased. B001 is not marked complete while this check is failing.
+Verification update: main Linux/Windows/wasm CI, Windows ARM64, packaging lint and preview-handler checks passed for `821f8fa`. Serial FreeBSD execution no longer reported the renderer deadline failure, but exposed a CUPS test-fixture defect: serial libtest prefixes the child’s mocked `lpoptions` answer with its test name. This reproduces locally. The child now uses quiet harness output; a new regression checks both one and two child threads, and all four actual CUPS tests pass locally under either outer thread count. Production printer code, security budgets, deadlines and existing assertions are unchanged; no test is skipped. B001 remains blocked until fresh CI verifies the fixture repair.
 
 ## Regeneration and verification
 
