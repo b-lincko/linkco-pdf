@@ -61,7 +61,7 @@ Local evidence: the actual automation/staging functions pass 18 standalone tests
 
 **Verified:** all five workflows passed on `8191bbd`: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install checks, FreeBSD build/test/package, packaging lint and preview-handler tests (links in `progress.toml`). This includes the new end-to-end save/retry test. The existing workflow skipped mutation fuzzing; no new fuzz execution is claimed. Full local Cargo gates were blocked by the missing `craft-libs` checkout. Native macOS/SMB/FUSE execution, including the macOS-only tests, remains unverified; fallback preservation was checked against the prior source. This component is not a parent-directory sync, a full power-loss guarantee, protection against hostile parent-directory replacement, or completion of REC-R01. The user approved the next basic component on 2026-10-25.
 
-## Current component: B003 — private Unix atomic-save staging
+## Current component: B003 — verified; awaiting next-component approval
 
 Parent: **REC-R01, save integrity**. The audit reproduced a default-mode staging file with permissions `0666` under umask `000`, before its first byte was written. Under a usual `022` umask the same default permits `0644`. Hidden/random names do not prevent another user reading a file when filesystem permissions allow it.
 
@@ -69,7 +69,7 @@ Unix creation now requests `0600` in the exclusive-creation syscall, **not** via
 
 **Compatibility policy:** new and replaced Unix atomic outputs keep the restrictive staging mode. Existing group/other sharing permissions, ownership and extended ACLs are not copied. Windows retains its existing access-control behavior. This is not a guarantee against administrators, filesystems that ignore Unix modes, hostile parent changes or power loss.
 
-Regressions check both formats before the first byte under child-process umasks `000`, `022`, `077` and `777`. No parent/global umask mutation is used; per-child receipts prevent a false pass from an empty test filter. Planted-file bytes and mode remain unchanged on collision. Desktop save coverage and an automation Save/Save As/confined-output/reopen integration test cover callers. Local tests/Clippy/formatting pass; **fresh workspace/platform CI is pending**, so B003 is not complete. Native macOS/network-filesystem execution remains unverified. After completion, stop and ask before another component.
+Regressions check both formats before the first byte under child-process umasks `000`, `022`, `077` and `777`. No parent/global umask mutation is used; per-child receipts prevent a false pass from an empty test filter. Planted-file bytes and mode remain unchanged on collision. Desktop save coverage and an automation Save/Save As/confined-output/reopen integration test cover callers. **Verified at `fc5fd97`:** all five replacement workflows passed: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 tests/install checks, FreeBSD build/test/package, packaging lint and preview-handler tests (links in `progress.toml`). Linux/FreeBSD coverage includes the permission regression and headless save/output/reopen integration test. Local tests/Clippy/formatting also passed; full local workspace gates remained dependency-blocked. Existing workflow policy skipped mutation fuzzing; no fuzz execution is claimed. Native macOS/network-filesystem execution remains unverified. REC-R01 remains open. **Stop here and obtain explicit approval before another component.**
 
 ## Regeneration and verification
 
