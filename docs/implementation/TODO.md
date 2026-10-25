@@ -14,11 +14,11 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (333 records)
 
-in_progress: 1, locally_verified: 1, pending: 330, pending_confirmation: 1
+ci_blocked: 1, in_progress: 1, pending: 330, pending_confirmation: 1
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
-| B001 | [ ] Reject paths as atomic-save staging filenames | P0 | locally_verified | REC-R01 |
+| B001 | [ ] Reject paths as atomic-save staging filenames | P0 | ci_blocked | REC-R01 |
 | B002 | [ ] Audit and harden flush-before-replace in automation saves | P0 | pending_confirmation | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
@@ -668,18 +668,21 @@ pending: 65, scope_review: 23
 
 ### B001: Reject paths as atomic-save staging filenames
 
-- Status: **locally_verified**; parent(s): REC-R01.
+- Status: **ci_blocked**; parent(s): REC-R01.
 - Acceptance: Reject traversal, absolute paths, empty/dot names and NUL before filesystem access or suffix consumption; reject Windows streams; preserve valid native Unicode/hidden filenames and both existing naming schemes.
 - Audit: First audit reproduced a real escape from the selected directory. Added validation before truncation; second audit checked native filename semantics, Windows streams, call sites, side effects and existing collision/attempt behavior.
 - Verification Limit: Cargo workspace clippy/test were attempted but blocked by unavailable dependency checkouts in offline mode. Windows/macOS/FreeBSD execution require CI; local standalone tests do not replace those gates. The prior research commit had a Windows byte-comparison test failure; its clock is now pinned without weakening assertions, awaiting workspace CI.
-- Ci: pending
+- Ci: main_and_arm64_passed_freebsd_failed
 - Local evidence: 7 staging tests passed on Linux using rustc 1.92.0-nightly.
 - Local evidence: Production and test modules passed standalone clippy-driver with warnings denied.
 - Local evidence: Two new regression tests failed before the fix and passed afterward.
 - Local evidence: cargo fmt --all -- --check passed.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40182762353
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40182762417
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40182762390
 
 ### B002: Audit and harden flush-before-replace in automation saves
 
 - Status: **pending_confirmation**; parent(s): REC-R01.
 - Acceptance: Scope and reproduce durability/failure behavior before changing it; preserve the desktop's supported-volume flush fallback, clean up failed staging writes and keep original bytes intact.
-- Notes: Candidate next component only. Do not implement until B001 is verified and the user agrees to continue.
+- Notes: The user confirmed continue on 2026-10-25. B002 is approved conditionally but must not start until B001 clears the failed FreeBSD verification gate.

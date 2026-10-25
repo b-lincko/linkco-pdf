@@ -47,7 +47,11 @@ jobs:
             rustc --version
             export CARGO_PROFILE_DEV_DEBUG=0
             bash .github/scripts/run-annotated.sh "FreeBSD build" cargo build --workspace --all-targets --locked
-            bash .github/scripts/run-annotated.sh "FreeBSD test" cargo test --workspace --locked --no-fail-fast
+            # The renderer's security regressions intentionally decode hundreds of MiB.
+            # Parallel harness threads compete for the VM's CPU/memory and made the existing
+            # 60-second bounded-render test time out. Keep every test and its deadlines intact;
+            # isolate tests in this constrained VM instead of weakening a security assertion.
+            RUST_TEST_THREADS=1 bash .github/scripts/run-annotated.sh "FreeBSD test" cargo test --workspace --locked --no-fail-fast
             # The release packaging, end to end (a quicker release profile than the real release).
             CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 bash .github/scripts/run-annotated.sh "FreeBSD package" packaging/freebsd/package.sh
             tar -tzf dist/release/pdfcraft-*-freebsd-*.tar.gz | grep -E '/bin/pdfcraft$|/bin/pdfcraft-cli$|applications/|/share/pdfcraft/models/.+\.rten$'

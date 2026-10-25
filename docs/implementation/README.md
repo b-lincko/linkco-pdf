@@ -47,7 +47,9 @@ The shared staging helper already used exclusive creation, random suffixes and a
 
 Acceptance includes both name formats, empty/dot/absolute/traversal/NUL inputs, long-path truncation cases, normal Unicode/hidden filenames and Windows-specific path/stream cases. Existing collision and attempt-limit behavior must remain unchanged.
 
-**Not claimed:** full filesystem sandboxing against hostile parent-directory changes, complete crash/power-loss durability, scanner/printer/hardware acceptance, or completion of all R01. The live record distinguishes local tests from full CI. B002 is a candidate follow-up only and remains pending confirmation.
+**Not claimed:** full filesystem sandboxing against hostile parent-directory changes, complete crash/power-loss durability, scanner/printer/hardware acceptance, or completion of all R01. The live record distinguishes local tests from full CI. The user has confirmed continuation to B002, but it remains blocked until B001 verification passes.
+
+Verification update: main Linux/Windows/wasm CI and Windows ARM64 passed for `184146f`; FreeBSD failed in the existing large-memory renderer regression at its 60-second receive deadline. FreeBSD tests now run serially to isolate competing stress fixtures. No test is skipped, no assertion is removed, no timeout or production budget is increased. B001 is not marked complete while this check is failing.
 
 ## Regeneration and verification
 
