@@ -39,7 +39,7 @@ Finish the relevant basic queue before advancing to advanced, then future. Do no
 
 “Without errors” is the quality objective, not a promise that software has no unknown defects. Known failures, missing acceptance coverage and unsupported platform/workflow claims must remain visible. If a required gate cannot be run, stop short of claiming that component complete. Never push a known-failing or deliberately incomplete implementation as a completed function.
 
-## Current component: B001 — staging filename confinement
+## Verified component: B001 — staging filename confinement
 
 Parent: **REC-R01, save integrity**. Existing callers: desktop `write_atomically` and automation `write_atomic`, reached through the existing Save/`doc_save` functionality.
 
@@ -47,9 +47,19 @@ The shared staging helper already used exclusive creation, random suffixes and a
 
 Acceptance includes both name formats, empty/dot/absolute/traversal/NUL inputs, long-path truncation cases, normal Unicode/hidden filenames and Windows-specific path/stream cases. Existing collision and attempt-limit behavior must remain unchanged.
 
-**Not claimed:** full filesystem sandboxing against hostile parent-directory changes, complete crash/power-loss durability, scanner/printer/hardware acceptance, or completion of all R01. The live record distinguishes local tests from full CI. The user has confirmed continuation to B002, but it remains blocked until B001 verification passes.
+**Not claimed:** full filesystem sandboxing against hostile parent-directory changes, complete crash/power-loss durability, scanner/printer/hardware acceptance, or completion of all R01. The live record distinguishes local tests from full CI. All B001 replacement gates passed at `da8b5de`; the user’s conditional continuation approval now permits B002.
 
-Verification update: main Linux/Windows/wasm CI, Windows ARM64, packaging lint and preview-handler checks passed for `821f8fa`. Serial FreeBSD execution no longer reported the renderer deadline failure, but exposed a CUPS test-fixture defect: serial libtest prefixes the child’s mocked `lpoptions` answer with its test name. This reproduces locally. The child now uses quiet harness output; a new regression checks both one and two child threads, and all four actual CUPS tests pass locally under either outer thread count. Production printer code, security budgets, deadlines and existing assertions are unchanged; no test is skipped. B001 remains blocked until fresh CI verifies the fixture repair.
+Verification: main Linux/Windows/wasm CI, Windows ARM64, FreeBSD build/test/package, packaging lint and preview-handler checks all passed for `da8b5de` (links in `progress.toml`). Serial FreeBSD execution isolated the large-memory renderer fixtures; quiet child-harness output repaired a CUPS mock that otherwise acquired a serial libtest prefix. No production renderer/printer code, security budget, deadline or existing assertion was weakened.
+
+## Current component: B002 — flush before replacing automation output
+
+Parent: **REC-R01, save integrity**. Automation's atomic writer previously wrote, closed and renamed its staging file without flushing. Three deterministic regressions reproduced the missing flush: replacement despite an injected flush failure for existing/new targets, and absence of a flush-before-replace callback.
+
+The writer now performs **write → flush → close → rename**. A write/flush failure closes the descriptor, attempts staging cleanup and returns an error before the target is replaced or `doc_save` marks the document saved. Desktop and automation share the existing desktop flush helper verbatim, including the macOS `ENOTSUP`/`ENOTTY` plain-`fsync` fallback; no production fallback policy is broadened. Root checks, name forms and unconfined stream-compatible `write_output` are unchanged.
+
+Local evidence: the actual automation/staging functions pass 18 standalone tests; the actual desktop/staging functions pass 16. Both standalone modules pass Clippy with warnings denied, and workspace formatting passes. End-to-end coverage adds failed-save/retry preservation and checks that full/incremental saves leave no staging files. A macOS-only automation regression mirrors the desktop's supported-volume fallback test.
+
+**Pending:** fresh workspace/platform CI, including the new end-to-end test. Full local Cargo gates are blocked by the missing `craft-libs` checkout; native macOS/SMB/FUSE hardware execution is unavailable. This component is not a parent-directory sync, a full power-loss guarantee, protection against hostile parent-directory replacement, or completion of REC-R01. B002 is not complete until the new CI gates pass. After completion, stop and ask before starting another component.
 
 ## Regeneration and verification
 

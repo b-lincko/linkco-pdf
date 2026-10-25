@@ -2,7 +2,7 @@
 //! "save changes?" prompt when closing a tab or quitting with unsaved edits.
 
 use pdfcraft_engine::Edit;
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes};
+use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, sync_staged};
 
 use crate::PdfCraftApp;
 
@@ -713,23 +713,6 @@ fn write_atomically_syncing(
         let _ = std::fs::remove_file(&tmp);
     }
     result
-}
-
-/// Flush the staging file to the disk before it replaces the original. On macOS `sync_all` asks
-/// for a full flush (`F_FULLFSYNC`), which SMB and FUSE volumes, such as a mounted Cryptomator
-/// vault, refuse as unsupported: there a plain `fsync` is the strongest flush the volume offers.
-/// Any other failure still fails the save.
-fn sync_staged(f: &std::fs::File, sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        use rustix::io::Errno;
-        match sync_all(f) {
-            Err(e) if matches!(Errno::from_io_error(&e), Some(Errno::NOTSUP | Errno::NOTTY)) => Ok(rustix::fs::fsync(f)?),
-            other => other,
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    sync_all(f)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

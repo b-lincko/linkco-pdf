@@ -165,6 +165,28 @@ fn edit_undo_redo_and_save_round_trip() {
     let after = std::fs::read(dir.join("out/edited.pdf")).unwrap();
     assert!(after.len() as u64 > before);
     assert_eq!(after.windows(5).filter(|w| w == b"%%EOF").count(), 2);
+    let outputs: Vec<_> = std::fs::read_dir(dir.join("out")).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(outputs, [std::ffi::OsString::from("edited.pdf")], "successful saves leave no staging files");
+}
+
+#[test]
+fn a_failed_atomic_save_keeps_unsaved_edits_for_a_retry() {
+    let dir = workdir("save-retry");
+    let original = std::fs::read(dir.join("a.pdf")).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Still unsaved" }));
+    std::fs::write(dir.join("blocked"), b"NOT A DIRECTORY").unwrap();
+    assert!(a.call("doc_save", &json!({ "doc": doc, "path": "blocked/out.pdf" })).is_err());
+    assert_eq!(std::fs::read(dir.join("a.pdf")).unwrap(), original);
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc }))["title"], "Still unsaved");
+    assert!(a.call("doc_close", &json!({ "doc": doc })).is_err(), "failed saves must not clear the dirty flag");
+    let saved = ok(&mut a, "doc_save", json!({ "doc": doc }));
+    assert_eq!(saved["document"]["dirty"], false);
+    let mut reopened = auto(&dir);
+    let id = ok(&mut reopened, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut reopened, "doc_info", json!({ "doc": id }))["title"], "Still unsaved");
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -1,7 +1,25 @@
 //! Staging files for atomic saves: a new, unpredictably named file beside the target, written and
-//! then renamed over it. Writing, closing, renaming and cleaning up stay with the caller.
+//! then renamed over it. Creation and flushing are shared; writing, closing, renaming and cleaning
+//! up stay with the caller.
 
 use std::path::{Path, PathBuf};
+
+/// Flush the staging file to the disk before it replaces the original. On macOS `sync_all` asks
+/// for a full flush (`F_FULLFSYNC`), which SMB and FUSE volumes, such as a mounted Cryptomator
+/// vault, refuse as unsupported: there a plain `fsync` is the strongest flush the volume offers.
+/// Any other failure still fails the save.
+pub fn sync_staged(f: &std::fs::File, sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use rustix::io::Errno;
+        match sync_all(f) {
+            Err(e) if matches!(Errno::from_io_error(&e), Some(Errno::NOTSUP | Errno::NOTTY)) => Ok(rustix::fs::fsync(f)?),
+            other => other,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    sync_all(f)
+}
 
 /// How many staging names [`create_staging`] tries. A random 64-bit name is only taken if someone
 /// put a file there on purpose, so running out means refusing, not trying harder.
@@ -90,6 +108,35 @@ mod tests {
 
     fn file_name(p: &Path) -> String {
         p.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_staged_file_is_flushed_with_the_supplied_operation() {
+        use std::io::Write;
+        let dir = test_dir("flush");
+        let (path, mut file) = create_staging(&dir, "out.pdf", StagingName::SuffixThenTag, [1]).unwrap();
+        file.write_all(b"STAGED").unwrap();
+        let called = std::cell::Cell::new(false);
+        sync_staged(&file, |file| {
+            assert!(!called.replace(true), "flush exactly once");
+            assert_eq!(file.metadata().unwrap().len(), 6);
+            file.sync_all()
+        })
+        .unwrap();
+        assert!(called.get());
+        drop(file);
+        assert_eq!(std::fs::read(path).unwrap(), b"STAGED");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_staged_flush_is_not_ignored() {
+        let dir = test_dir("flush-failure");
+        let (_, file) = create_staging(&dir, "out.pdf", StagingName::SuffixThenTag, [1]).unwrap();
+        let error = sync_staged(&file, |_| Err(std::io::Error::other("disk gone"))).unwrap_err();
+        assert_eq!(error.to_string(), "disk gone");
+        drop(file);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

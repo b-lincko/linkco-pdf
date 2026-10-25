@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pdfcraft_engine::{CombineSource, DocId, Document, Edit, Session, commands};
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes};
+use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, sync_staged};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
@@ -1986,6 +1986,16 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// [`write_atomic`], trying the staging names that `suffixes` give.
 fn write_atomic_with(path: &Path, bytes: &[u8], suffixes: impl IntoIterator<Item = u64>) -> Result<()> {
+    write_atomic_syncing(path, bytes, suffixes, std::fs::File::sync_all)
+}
+
+/// [`write_atomic_with`], with an injectable staging flush for deterministic failure tests.
+fn write_atomic_syncing(
+    path: &Path,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+) -> Result<()> {
     use std::io::Write;
     // A folder can't be replaced, and staging beside it could land outside the root: "." names
     // the root itself, whose parent isn't ours to write in.
@@ -2000,7 +2010,7 @@ fn write_atomic_with(path: &Path, bytes: &[u8], suffixes: impl IntoIterator<Item
     // Closed at the end of the block, before the rename.
     let written = {
         let mut file = file;
-        file.write_all(bytes)
+        file.write_all(bytes).and_then(|()| sync_staged(&file, sync_all))
     };
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
@@ -2172,6 +2182,69 @@ mod tests {
         let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn a_failed_flush_keeps_the_original_and_removes_staging() {
+        let dir = staging_dir("flush-existing");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        let error = write_atomic_syncing(&target, b"NEW", [7], |file| {
+            assert_eq!(file.metadata().unwrap().len(), 3, "the bytes were written first");
+            assert_eq!(read(&target), "OLD", "the target is not yet replaced");
+            Err(std::io::Error::other("forced flush failure"))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("forced flush failure"), "{error}");
+        assert!(error.to_string().contains(&staged(&dir, 7).display().to_string()), "{error}");
+        assert_eq!(read(&target), "OLD");
+        assert_eq!(listing(&dir), ["out.pdf"], "the failed staging file was removed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_flush_does_not_create_a_new_target() {
+        let dir = staging_dir("flush-new");
+        let target = dir.join("out.pdf");
+        let error = write_atomic_syncing(&target, b"NEW", [7], |_| Err(std::io::Error::other("forced flush failure"))).unwrap_err();
+        assert!(error.to_string().contains("forced flush failure"), "{error}");
+        assert!(!target.exists());
+        assert!(listing(&dir).is_empty(), "the failed staging file was removed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Keep the desktop's supported-volume fallback available to headless saves too.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_automation_volume_without_full_flush_still_saves() {
+        for errno in [45, 25] {
+            let dir = staging_dir(&format!("flush-fallback-{errno}"));
+            let target = dir.join("out.pdf");
+            std::fs::write(&target, b"OLD").unwrap();
+            write_atomic_syncing(&target, b"NEW", [7], |_| Err(std::io::Error::from_raw_os_error(errno))).unwrap();
+            assert_eq!(read(&target), "NEW");
+            assert_eq!(listing(&dir), ["out.pdf"]);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn staging_is_written_then_flushed_before_replacing_the_target() {
+        let dir = staging_dir("flush-order");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        let called = std::cell::Cell::new(false);
+        write_atomic_syncing(&target, b"NEW", [7], |file| {
+            assert!(!called.replace(true), "flush exactly once");
+            assert_eq!(read(&target), "OLD", "flush before replacing the target");
+            assert_eq!(read(&staged(&dir, 7)), "NEW", "flush after writing the complete staging file");
+            file.sync_all()
+        })
+        .unwrap();
+        assert!(called.get(), "a successful save must flush its staging file");
+        assert_eq!(read(&target), "NEW");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

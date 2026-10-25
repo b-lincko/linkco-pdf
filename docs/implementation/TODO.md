@@ -10,16 +10,16 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B001 · **Active stage:** basic
+**Active component:** B002 · **Active stage:** basic
 
 ## Basic (333 records)
 
-ci_blocked: 1, in_progress: 1, pending: 330, pending_confirmation: 1
+ci_pending: 1, complete: 1, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
-| B001 | [ ] Reject paths as atomic-save staging filenames | P0 | ci_blocked | REC-R01 |
-| B002 | [ ] Audit and harden flush-before-replace in automation saves | P0 | pending_confirmation | REC-R01 |
+| B001 | [x] Reject paths as atomic-save staging filenames | P0 | complete | REC-R01 |
+| B002 | [ ] Audit and harden flush-before-replace in automation saves | P0 | ci_pending | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -668,23 +668,33 @@ pending: 65, scope_review: 23
 
 ### B001: Reject paths as atomic-save staging filenames
 
-- Status: **ci_blocked**; parent(s): REC-R01.
+- Status: **complete**; parent(s): REC-R01.
 - Acceptance: Reject traversal, absolute paths, empty/dot names and NUL before filesystem access or suffix consumption; reject Windows streams; preserve valid native Unicode/hidden filenames and both existing naming schemes.
 - Audit: First audit reproduced a real escape from the selected directory. Added validation before truncation; second audit checked native filename semantics, Windows streams, call sites, side effects and existing collision/attempt behavior.
-- Verification Limit: Local workspace clippy/test/xtask gates remain blocked by the missing craft-libs checkout in offline mode. Main Linux/Windows/wasm CI and ARM64 passed at 821f8fa, but that does not verify the subsequent CUPS fixture change; a fresh CI run is required. macOS/hardware acceptance is not claimed.
-- Ci: main_and_arm64_passed_freebsd_fixture_failed
+- Verification Limit: Local full workspace gates were unavailable because the craft-libs checkout was missing. Remote Linux/Windows/wasm, ARM64 and FreeBSD checks passed on the verification commit. macOS hardware acceptance, full durability and all of REC-R01 are not claimed.
+- Ci: passed
 - Local evidence: 7 staging tests passed on Linux using rustc 1.92.0-nightly.
 - Local evidence: Production and test modules passed standalone clippy-driver with warnings denied.
 - Local evidence: Two new regression tests failed before the fix and passed afterward.
 - Local evidence: cargo fmt --all -- --check passed.
 - Local evidence: CUPS fixture: existing default assertion and new regression reproduced failures with one harness thread before the fix; all 4 actual CUPS tests passed with both 1 and 2 threads after the fix.
 - Local evidence: Actual spool module and extracted CUPS tests passed standalone clippy-driver with warnings denied.
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40190242106
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40190242115
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40190242102
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40192697828
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40192697831
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40192697825
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40192697845
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40192697834
 
 ### B002: Audit and harden flush-before-replace in automation saves
 
-- Status: **pending_confirmation**; parent(s): REC-R01.
+- Status: **ci_pending**; parent(s): REC-R01.
 - Acceptance: Scope and reproduce durability/failure behavior before changing it; preserve the desktop's supported-volume flush fallback, clean up failed staging writes and keep original bytes intact.
-- Notes: The user confirmed continue on 2026-10-25. B002 is approved conditionally but must not start until B001 clears the failed FreeBSD verification gate.
+- Audit: Baseline automation wrote, closed and renamed without a flush. Three injected ordering/failure regressions failed before the fix. Shared the desktop flush helper verbatim, including macOS ENOTSUP/ENOTTY fallback; second audit checked write/flush/close/rename order, error propagation before mark_saved, cleanup after descriptor close, root handling and dependency relocation.
+- Verification Limit: Full local workspace clippy/test/wasm gates remain blocked by the missing craft-libs checkout. New end-to-end save/retry and platform tests require replacement CI. Native macOS/SMB/FUSE execution is not available here; existing fallback logic is preserved and macOS-only automation coverage is added. Parent-directory synchronization and hostile parent replacement remain outside scope.
+- Ci: pending
+- Notes: The user confirmed continuation on 2026-10-25; implementation began only after all B001 gates passed. B002 is implemented and locally audited, not complete until fresh CI passes. Stop and request approval before the next component.
+- Local evidence: 18 standalone automation/staging tests passed; three new regressions failed before the fix.
+- Local evidence: 16 standalone desktop/staging tests passed.
+- Local evidence: Standalone Clippy passed for the actual automation/desktop save functions and staging module.
+- Local evidence: cargo fmt --all -- --check passed.
+- Local evidence: Desktop flush helper moved verbatim; dependency version unchanged.
