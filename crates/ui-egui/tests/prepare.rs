@@ -234,6 +234,10 @@ fn options_tab_sets_the_check_box_style() {
 fn button_label_is_editable_without_renaming_the_field() {
     use pdfcraft_engine::{Edit, NewField};
     let mut h = harness();
+    // Save stamps /ModDate. Compare the effect of Cancel/unchanged OK, not whether UI frames
+    // happened to cross a wall-clock second (which made this byte comparison flaky on Windows).
+    let app = h.state_mut();
+    app.session = std::mem::take(&mut app.session).with_clock(|| 1_700_000_000);
     h.state_mut().apply_edit(Edit::AddField {
         page: 0,
         rect: [40.0, 300.0, 190.0, 330.0],

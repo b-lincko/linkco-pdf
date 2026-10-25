@@ -352,3 +352,7 @@ at your option. Third-party font and icon attributions are cataloged in [`ATTRIB
 Copyright © Al Rawabet Commercial Services & Contracting Company W.L.L. (Linkco)  
 Developed by **Muhammad Bilal** (Linkco)  
 Building 159, Street 220, Zone 24, P.O. Box 32282, Doha – Qatar · Phone: +974 4437 2511 · Email: `info@linkco.com.qa` · Web: `www.linkco.com.qa`
+
+## Implementation TODO and delivery workflow
+
+The complete research scope is tracked in the [live implementation TODO](docs/implementation/TODO.md), with [workflow and verification rules](docs/implementation/README.md). Work proceeds basic → advanced → future, one audited component at a time, with user confirmation before starting the next. Proposed features are not shipped-feature claims.

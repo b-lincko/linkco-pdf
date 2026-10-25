@@ -1,5 +1,7 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-10-25 · **Last updated:** 2026-10-25 · **Change:** B001 adds the owner-directed implementation queue and staging-filename safety; broad gaps and historical readiness estimates remain open.
+
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M1: raw-deflate fallback preserves decoding-limit errors in strict and tolerant decoding; M7: content pieces are joined with a space, as hayro, MuPDF and Poppler join them, so a trailing comment hides the start of the next piece the way it will render. Estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 Every known shortfall, one entry each, ranked by what it costs users. This is the work list: agents
@@ -14,6 +16,10 @@ workflow's partial sub-cases and are the first beta items.
 Hours are Opus 5.5 agent wall-clock hours. "Doc" names the parity document the gap belongs to.
 When a gap closes, delete its entry, note it in the [ROADMAP.md](../ROADMAP.md) progress log and
 update the numbers.
+
+## Owner-directed implementation queue
+
+The 25 October 2026 owner instruction adds the complete research scope to a [live TODO](implementation/TODO.md), ordered basic → advanced → future, with implement/audit/fix/re-audit/test/push/CI and confirmation after each component. B001 hardens shared save staging; it does not close a broad gap or change the historical readiness estimates below. Current verification is in [the component record](implementation/progress.toml).
 
 ## Summary
 

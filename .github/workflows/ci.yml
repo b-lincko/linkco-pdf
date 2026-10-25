@@ -39,6 +39,13 @@ jobs:
           ref: 8dcdacd5153e64560d109541a47d806f26f048c0
           path: craft-fonts
 
+      - name: Implementation backlog and research consistency
+        if: runner.os == 'Linux'
+        run: |
+          python3 docs/implementation/build_backlog.py --check
+          python3 -m unittest discover -s docs/implementation -p 'test_*.py' -v
+          python3 -m unittest discover -s docs/research/scripts -p 'test_*.py' -v
+
       - name: Install Linux system dependencies (egui/winit/rfd)
         if: runner.os == 'Linux'
         run: |

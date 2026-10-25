@@ -21,13 +21,25 @@ pub enum StagingName {
 /// a symbolic link even when dangling, a folder), on Windows as everywhere else; such a name is
 /// skipped, never opened, so a file planted at the staging path can't receive or redirect the
 /// write. Pass [`staging_suffixes`]: fixed suffixes are for tests, and a predictable name can be
-/// taken in advance to refuse every save.
+/// taken in advance to refuse every save. `name` must be a single native filename, not a path
+/// or (on Windows) an alternate data stream. Invalid names return `InvalidInput` before any
+/// suffix is consumed or filesystem access is attempted, including before truncating long names.
 pub fn create_staging(
     dir: &Path,
     name: &str,
     form: StagingName,
     suffixes: impl IntoIterator<Item = u64>,
 ) -> std::io::Result<(PathBuf, std::fs::File)> {
+    // Check the whole input before truncating it or trying a suffix. A caller must pass a
+    // filename, never a path: the leading dot in the format does not neutralize `../` segments
+    // if a matching directory exists. Use native path rules so legal Unix backslashes remain
+    // usable, but reject alternate data streams on Windows as well as paths.
+    let invalid = name.contains('\0') || Path::new(name).file_name() != Some(std::ffi::OsStr::new(name));
+    #[cfg(windows)]
+    let invalid = invalid || name.contains(':');
+    if invalid {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "a temporary file name must be a filename, not a path"));
+    }
     // At most 128 bytes of the target's name, cut between characters, so the staging name fits
     // the 255-byte (Linux, macOS) and 255-unit (Windows) limits however long that name is.
     let mut stem = String::new();
@@ -78,6 +90,81 @@ mod tests {
 
     fn file_name(p: &Path) -> String {
         p.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_staging_name_cannot_traverse_out_of_its_directory() {
+        let root = test_dir("traversal");
+        let dir = root.join("selected");
+        // The leading dot added by the staging format used to turn this into a traversable
+        // directory: selected/.escape/../../outside.pdf.<suffix>.pdfcraft-tmp.
+        std::fs::create_dir_all(dir.join(".escape")).unwrap();
+        let original = root.join("original.pdf");
+        std::fs::write(&original, b"ORIGINAL").unwrap();
+        for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+            let error = create_staging(&dir, "escape/../../outside.pdf", form, [1]).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        }
+        assert_eq!(std::fs::read(&original).unwrap(), b"ORIGINAL");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2, "nothing staged beside the selected directory");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "nothing staged inside it either");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_names_are_rejected_before_using_a_suffix_or_touching_the_filesystem() {
+        let dir = test_dir("invalid");
+        let names = ["", ".", "..", "../out.pdf", "nested/out.pdf", "out.pdf/", "/out.pdf", "nested/../out.pdf", "out.pdf/.", "out\0.pdf"];
+        for name in names {
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let suffixes = std::iter::from_fn(|| panic!("an invalid name consumed a suffix"));
+                let error = create_staging(&dir.join("missing"), name, form, suffixes).unwrap_err();
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{name:?}");
+            }
+        }
+        // Validation must precede truncation: an invalid path must not become a valid prefix.
+        let long_path = format!("{}/out.pdf", "x".repeat(200));
+        let error = create_staging(&dir, &long_path, StagingName::TagThenSuffix, [1]).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_and_alternate_streams_are_not_staging_names() {
+        let dir = test_dir("windows-invalid");
+        for name in [r"..\out.pdf", r"nested\out.pdf", r"C:out.pdf", r"C:\out.pdf", r"\\server\share\out.pdf", "out.pdf:payload"] {
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let error = create_staging(&dir, name, form, [1]).unwrap_err();
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{name:?}");
+            }
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ordinary_native_filenames_still_stage_beside_the_target() {
+        use std::io::Write;
+        let dir = test_dir("valid");
+        for name in ["report.pdf", "revision..v2.pdf", ".private.pdf", "..not-parent.pdf", "tender 2026.pdf", "مناقصة.pdf"] {
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let (path, mut file) = create_staging(&dir, name, form, [1]).unwrap();
+                assert_eq!(path.parent(), Some(dir.as_path()));
+                file.write_all(b"STAGED").unwrap();
+                drop(file);
+                assert_eq!(std::fs::read(&path).unwrap(), b"STAGED");
+            }
+        }
+        #[cfg(unix)]
+        {
+            // A backslash is a legal filename character on Unix, not a path separator.
+            let (path, file) = create_staging(&dir, r"a\b.pdf", StagingName::TagThenSuffix, [1]).unwrap();
+            drop(file);
+            assert_eq!(path.parent(), Some(dir.as_path()));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// The callers' tests plant files at these exact names; if a name changed, those tests would

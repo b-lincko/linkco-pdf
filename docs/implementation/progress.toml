@@ -1,0 +1,34 @@
+# Live implementation state. The dated research snapshot remains immutable.
+# Change status only with component-specific implementation, audit and test evidence.
+[workflow]
+order = ["basic", "advanced", "future"]
+active_stage = "basic"
+active_component = "B001"
+confirmation_required_after_each_component = true
+auto_advance = false
+steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verify_ci", "ask_to_continue"]
+# Completion requires all relevant acceptance tests; no claim of zero unknown bugs.
+
+[task_status.REC-R01]
+status = "in_progress"
+notes = "B001 hardens the shared staging helper. R01 remains open: this does not complete fault injection, crash recovery or the full save-integrity gate."
+
+[components.B001]
+title = "Reject paths as atomic-save staging filenames"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "locally_verified"
+code = ["crates/platform/src/staging.rs", "crates/ui-egui/tests/prepare.rs"]
+acceptance = "Reject traversal, absolute paths, empty/dot names and NUL before filesystem access or suffix consumption; reject Windows streams; preserve valid native Unicode/hidden filenames and both existing naming schemes."
+audit = "First audit reproduced a real escape from the selected directory. Added validation before truncation; second audit checked native filename semantics, Windows streams, call sites, side effects and existing collision/attempt behavior."
+local_evidence = ["7 staging tests passed on Linux using rustc 1.92.0-nightly", "Production and test modules passed standalone clippy-driver with warnings denied", "Two new regression tests failed before the fix and passed afterward", "cargo fmt --all -- --check passed"]
+verification_limit = "Cargo workspace clippy/test were attempted but blocked by unavailable dependency checkouts in offline mode. Windows/macOS/FreeBSD execution require CI; local standalone tests do not replace those gates. The prior research commit had a Windows byte-comparison test failure; its clock is now pinned without weakening assertions, awaiting workspace CI."
+ci = "pending"
+
+[components.B002]
+title = "Audit and harden flush-before-replace in automation saves"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "pending_confirmation"
+acceptance = "Scope and reproduce durability/failure behavior before changing it; preserve the desktop's supported-volume flush fallback, clean up failed staging writes and keep original bytes intact."
+notes = "Candidate next component only. Do not implement until B001 is verified and the user agrees to continue."
