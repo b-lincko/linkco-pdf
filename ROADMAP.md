@@ -135,6 +135,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 Newest first: the date, what moved, and the new overall estimate.
 
+- **2026-10-25 (B002 verified):** Source commit `8191bbd` passed main Linux/Windows/wasm/consistency/advisory, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler CI. Mark only the bounded flush-before-replace component complete; REC-R01 remains open. Native macOS execution, parent-directory sync and full power-loss durability are not claimed. Stop for the user’s next-component approval; overall readiness estimates unchanged.
+
 - **2026-10-25 (B002, save integrity):** All B001 replacement gates passed at `da8b5de`, including FreeBSD build/test/package. With the user’s continuation approval, harden automation atomic writes to flush before close/replace, sharing the unchanged desktop macOS fallback. Three new failure/order regressions reproduced the omission; 18 automation/staging and 16 desktop/staging standalone tests plus direct Clippy pass. Added tool-level save/retry and staging-cleanup coverage; fresh workspace CI is pending. B002 and REC-R01 are not marked complete; readiness estimates unchanged.
 
 - **2026-10-25 (B001 verification repair):** Fresh main/ARM64/packaging/preview checks passed at `821f8fa`. The serial FreeBSD rerun no longer reported the renderer deadline failure, but exposed a CUPS child-harness output defect. Reproduced the unchanged printer-default assertion failure locally; quiet child output and a one/two-thread regression fix the fixture without modifying production printer code or weakening assertions. B001 remains CI-blocked and B002 remains unstarted; estimates unchanged.

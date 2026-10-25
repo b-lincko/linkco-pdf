@@ -14,12 +14,12 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (333 records)
 
-ci_pending: 1, complete: 1, in_progress: 1, pending: 330
+complete: 2, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
 | B001 | [x] Reject paths as atomic-save staging filenames | P0 | complete | REC-R01 |
-| B002 | [ ] Audit and harden flush-before-replace in automation saves | P0 | ci_pending | REC-R01 |
+| B002 | [x] Audit and harden flush-before-replace in automation saves | P0 | complete | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -687,14 +687,19 @@ pending: 65, scope_review: 23
 
 ### B002: Audit and harden flush-before-replace in automation saves
 
-- Status: **ci_pending**; parent(s): REC-R01.
+- Status: **complete**; parent(s): REC-R01.
 - Acceptance: Scope and reproduce durability/failure behavior before changing it; preserve the desktop's supported-volume flush fallback, clean up failed staging writes and keep original bytes intact.
 - Audit: Baseline automation wrote, closed and renamed without a flush. Three injected ordering/failure regressions failed before the fix. Shared the desktop flush helper verbatim, including macOS ENOTSUP/ENOTTY fallback; second audit checked write/flush/close/rename order, error propagation before mark_saved, cleanup after descriptor close, root handling and dependency relocation.
-- Verification Limit: Full local workspace clippy/test/wasm gates remain blocked by the missing craft-libs checkout. New end-to-end save/retry and platform tests require replacement CI. Native macOS/SMB/FUSE execution is not available here; existing fallback logic is preserved and macOS-only automation coverage is added. Parent-directory synchronization and hostile parent replacement remain outside scope.
-- Ci: pending
-- Notes: The user confirmed continuation on 2026-10-25; implementation began only after all B001 gates passed. B002 is implemented and locally audited, not complete until fresh CI passes. Stop and request approval before the next component.
+- Verification Limit: Full local workspace gates were dependency-blocked; remote Linux/Windows/wasm, native ARM64 and FreeBSD gates passed, including new save/retry coverage. Native macOS/SMB/FUSE execution remains unverified; the fallback was moved verbatim and macOS-only coverage was added but not executed here. Parent-directory synchronization and hostile parent replacement remain outside scope.
+- Ci: passed
+- Notes: The user confirmed continuation on 2026-10-25; implementation began only after all B001 gates passed. B002 is implemented, audited and verified at 8191bbd. All replacement CI gates passed. Await explicit approval before the next component.
 - Local evidence: 18 standalone automation/staging tests passed; three new regressions failed before the fix.
 - Local evidence: 16 standalone desktop/staging tests passed.
 - Local evidence: Standalone Clippy passed for the actual automation/desktop save functions and staging module.
 - Local evidence: cargo fmt --all -- --check passed.
 - Local evidence: Desktop flush helper moved verbatim; dependency version unchanged.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716756
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716771
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716697
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716751
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716706

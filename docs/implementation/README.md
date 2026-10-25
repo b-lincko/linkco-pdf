@@ -51,7 +51,7 @@ Acceptance includes both name formats, empty/dot/absolute/traversal/NUL inputs, 
 
 Verification: main Linux/Windows/wasm CI, Windows ARM64, FreeBSD build/test/package, packaging lint and preview-handler checks all passed for `da8b5de` (links in `progress.toml`). Serial FreeBSD execution isolated the large-memory renderer fixtures; quiet child-harness output repaired a CUPS mock that otherwise acquired a serial libtest prefix. No production renderer/printer code, security budget, deadline or existing assertion was weakened.
 
-## Current component: B002 — flush before replacing automation output
+## Current component: B002 — verified; awaiting next-component approval
 
 Parent: **REC-R01, save integrity**. Automation's atomic writer previously wrote, closed and renamed its staging file without flushing. Three deterministic regressions reproduced the missing flush: replacement despite an injected flush failure for existing/new targets, and absence of a flush-before-replace callback.
 
@@ -59,7 +59,7 @@ The writer now performs **write → flush → close → rename**. A write/flush 
 
 Local evidence: the actual automation/staging functions pass 18 standalone tests; the actual desktop/staging functions pass 16. Both standalone modules pass Clippy with warnings denied, and workspace formatting passes. End-to-end coverage adds failed-save/retry preservation and checks that full/incremental saves leave no staging files. A macOS-only automation regression mirrors the desktop's supported-volume fallback test.
 
-**Pending:** fresh workspace/platform CI, including the new end-to-end test. Full local Cargo gates are blocked by the missing `craft-libs` checkout; native macOS/SMB/FUSE hardware execution is unavailable. This component is not a parent-directory sync, a full power-loss guarantee, protection against hostile parent-directory replacement, or completion of REC-R01. B002 is not complete until the new CI gates pass. After completion, stop and ask before starting another component.
+**Verified:** all five workflows passed on `8191bbd`: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install checks, FreeBSD build/test/package, packaging lint and preview-handler tests (links in `progress.toml`). This includes the new end-to-end save/retry test. The existing workflow skipped mutation fuzzing; no new fuzz execution is claimed. Full local Cargo gates were blocked by the missing `craft-libs` checkout. Native macOS/SMB/FUSE execution, including the macOS-only tests, remains unverified; fallback preservation was checked against the prior source. This component is not a parent-directory sync, a full power-loss guarantee, protection against hostile parent-directory replacement, or completion of REC-R01. **Stop here and obtain explicit approval before another component.**
 
 ## Regeneration and verification
 
