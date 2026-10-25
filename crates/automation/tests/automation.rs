@@ -189,6 +189,32 @@ fn a_failed_atomic_save_keeps_unsaved_edits_for_a_retry() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn atomic_outputs_do_not_widen_private_unix_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = workdir("private-output");
+    let source = dir.join("a.pdf");
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Private report" }));
+    ok(&mut a, "doc_save", json!({ "doc": doc }));
+    assert_eq!(std::fs::metadata(&source).unwrap().permissions().mode() & 0o777, 0o600);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "copy.pdf" }));
+    assert_eq!(std::fs::metadata(dir.join("copy.pdf")).unwrap().permissions().mode() & 0o777, 0o600);
+    let output = a.write_output("result.txt", b"PRIVATE RESULT").unwrap();
+    assert_eq!(std::fs::metadata(output).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::read_to_string(dir.join("result.txt")).unwrap(), "PRIVATE RESULT");
+    let mut reopened = auto(&dir);
+    let id = ok(&mut reopened, "doc_open", json!({ "path": "copy.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut reopened, "doc_info", json!({ "doc": id }))["title"], "Private report");
+    let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    files.sort();
+    assert_eq!(files, ["a.pdf", "b.pdf", "copy.pdf", "result.txt"].map(std::ffi::OsString::from));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn combine_extract_and_split() {
     let dir = workdir("organize");

@@ -973,6 +973,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn atomic_desktop_saves_do_not_widen_private_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = staging_dir("private-output");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_atomically_syncing(&target.to_string_lossy(), b"NEW", [7], |file| {
+            assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600, "private while staging");
+            file.sync_all()
+        })
+        .unwrap();
+        assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(read(&target), "NEW");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Windows refuses to replace a read-only file, so the rename fails: the staging file must not
     /// be left behind.
     #[cfg(windows)]

@@ -42,6 +42,9 @@ pub enum StagingName {
 /// taken in advance to refuse every save. `name` must be a single native filename, not a path
 /// or (on Windows) an alternate data stream. Invalid names return `InvalidInput` before any
 /// suffix is consumed or filesystem access is attempted, including before truncating long names.
+/// On Unix the file is created with mode `0o600`, subject to umask, before any bytes are written.
+/// It keeps that restrictive mode if renamed into place; existing target permissions/ACLs are
+/// not copied. Other platforms keep their existing OS-default access-control behavior.
 pub fn create_staging(
     dir: &Path,
     name: &str,
@@ -72,7 +75,16 @@ pub fn create_staging(
             StagingName::SuffixThenTag => format!(".{stem}.{suffix:016x}.pdfcraft-tmp"),
             StagingName::TagThenSuffix => format!(".{stem}.pdfcraft-{suffix:016x}.tmp"),
         });
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        // Restrict access in the creation syscall, before any document bytes are written.
+        // chmod afterward would leave an exposure window. A stricter umask still applies.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        match options.open(&tmp) {
             Ok(file) => return Ok((tmp, file)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             // Windows reports a folder at the name as "access denied"; it is taken all the same.
@@ -136,6 +148,71 @@ mod tests {
         let error = sync_staged(&file, |_| Err(std::io::Error::other("disk gone"))).unwrap_err();
         assert_eq!(error.to_string(), "disk gone");
         drop(file);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Change umask only in a child shell: it is process-global and must not race other tests.
+    #[cfg(unix)]
+    #[test]
+    fn staging_permissions_are_private_from_creation() {
+        use std::os::unix::fs::PermissionsExt as _;
+        const CHILD_MODE: &str = "PDFCRAFT_STAGING_TEST_MODE";
+        if let Some(mode) = std::env::var_os(CHILD_MODE) {
+            use std::io::Write as _;
+            let expected: u32 = mode.to_str().unwrap().parse().unwrap();
+            let dir = test_dir("private-create");
+            // Keep the fixture usable even when the child umask removes every permission.
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let (path, mut file) = create_staging(&dir, "out.pdf", form, [1]).unwrap();
+                assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, expected, "private before the first byte: {path:?}");
+                file.write_all(b"SECRET").unwrap();
+                assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, expected);
+                drop(file);
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+            // A receipt proves the child ran this test, not merely an empty test filter.
+            std::fs::write(std::env::var_os("PDFCRAFT_STAGING_TEST_RECEIPT").unwrap(), b"verified").unwrap();
+            return;
+        }
+        let dir = test_dir("private-child");
+        let receipt = dir.join("verified");
+        // module_path includes the crate name, which libtest omits from its test names.
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::staging_permissions_are_private_from_creation");
+        for (mask, expected) in [("000", 0o600), ("022", 0o600), ("077", 0o600), ("777", 0)] {
+            let output = std::process::Command::new("/bin/sh")
+                .args(["-c", "umask \"$1\" || exit; shift; exec \"$@\"", "pdfcraft-staging-test", mask])
+                .arg(std::env::current_exe().unwrap())
+                .args(["--exact", &test, "--nocapture"])
+                .env(CHILD_MODE, expected.to_string())
+                .env("PDFCRAFT_STAGING_TEST_RECEIPT", &receipt)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "umask {mask}: {}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            assert!(receipt.is_file(), "the child must execute the requested test: umask {mask}");
+            std::fs::remove_file(&receipt).unwrap();
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_staging_does_not_change_a_colliding_files_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = test_dir("private-collision");
+        for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+            let (planted, file) = create_staging(&dir, "out.pdf", form, [1]).unwrap();
+            drop(file);
+            std::fs::write(&planted, b"PLANTED").unwrap();
+            std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let (path, file) = create_staging(&dir, "out.pdf", form, [1, 2]).unwrap();
+            assert_ne!(path, planted);
+            assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+            drop(file);
+            assert_eq!(std::fs::read(&planted).unwrap(), b"PLANTED");
+            assert_eq!(std::fs::metadata(&planted).unwrap().permissions().mode() & 0o777, 0o644);
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

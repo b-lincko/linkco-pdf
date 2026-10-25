@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B002"
+active_component = "B003"
 confirmation_required_after_each_component = true
 auto_advance = false
 steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verify_ci", "ask_to_continue"]
@@ -45,3 +45,17 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40195716756"
 ci_notes = "All five replacement workflows passed on 8191bbd: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 tests and install smoke, FreeBSD build/test/package, packaging lint and preview-handler tests. No test assertions or deadlines were weakened. Mutation fuzzing was skipped by the existing workflow policy; no fuzz-run claim is made."
 implementation_commit = "8191bbd1763942d89ddf069ff5110afdeb4a4a17"
 verification_commit = "8191bbd1763942d89ddf069ff5110afdeb4a4a17"
+
+[components.B003]
+title = "Create Unix atomic-save staging files with private permissions"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "ci_pending"
+acceptance = "Request 0600 in the Unix exclusive-creation syscall before writing bytes, honor stricter umasks, preserve collision refusal and bytes/modes of planted files, and cover desktop plus headless Save/Save As/confined output. Do not change Windows ACL or unconfined stream behavior."
+notes = "The user approved the next basic component on 2026-10-25 after B002 verification. New/replaced Unix atomic outputs intentionally retain private mode rather than copying broader sharing permissions; full ownership/ACL preservation is outside scope. Stop for approval after B003 verification."
+code = ["crates/platform/src/staging.rs", "crates/automation/tests/automation.rs", "crates/ui-egui/src/editing.rs"]
+audit = "Reproduced default Unix staging mode 0666 under an isolated umask 000 before the first byte. The fix supplies mode 0600 to OpenOptions::create_new, never a post-create chmod. Re-audit checked both naming schemes, restrictive umask behavior, collision metadata, child-filter receipts, unchanged Windows code path and both caller pipelines."
+local_evidence = ["Permission regression failed before the fix: observed 0666, expected 0600", "11 staging tests passed, including isolated child umasks 000/022/077/777 and unchanged collision permissions", "20 actual automation/staging standalone tests passed", "19 actual desktop/staging standalone tests passed", "Standalone Clippy with warnings denied and non-test staging compilation passed", "cargo fmt --all -- --check passed"]
+verification_limit = "Local full workspace gates require the unavailable craft-libs checkout; fresh CI must verify integration, Windows/ARM64, wasm and FreeBSD. Native macOS execution and network filesystems remain unverified. This is a Unix creation-mode policy, not Windows ACL hardening, ownership/ACL preservation, parent-directory race protection or full power-loss durability."
+ci = "pending"
+ci_run_urls = []

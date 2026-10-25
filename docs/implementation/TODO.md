@@ -10,16 +10,17 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B002 · **Active stage:** basic
+**Active component:** B003 · **Active stage:** basic
 
-## Basic (333 records)
+## Basic (334 records)
 
-complete: 2, in_progress: 1, pending: 330
+ci_pending: 1, complete: 2, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
 | B001 | [x] Reject paths as atomic-save staging filenames | P0 | complete | REC-R01 |
 | B002 | [x] Audit and harden flush-before-replace in automation saves | P0 | complete | REC-R01 |
+| B003 | [ ] Create Unix atomic-save staging files with private permissions | P0 | ci_pending | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -703,3 +704,18 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716697
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716751
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40195716706
+
+### B003: Create Unix atomic-save staging files with private permissions
+
+- Status: **ci_pending**; parent(s): REC-R01.
+- Acceptance: Request 0600 in the Unix exclusive-creation syscall before writing bytes, honor stricter umasks, preserve collision refusal and bytes/modes of planted files, and cover desktop plus headless Save/Save As/confined output. Do not change Windows ACL or unconfined stream behavior.
+- Audit: Reproduced default Unix staging mode 0666 under an isolated umask 000 before the first byte. The fix supplies mode 0600 to OpenOptions::create_new, never a post-create chmod. Re-audit checked both naming schemes, restrictive umask behavior, collision metadata, child-filter receipts, unchanged Windows code path and both caller pipelines.
+- Verification Limit: Local full workspace gates require the unavailable craft-libs checkout; fresh CI must verify integration, Windows/ARM64, wasm and FreeBSD. Native macOS execution and network filesystems remain unverified. This is a Unix creation-mode policy, not Windows ACL hardening, ownership/ACL preservation, parent-directory race protection or full power-loss durability.
+- Ci: pending
+- Notes: The user approved the next basic component on 2026-10-25 after B002 verification. New/replaced Unix atomic outputs intentionally retain private mode rather than copying broader sharing permissions; full ownership/ACL preservation is outside scope. Stop for approval after B003 verification.
+- Local evidence: Permission regression failed before the fix: observed 0666, expected 0600.
+- Local evidence: 11 staging tests passed, including isolated child umasks 000/022/077/777 and unchanged collision permissions.
+- Local evidence: 20 actual automation/staging standalone tests passed.
+- Local evidence: 19 actual desktop/staging standalone tests passed.
+- Local evidence: Standalone Clippy with warnings denied and non-test staging compilation passed.
+- Local evidence: cargo fmt --all -- --check passed.
