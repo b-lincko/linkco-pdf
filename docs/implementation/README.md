@@ -137,7 +137,7 @@ Parent: **REC-R05, external-file change and save-conflict detection** (bounded; 
 
 The app now stamps a file's contents (length plus a streamed 64-bit hash) when it opens a document from disk and again after each successful save. Saving in place compares the stamp with the file: if the bytes differ, nothing is written and a modal explains the conflict, offering **Save As…** (primary), **Cancel**, and **Overwrite**. Identical bytes are not a conflict, and a missing file is not one either (writing recreates it). The prompt is compiled out on wasm, where the in-place path save does not exist.
 
-Local evidence: three standalone stamp tests pass (same-length different bytes; a 300 KiB file crossing read buffers; missing/unreadable paths), the module compiles with warnings denied, and formatting passes. Four full-app expectations (unchanged save, blocked save, overwrite, cancel-then-ask-again) run in CI only, because full local workspace gates remain dependency-blocked. **CI is pending.**
+Local evidence: three standalone stamp tests pass (same-length different bytes; a 300 KiB file crossing read buffers; missing/unreadable paths), the module compiles with warnings denied, and formatting passes. The three full-app regressions (unchanged save, blocked save, overwrite, cancel-then-ask-again) pass on Linux and Windows. **Verified at `7a72435` by all five workflows.**
 
 Not claimed: this is a check between two filesystem operations, not a lock — another program can still write between the check and the rename. Automation saves, rename/delete/move detection, idle-time notification and merge/reload choices remain open in REC-R05.
 
@@ -147,7 +147,7 @@ Parent: **REC-S08, secure temporary files, thumbnails and local history** (bound
 
 `pdfcraft_platform::private_dir::create_private_dir` now creates the folder with mode `0700` in the creation call itself, tightens a looser folder when the app opens the store, and refuses a path that is a link, a dangling link or a file instead of following or writing through it. The mode is changed through an open handle, so a swap between the check and the change cannot redirect it. Restricting a folder further is the only change it makes, and a failure to tighten is ignored on the write path so a filesystem without Unix modes cannot turn a permission bit into a failed autosave. Windows and macOS keep their per-user profile defaults.
 
-Local evidence: six standalone helper tests pass (new folder, loosened folder tightened and still usable, missing parents, symlink, dangling symlink, file at the path), the module compiles as a standalone test binary, and formatting passes. Two store regressions (modes of the folder and both files; tightening on open; linked folder refused) run in CI only. **CI is pending.**
+Local evidence: six standalone helper tests pass (new folder, loosened folder tightened and still usable, missing parents, symlink, dangling symlink, file at the path), and formatting passes. The two store regressions (modes of the folder and both files; tightening on open; linked folder refused) pass on Linux and Windows, and the helper tests also run on ARM64 and FreeBSD. **Verified at `7a72435` by all five workflows.**
 
 Not claimed: this is not a sandbox — replacing the folder or its parent between two filesystem operations is outside the component. Thumbnails, saved settings, printed output, local history, the portable data folder and the automation side are untouched, so REC-S08 stays open.
 
