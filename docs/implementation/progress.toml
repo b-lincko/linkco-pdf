@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B003"
+active_component = "B004"
 confirmation_required_after_each_component = true
 auto_advance = false
 steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verify_ci", "ask_to_continue"]
@@ -62,3 +62,17 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40200837989"
 ci_notes = "All five workflows passed at fc5fd97: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler tests. The existing workflow skipped mutation fuzzing; no fuzz execution is claimed. Assertions, deadlines and production renderer budgets were not weakened."
 implementation_commit = "fc5fd97b2c3f91c176e33dc5ad79e8470a62da57"
 verification_commit = "fc5fd97b2c3f91c176e33dc5ad79e8470a62da57"
+
+[components.B004]
+title = "Deterministic atomic-save write and rename fault coverage"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "ci_pending"
+acceptance = "For both automation and desktop atomic writers, inject partial-write disk-full and post-flush rename failures for existing/new targets; preserve original bytes or absence of new targets, return errors and remove staging. Verify recoverable Interrupted/short writes finish before replacement, and on Windows verify the staging writer is closed before rename. Keep fault controls private and production I/O unchanged."
+notes = "The user approved continuation on 2026-10-26. This closes a deterministic coverage gap, not a newly reproduced production data-loss defect. It does not complete the broad REC-R01 release gate. Stop for explicit approval after B004 verification."
+code = ["crates/automation/src/lib.rs", "crates/ui-egui/src/editing.rs"]
+audit = "Prior code already propagated write/rename errors, but portable post-staging failure tests were missing (the existing real rename-denial fixtures were Windows-only). Introduced private I/O seams with unchanged standard operations in production. Re-audit checked exact call order, descriptor scope, unchanged cleanup/error mapping, failure cases for existing/new outputs, retry semantics and no public runtime fault switches."
+local_evidence = ["23 actual automation/staging standalone tests passed", "22 actual desktop/staging standalone tests passed", "Four scratch mutation checks rejected swallowed write/rename errors in both save pipelines", "Standalone Clippy with warnings denied passed for both actual save pipelines", "cargo fmt --all -- --check passed"]
+verification_limit = "Local workspace gates remain blocked by the missing craft-libs checkout; fresh platform CI is required. The new tests inject operation errors against real staging files; they do not physically fill a volume, kill a process, simulate power loss or validate native macOS/network filesystems. Cleanup remains best-effort when unlink itself fails; broader recovery/metadata/parent-directory guarantees remain outside this component."
+ci = "pending"
+ci_run_urls = []

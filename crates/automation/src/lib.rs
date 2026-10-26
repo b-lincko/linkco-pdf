@@ -1996,7 +1996,19 @@ fn write_atomic_syncing(
     suffixes: impl IntoIterator<Item = u64>,
     sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
 ) -> Result<()> {
-    use std::io::Write;
+    write_atomic_using(path, bytes, suffixes, std::io::Write::write_all, sync_all, |from, to| std::fs::rename(from, to))
+}
+
+/// The save pipeline with private I/O seams for deterministic failure tests. Production callers
+/// always supply the standard file operations; these are not automation/runtime fault switches.
+fn write_atomic_using(
+    path: &Path,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    write_all: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+    rename: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+) -> Result<()> {
     // A folder can't be replaced, and staging beside it could land outside the root: "." names
     // the root itself, whose parent isn't ours to write in.
     if path.is_dir() {
@@ -2010,13 +2022,13 @@ fn write_atomic_syncing(
     // Closed at the end of the block, before the rename.
     let written = {
         let mut file = file;
-        file.write_all(bytes).and_then(|()| sync_staged(&file, sync_all))
+        write_all(&mut file, bytes).and_then(|()| sync_staged(&file, sync_all))
     };
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
         return Err(failed(format!("{}: {e}", tmp.display())));
     }
-    std::fs::rename(&tmp, path).map_err(|e| {
+    rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         failed(format!("{}: {e}", path.display()))
     })
@@ -2109,6 +2121,139 @@ mod tests {
         {
             Err(std::io::Error::other(format!("no symbolic links here: {} {}", target.display(), link.display())))
         }
+    }
+
+    #[test]
+    fn a_partial_disk_full_write_never_replaces_the_target() {
+        use std::io::Write as _;
+        for existing in [false, true] {
+            let dir = staging_dir(&format!("partial-write-{existing}"));
+            let target = dir.join("out.pdf");
+            if existing {
+                std::fs::write(&target, b"ORIGINAL").unwrap();
+            }
+            let error = write_atomic_using(
+                &target,
+                b"NEW CONTENT",
+                [7],
+                |file, bytes| {
+                    assert_eq!(bytes, b"NEW CONTENT");
+                    file.write_all(b"NEW")?;
+                    assert_eq!(read(&staged(&dir, 7)), "NEW", "actual partial bytes reached staging");
+                    Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "injected disk full"))
+                },
+                |_| panic!("a failed write must not reach flush"),
+                |_, _| panic!("a failed write must not reach rename"),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("injected disk full"), "{error}");
+            if existing {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_denied_rename_keeps_original_bytes_and_cleans_staging() {
+        for existing in [false, true] {
+            let dir = staging_dir(&format!("denied-rename-{existing}"));
+            let target = dir.join("out.pdf");
+            if existing {
+                std::fs::write(&target, b"ORIGINAL").unwrap();
+            }
+            let flushed = std::cell::Cell::new(false);
+            let renamed = std::cell::Cell::new(false);
+            let error = write_atomic_using(
+                &target,
+                b"NEW CONTENT",
+                [7],
+                std::io::Write::write_all,
+                |file| {
+                    assert!(!flushed.replace(true));
+                    file.sync_all()
+                },
+                |from, to| {
+                    assert!(!renamed.replace(true));
+                    assert!(flushed.get(), "flush before rename");
+                    assert_eq!(from, staged(&dir, 7));
+                    assert_eq!(to, target);
+                    assert_eq!(read(from), "NEW CONTENT");
+                    assert_eq!(to.exists(), existing);
+                    if existing {
+                        assert_eq!(read(to), "ORIGINAL", "rename has not happened yet");
+                    }
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::fs::OpenOptionsExt as _;
+                        // Exclusive reopening would fail if the staging writer were still open.
+                        let exclusive = std::fs::OpenOptions::new().read(true).share_mode(0).open(from).unwrap();
+                        drop(exclusive);
+                    }
+                    Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected rename denial"))
+                },
+            )
+            .unwrap_err();
+            assert!(flushed.get() && renamed.get());
+            assert!(error.to_string().contains("injected rename denial"), "{error}");
+            if existing {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn interrupted_and_short_writes_can_finish_before_replacement() {
+        use std::io::Write as _;
+        struct ShortWrites<'a> {
+            file: &'a mut std::fs::File,
+            calls: usize,
+        }
+        impl std::io::Write for ShortWrites<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                if self.calls == 1 {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                self.file.write(bytes.get(..2).unwrap_or(bytes))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.file.flush()
+            }
+        }
+        let dir = staging_dir("short-interrupted");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"ORIGINAL").unwrap();
+        write_atomic_using(
+            &target,
+            b"NEW CONTENT",
+            [7],
+            |file, bytes| {
+                let mut writer = ShortWrites { file, calls: 0 };
+                writer.write_all(bytes)?;
+                assert!(writer.calls > 2, "retry interruption and multiple short writes");
+                Ok(())
+            },
+            |file| {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(read(&staged(&dir, 7)), "NEW CONTENT");
+                file.sync_all()
+            },
+            |from, to| std::fs::rename(from, to),
+        )
+        .unwrap();
+        assert_eq!(read(&target), "NEW CONTENT");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

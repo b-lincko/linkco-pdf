@@ -105,3 +105,7 @@ Exports complete synchronously. `progressToken` and cancellation notifications a
 ignored; no background-job or cancellation behavior is added.
 
 Session resources `pdfcraft://document` and `pdfcraft://commands`, and the refusal of unknown argument keys, are described in [docs/mcp.md](../../docs/mcp.md).
+
+## Atomic-save failure coverage
+
+The private atomic writer has deterministic write/flush/rename seams for unit tests only; production always uses standard file operations. Tests cover real partial staging bytes plus an injected disk-full error, a post-flush rename denial, and recoverable interrupted/short writes. Existing/new-target failures preserve the old bytes or absence of the target, report failure and clean up staging in the tested cases. There is no public/runtime fault switch. The existing tool save-failure/retry test checks that failed output does not mark unsaved edits as saved. These are not physical volume-full, process-kill, power-loss or guaranteed-unlink tests.
