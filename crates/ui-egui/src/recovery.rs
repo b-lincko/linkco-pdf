@@ -8,6 +8,8 @@
 //!
 //! Encrypted documents are stored encrypted (the working file is), so recovery never writes
 //! plaintext of a protected document to disk. The web build has no recovery store yet.
+//! A snapshot is acknowledged only after both store writes succeed; failed revisions remain
+//! pending for retry without another edit. The PDF and metadata are still separate replacements.
 
 use std::path::{Path, PathBuf};
 
@@ -133,9 +135,12 @@ impl PdfCraftApp {
         let Some(store) = self.recovery.clone() else { return };
         for snap in self.session.autosave_snapshots() {
             let key = self.recovery_keys.entry(snap.doc).or_insert_with(|| format!("{}-{}-{}", now_secs(), std::process::id(), snap.doc.0)).clone();
-            let meta = RecoveryMeta { key, name: snap.name, path: snap.path, saved_at: now_secs(), encrypted: snap.encrypted };
-            if let Err(e) = store.write(&meta, &snap.bytes) {
-                log::warn!("autosave failed: {e}");
+            let meta = RecoveryMeta { key, name: snap.name.clone(), path: snap.path.clone(), saved_at: now_secs(), encrypted: snap.encrypted };
+            match store.write(&meta, &snap.bytes) {
+                Ok(()) => {
+                    self.session.acknowledge_autosave(&snap);
+                }
+                Err(e) => log::warn!("autosave failed: {e}"),
             }
         }
     }

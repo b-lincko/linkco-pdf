@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B005"
+active_component = "B006"
 confirmation_required_after_each_component = true
 auto_advance = false
 steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verify_ci", "ask_to_continue"]
@@ -96,3 +96,17 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40279282248"
 ci_notes = "All five workflows passed at 4b3a22b: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler tests. Both new test functions are included in the workspace unit suites. Existing workflow policy skipped mutation fuzzing; the four local scratch regression-mutation checks are not a fuzz run. No production behavior, existing safety assertions or deadlines were changed."
 implementation_commit = "4b3a22bd6e9d82f86e60a855bcacb5ff8a59a701"
 verification_commit = "4b3a22bd6e9d82f86e60a855bcacb5ff8a59a701"
+
+[components.B006]
+title = "Retry recovery autosaves until complete persistence succeeds"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "ci_pending"
+acceptance = "Do not consume an unsaved revision when selecting an autosave snapshot. Acknowledge only after PDF and metadata writes both succeed; retry failures without another edit, independently per document. Reject acknowledgements for newer/closed/clean documents and keep autosaved documents dirty. Cover real filesystem refusals, prior/new entries, encrypted/plain PDFs and fresh-app recovery after retry."
+notes = "The user approved continuation after B005. B006 fixes a reproduced snapshot-selection bug; it does not implement orphan cleanup, a transactional PDF/metadata pair, web recovery or power-loss guarantees. Stop for explicit approval after verification."
+code = ["crates/engine/src/lib.rs", "crates/engine/src/tests.rs", "crates/ui-egui/src/recovery.rs", "crates/ui-egui/tests/recovery.rs"]
+audit = "Baseline selection advanced snapshot_generation before RecoveryStore::write; a failed write was not retried without another edit. A regression against the extracted actual selection method failed before the fix. Selection is now read-only; a private revision token and current-byte identity guard the engine acknowledgement, called only after the whole store write returns Ok. Re-audit checked all callers, dirty/undo/save/close behavior, per-document state, metadata-write ordering and unchanged encryption/storage paths."
+local_evidence = ["Five standalone tests of actual extracted engine selection/acknowledgement and UI autosave-loop methods passed, using lightweight document/store stubs (not full-engine or filesystem integration)", "Baseline actual selector failed the unacknowledged-retry regression", "Three scratch mutation checks rejected selection-time consumption, stale acknowledgement and acknowledgement before store success", "Standalone Clippy with warnings denied passed", "cargo fmt --all -- --check passed"]
+verification_limit = "Full local workspace Clippy/test/wasm gates are blocked by the unavailable craft-libs checkout; fresh platform CI must run the real engine and filesystem/app integration tests. The new integration tests drop/reopen app instances, not real processes. Directory/rename refusals are controlled filesystem errors, not physical volume-full or power loss. RecoveryStore still writes PDF then JSON separately; pair-transactionality, concurrent sessions, hostile store contents, automatic orphan cleanup, native macOS/network filesystems and web recovery are outside this component."
+ci = "pending"
+ci_run_urls = []

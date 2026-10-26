@@ -226,7 +226,7 @@ pub struct Document {
     pub dirty: bool,
     /// Bumped on every change to the working file (edit, undo, redo, save); autosave compares it.
     generation: u64,
-    /// The generation last handed out by `autosave_snapshots`.
+    /// The generation last acknowledged as successfully persisted for recovery.
     snapshot_generation: u64,
     /// Why the document cannot be edited (e.g. encryption), if so.
     pub read_only_reason: Option<String>,
@@ -647,6 +647,8 @@ fn outline_rows(items: &[pdfcraft_render::OutlineItem]) -> Vec<BookmarkRow> {
 /// A document's working file captured for crash recovery.
 #[derive(Clone, Debug)]
 pub struct RecoverySnapshot {
+    // An opaque revision token: callers must acknowledge the snapshot they actually stored.
+    generation: u64,
     pub doc: DocId,
     pub name: String,
     pub path: Option<String>,
@@ -3169,14 +3171,15 @@ impl Session {
         write_full(doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
 
-    /// Documents with unsaved changes made since the last call: their current working file,
-    /// for crash recovery. Encrypted documents stay encrypted in the snapshot.
-    pub fn autosave_snapshots(&mut self) -> Vec<RecoverySnapshot> {
+    /// Documents with unsaved changes not yet acknowledged as persisted for crash recovery.
+    /// Selection does not mark a revision stored: call `acknowledge_autosave` only after the
+    /// whole recovery-store write succeeds. Encrypted documents stay encrypted in the snapshot.
+    pub fn autosave_snapshots(&self) -> Vec<RecoverySnapshot> {
         let mut out = Vec::new();
-        for d in &mut self.docs {
+        for d in &self.docs {
             if d.dirty && d.generation != d.snapshot_generation {
-                d.snapshot_generation = d.generation;
                 out.push(RecoverySnapshot {
+                    generation: d.generation,
                     doc: d.id,
                     name: d.name.clone(),
                     path: d.path.clone(),
@@ -3186,6 +3189,18 @@ impl Session {
             }
         }
         out
+    }
+
+    /// Acknowledge a complete, successful recovery-store write. A stale snapshot cannot mark
+    /// a newer edit persisted, nor regress an already acknowledged revision. This never marks
+    /// the document saved. Returns false for a closed, clean or changed document.
+    pub fn acknowledge_autosave(&mut self, snapshot: &RecoverySnapshot) -> bool {
+        let Some(d) = self.docs.iter_mut().find(|d| d.id == snapshot.doc) else { return false };
+        if !d.dirty || d.generation != snapshot.generation || !Arc::ptr_eq(&d.bytes, &snapshot.bytes) {
+            return false;
+        }
+        d.snapshot_generation = snapshot.generation;
+        true
     }
 
     /// Mark a document opened from a recovery file: it has unsaved changes and belongs at

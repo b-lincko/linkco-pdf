@@ -126,6 +126,114 @@ fn saving_or_closing_clears_the_entry_and_nothing_is_written_for_clean_documents
     let _ = std::fs::remove_file(out);
 }
 
+/// A real filesystem refusal must not consume a revision. Retry without another edit, then
+/// recover its complete PDF in a fresh app (not a process-kill or power-loss simulation).
+#[test]
+fn failed_autosaves_retry_without_an_edit_and_recover_in_a_fresh_app() {
+    for protected in [false, true] {
+        for prior in [false, true] {
+            let s = store(&format!("retry-{protected}-{prior}"));
+            let original = s.dir().with_extension("original.pdf");
+            let bytes = if protected { encrypted(fixture(3), "pw") } else { fixture(3) };
+            std::fs::write(&original, &bytes).unwrap();
+            let path = original.to_string_lossy().into_owned();
+            let mut app = PdfCraftApp::new();
+            app.enable_recovery(s.clone());
+            app.open_bytes("work.pdf", Some(path.clone()), bytes.clone()).unwrap();
+            if protected {
+                app.submit_password(Some("pw".into()));
+            }
+            assert!(app.apply_edit(Edit::RotatePages { pages: vec![0], degrees: 90 }));
+            let backup = s.dir().with_extension("backup");
+            if prior {
+                app.autosave_now();
+                assert_eq!(s.list().len(), 1);
+                std::fs::rename(s.dir(), &backup).unwrap();
+                assert!(app.apply_edit(Edit::DeletePages { pages: vec![2] }));
+            }
+            let id = app.views[0].id;
+            let expected = app.session.get(id).unwrap().bytes.clone();
+            // A file in place of the store directory fails even as root and on Windows.
+            std::fs::write(s.dir(), b"BLOCKED STORE").unwrap();
+            app.autosave_now();
+            app.autosave_now();
+            assert_eq!(std::fs::read(s.dir()).unwrap(), b"BLOCKED STORE");
+            assert_eq!(app.session.get(id).unwrap().bytes, expected);
+            assert!(app.session.get(id).unwrap().dirty);
+            assert_eq!(app.session.autosave_snapshots().len(), 1, "failed writes stay pending");
+            std::fs::remove_file(s.dir()).unwrap();
+            if prior {
+                std::fs::rename(&backup, s.dir()).unwrap();
+                assert_ne!(s.read(&s.list()[0].key).unwrap().as_slice(), expected.as_slice(), "last stored revision survived");
+            }
+            app.autosave_now(); // No edit between failure and retry.
+            assert!(app.session.autosave_snapshots().is_empty(), "success acknowledges the revision");
+            let entries = s.list();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(s.read(&entries[0].key).unwrap().as_slice(), expected.as_slice());
+            assert_eq!(std::fs::read(&original).unwrap(), bytes, "autosave never changes the original");
+            drop(app); // Deliberately no clean shutdown.
+            let mut reopened = PdfCraftApp::new();
+            reopened.enable_recovery(s.clone());
+            assert_eq!(reopened.recoverable.len(), 1);
+            reopened.recover(&[entries[0].key.clone()]);
+            if protected {
+                assert!(reopened.password_prompt.is_some());
+                reopened.submit_password(Some("pw".into()));
+            }
+            assert_eq!(reopened.views.len(), 1);
+            let recovered = reopened.session.get(reopened.views[0].id).unwrap();
+            assert!(recovered.dirty);
+            assert_eq!(recovered.path.as_deref(), Some(path.as_str()));
+            assert_eq!(recovered.info.pages.len(), if prior { 2 } else { 3 });
+            assert_eq!(recovered.info.pages[0].rotation, 90);
+            assert_eq!(recovered.bytes, expected);
+            s.clear();
+            std::fs::remove_dir_all(s.dir()).unwrap();
+            std::fs::remove_file(original).unwrap();
+        }
+    }
+}
+
+/// Metadata is the second write: persisting PDF bytes alone must not acknowledge an autosave.
+#[test]
+fn a_failed_metadata_write_keeps_the_autosave_pending() {
+    for protected in [false, true] {
+        let s = store(&format!("metadata-retry-{protected}"));
+        let mut app = PdfCraftApp::new();
+        app.enable_recovery(s.clone());
+        let bytes = if protected { encrypted(fixture(3), "pw") } else { fixture(3) };
+        app.open_bytes("work.pdf", None, bytes).unwrap();
+        if protected {
+            app.submit_password(Some("pw".into()));
+        }
+        assert!(app.apply_edit(Edit::RotatePages { pages: vec![0], degrees: 90 }));
+        app.autosave_now();
+        let entry = s.list().remove(0);
+        let metadata = s.dir().join(format!("{}.json", entry.key));
+        std::fs::remove_file(&metadata).unwrap();
+        std::fs::create_dir(&metadata).unwrap(); // Portable rename denial after PDF persistence.
+        assert!(app.apply_edit(Edit::DeletePages { pages: vec![2] }));
+        let id = app.views[0].id;
+        let expected = app.session.get(id).unwrap().bytes.clone();
+        app.autosave_now();
+        assert!(metadata.is_dir());
+        let persisted = s.read(&entry.key).unwrap();
+        assert_eq!(persisted.as_slice(), expected.as_slice(), "PDF write completed before metadata failed");
+        if protected {
+            assert!(!String::from_utf8_lossy(&persisted).contains("Confidential"));
+        }
+        assert_eq!(app.session.autosave_snapshots().len(), 1, "acknowledge only the complete store write");
+        std::fs::remove_dir(metadata).unwrap();
+        app.autosave_now();
+        assert_eq!(s.list().len(), 1, "metadata is retried without another edit");
+        assert!(app.session.autosave_snapshots().is_empty());
+        assert!(app.session.get(id).unwrap().dirty);
+        s.clear();
+        std::fs::remove_dir_all(s.dir()).unwrap();
+    }
+}
+
 #[test]
 fn quitting_cleanly_leaves_nothing_behind() {
     let s = store("quit");

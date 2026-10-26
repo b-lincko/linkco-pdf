@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B005 · **Active stage:** basic
+**Active component:** B006 · **Active stage:** basic
 
-## Basic (336 records)
+## Basic (337 records)
 
-complete: 5, in_progress: 1, pending: 330
+ci_pending: 1, complete: 5, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -23,6 +23,7 @@ complete: 5, in_progress: 1, pending: 330
 | B003 | [x] Create Unix atomic-save staging files with private permissions | P0 | complete | REC-R01 |
 | B004 | [x] Deterministic atomic-save write and rename fault coverage | P0 | complete | REC-R01 |
 | B005 | [x] Process-termination boundaries and safe retry for atomic saves | P0 | complete | REC-R01 |
+| B006 | [ ] Retry recovery autosaves until complete persistence succeeds | P0 | ci_pending | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -765,3 +766,17 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282211
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282228
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282235
+
+### B006: Retry recovery autosaves until complete persistence succeeds
+
+- Status: **ci_pending**; parent(s): REC-R01.
+- Acceptance: Do not consume an unsaved revision when selecting an autosave snapshot. Acknowledge only after PDF and metadata writes both succeed; retry failures without another edit, independently per document. Reject acknowledgements for newer/closed/clean documents and keep autosaved documents dirty. Cover real filesystem refusals, prior/new entries, encrypted/plain PDFs and fresh-app recovery after retry.
+- Audit: Baseline selection advanced snapshot_generation before RecoveryStore::write; a failed write was not retried without another edit. A regression against the extracted actual selection method failed before the fix. Selection is now read-only; a private revision token and current-byte identity guard the engine acknowledgement, called only after the whole store write returns Ok. Re-audit checked all callers, dirty/undo/save/close behavior, per-document state, metadata-write ordering and unchanged encryption/storage paths.
+- Verification Limit: Full local workspace Clippy/test/wasm gates are blocked by the unavailable craft-libs checkout; fresh platform CI must run the real engine and filesystem/app integration tests. The new integration tests drop/reopen app instances, not real processes. Directory/rename refusals are controlled filesystem errors, not physical volume-full or power loss. RecoveryStore still writes PDF then JSON separately; pair-transactionality, concurrent sessions, hostile store contents, automatic orphan cleanup, native macOS/network filesystems and web recovery are outside this component.
+- Ci: pending
+- Notes: The user approved continuation after B005. B006 fixes a reproduced snapshot-selection bug; it does not implement orphan cleanup, a transactional PDF/metadata pair, web recovery or power-loss guarantees. Stop for explicit approval after verification.
+- Local evidence: Five standalone tests of actual extracted engine selection/acknowledgement and UI autosave-loop methods passed, using lightweight document/store stubs (not full-engine or filesystem integration).
+- Local evidence: Baseline actual selector failed the unacknowledged-retry regression.
+- Local evidence: Three scratch mutation checks rejected selection-time consumption, stale acknowledgement and acknowledgement before store success.
+- Local evidence: Standalone Clippy with warnings denied passed.
+- Local evidence: cargo fmt --all -- --check passed.

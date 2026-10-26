@@ -526,8 +526,8 @@ milestone = "M4"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/engine/src/tests.rs::autosave_snapshots_only_changed_documents", "crates/ui-egui/tests/recovery.rs::saving_or_closing_clears_the_entry_and_nothing_is_written_for_clean_documents"]
-notes = ""
+evidence = ["crates/engine/src/tests.rs::autosave_snapshots_only_changed_documents", "crates/engine/src/tests.rs::an_unacknowledged_autosave_remains_retryable_without_another_edit", "crates/engine/src/tests.rs::a_stale_autosave_acknowledgement_cannot_suppress_newer_work", "crates/engine/src/tests.rs::autosave_acknowledgements_are_per_document", "crates/ui-egui/tests/recovery.rs::saving_or_closing_clears_the_entry_and_nothing_is_written_for_clean_documents", "crates/ui-egui/tests/recovery.rs::failed_autosaves_retry_without_an_edit_and_recover_in_a_fresh_app", "crates/ui-egui/tests/recovery.rs::a_failed_metadata_write_keeps_the_autosave_pending"]
+notes = "Recovery snapshots remain pending until both PDF and metadata writes succeed; failures can retry without another edit. Revision-specific acknowledgement rejects stale snapshots and never marks user work saved. The two store files are still replaced separately; transactional pair recovery, orphan cleanup, physical disk-full/power-loss and web recovery are not claimed."
 
 [[feature]]
 id = "core.crash-recovery"

@@ -712,7 +712,8 @@ fn autosave_snapshots_only_changed_documents() {
     let snaps = s.autosave_snapshots();
     assert_eq!(snaps.len(), 1);
     assert_eq!(snaps[0].bytes, s.get(id).unwrap().bytes, "the working file");
-    assert!(s.autosave_snapshots().is_empty(), "nothing new since the last snapshot");
+    assert!(s.acknowledge_autosave(&snaps[0]));
+    assert!(s.autosave_snapshots().is_empty(), "nothing new since the persisted snapshot");
     s.undo(id).unwrap();
     assert_eq!(s.autosave_snapshots().len(), 1, "undo is a change too");
     let saved = s.save_bytes(id).unwrap();
@@ -728,9 +729,60 @@ fn autosave_snapshots_a_new_unsaved_document_once() {
     assert_eq!(snaps.len(), 1, "the new document is unsaved work");
     assert_eq!(snaps[0].doc, id);
     assert!(snaps.iter().all(|x| x.doc != clean), "the clean document stays out");
-    assert!(s.autosave_snapshots().is_empty(), "nothing new since the last snapshot");
+    assert!(s.acknowledge_autosave(&snaps[0]));
+    assert!(s.autosave_snapshots().is_empty(), "nothing new since the persisted snapshot");
     s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
     assert_eq!(s.autosave_snapshots().len(), 1, "a later edit is snapshotted again");
+}
+
+#[test]
+fn an_unacknowledged_autosave_remains_retryable_without_another_edit() {
+    let (mut s, id) = session_with(2);
+    s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
+    let first = s.autosave_snapshots().remove(0);
+    let retry = s.autosave_snapshots().remove(0);
+    assert_eq!(retry.doc, first.doc);
+    assert_eq!(retry.bytes, first.bytes, "failure must not require another edit to retry");
+    assert!(s.acknowledge_autosave(&retry));
+    assert!(s.autosave_snapshots().is_empty());
+    assert!(s.get(id).unwrap().dirty, "an autosave is not a user save");
+}
+
+#[test]
+fn a_stale_autosave_acknowledgement_cannot_suppress_newer_work() {
+    let (mut s, id) = session_with(2);
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    let old = s.autosave_snapshots().remove(0);
+    s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
+    assert!(!s.acknowledge_autosave(&old));
+    let latest = s.autosave_snapshots().remove(0);
+    assert_ne!(old.bytes, latest.bytes);
+    assert!(s.acknowledge_autosave(&latest));
+    assert!(!s.acknowledge_autosave(&old), "do not regress the persisted revision");
+    assert!(s.autosave_snapshots().is_empty());
+    s.undo(id).unwrap();
+    assert!(!s.acknowledge_autosave(&latest));
+    assert_eq!(s.autosave_snapshots().len(), 1, "undo also needs persistence");
+    let pending = s.autosave_snapshots().remove(0);
+    let saved = s.save_bytes(id).unwrap();
+    s.mark_saved(id, saved, None).unwrap();
+    assert!(!s.acknowledge_autosave(&pending), "a clean document needs no acknowledgement");
+    s.close(id);
+    assert!(!s.acknowledge_autosave(&pending), "a closed document is ignored");
+}
+
+#[test]
+fn autosave_acknowledgements_are_per_document() {
+    let mut s = Session::new();
+    let first = s.open_new("first.pdf", Arc::new(fixture(1))).unwrap();
+    let second = s.open_new("second.pdf", Arc::new(fixture(1))).unwrap();
+    let snapshots = s.autosave_snapshots();
+    assert_eq!(snapshots.len(), 2);
+    let stored = snapshots.iter().find(|snap| snap.doc == first).unwrap();
+    assert!(s.acknowledge_autosave(stored));
+    let pending = s.autosave_snapshots();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].doc, second);
 }
 
 #[test]
