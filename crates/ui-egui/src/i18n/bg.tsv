@@ -2186,3 +2186,7 @@ key	Space	Интервал
 	Turn upside down (180°)	Обърни наопаки (180°)
 	the name is not a plain file name	името не е обикновено име на файл
 	Developer: {name}	Разработчик: {name}
+	Overwrite	Запиши върху
+	Save As…	Запази като…
+	“{name}” changed on disk while you were working on it.	„{name}“ се промени на диска, докато работехе по него.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Записът върху него ще замени версията, която друга програма е записала. Запазете копие, ако ви трябват и двете.

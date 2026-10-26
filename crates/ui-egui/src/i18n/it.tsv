@@ -2231,3 +2231,7 @@ key	Space	Spazio
 	Turn upside down (180°)	Capovolgi (ruota di 180°)
 	the name is not a plain file name	il nome non è un semplice nome file
 	Developer: {name}	Sviluppatore: {name}
+	Overwrite	Sovrascrivi
+	Save As…	Salva con nome…
+	“{name}” changed on disk while you were working on it.	«{name}» è cambiato su disco mentre ci lavoravi.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Salvando sopra sostituirai la versione scritta da un altro programma. Salva una copia se ti servono entrambe.

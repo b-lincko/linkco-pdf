@@ -2224,3 +2224,7 @@ key	Space	Leertaste
 	Turn upside down (180°)	Auf den Kopf drehen (180°)
 	the name is not a plain file name	der Name ist kein einfacher Dateiname
 	Developer: {name}	Entwickler: {name}
+	Overwrite	Überschreiben
+	Save As…	Speichern unter…
+	“{name}” changed on disk while you were working on it.	„{name}“ wurde auf dem Datenträger geändert, während Sie daran gearbeitet haben.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Beim Darüberspeichern würde die von einem anderen Programm geschriebene Fassung ersetzt. Speichern Sie eine Kopie, wenn Sie beide brauchen.

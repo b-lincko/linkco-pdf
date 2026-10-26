@@ -2225,3 +2225,7 @@ key	Space	Espaço
 	Turn upside down (180°)	Virar de cabeça para baixo (180°)
 	the name is not a plain file name	o nome não é um nome de arquivo simples
 	Developer: {name}	Desenvolvedor: {name}
+	Overwrite	Substituir
+	Save As…	Salvar como…
+	“{name}” changed on disk while you were working on it.	“{name}” mudou no disco enquanto você trabalhava nele.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Salvar por cima substituiria a versão gravada por outro programa. Salve uma cópia se precisar das duas.

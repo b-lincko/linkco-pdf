@@ -2110,3 +2110,7 @@ key	Space	空格
 	Turn upside down (180°)	上下顛倒 (180°)
 	the name is not a plain file name	名稱不是單純的檔案名稱
 	Developer: {name}	開發者：{name}
+	Overwrite	覆寫
+	Save As…	另存新檔…
+	“{name}” changed on disk while you were working on it.	您處理「{name}」期間，該檔案在磁碟上已被變更。
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	覆寫儲存將取代另一個程式寫入的版本。如果兩個版本都需要，請另存一份。
