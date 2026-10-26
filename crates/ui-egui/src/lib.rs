@@ -967,9 +967,9 @@ impl PdfCraftApp {
     ) -> Result<(), String> {
         use pdfcraft_render::OpenError;
         let size = bytes.len();
-        // Remember what was on disk, but only for a file this open actually read: recovered
-        // snapshots and browser uploads have no readable original here.
-        let stamp = path.as_deref().and_then(|p| conflict::Stamp::of_path(std::path::Path::new(p)));
+        // Remember what was on disk, but only for a file this open actually read: the bytes in
+        // hand are that file's contents, so no second read is needed.
+        let stamp = path.as_deref().map(|_| conflict::Stamp::of_bytes(bytes.as_slice()));
         let id = match self.session.open(name, path.clone(), bytes.clone(), password) {
             Ok(id) => id,
             Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
