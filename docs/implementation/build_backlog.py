@@ -90,8 +90,18 @@ def build():
         if not set(c["parent_tasks"]) <= by_id.keys():
             raise ValueError("Unknown component parent")
     workflow = progress["workflow"]
-    if workflow["order"] != list(STAGES) or not workflow["confirmation_required_after_each_component"] or workflow["auto_advance"]:
-        raise ValueError("Do not change the user's stage order or confirmation gate")
+    batch = workflow.get("batch_authorized_stage")
+    batch_authorized = (
+        batch == "basic"
+        and workflow["active_stage"] == "basic"
+        and bool(workflow.get("batch_authorization", "").strip())
+        and bool(workflow.get("batch_authorization_date", "").strip())
+        and workflow.get("confirmation_required_before_stage_change") is True
+    )
+    if (workflow["order"] != list(STAGES) or workflow["auto_advance"]
+            or (not workflow["confirmation_required_after_each_component"] and not batch_authorized)
+            or (batch is not None and not batch_authorized)):
+        raise ValueError("Do not change the user's stage order or confirmation gate without stage-scoped batch authorization")
     if workflow["active_stage"] not in STAGES or workflow["active_component"] not in progress["components"]:
         raise ValueError("Invalid active stage/component")
     stage_index = STAGES.index(workflow["active_stage"])
@@ -103,9 +113,11 @@ def build():
 
 
 def markdown(rows, progress):
+    continuation = ("continue the user-authorized basic batch; ask before changing stage"
+                    if not progress["workflow"]["confirmation_required_after_each_component"] else "ask the user to continue")
     lines = ["# Live implementation TODO", "", "> Generated from the full research inventory and `progress.toml`; do not edit statuses here.", "",
              "[Workflow and completion rules](README.md) · [Filterable CSV](TODO.csv) · [Original research](../research/pdf-product-strategy-2026-10-25/README.md)", "",
-             "Order: **basic → advanced → future**. Implement → audit → fix → re-audit → test → push → verify CI → ask the user to continue.", "",
+             f"Order: **basic → advanced → future**. Implement → audit → fix → re-audit → test → push → verify CI → {continuation}.", "",
              "Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus bounded components. These overlap; they are not 629 distinct new functions. Existing shipped features are not marked missing. Complete a gap only when its own criteria are demonstrated, not just because a related component landed.", "",
              "P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.", "",
              f"**Active component:** {progress['workflow']['active_component']} · **Active stage:** {progress['workflow']['active_stage']}", ""]

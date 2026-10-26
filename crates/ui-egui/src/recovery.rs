@@ -218,6 +218,11 @@ impl PdfCraftApp {
     pub fn recover(&mut self, keys: &[String]) {
         let Some(store) = self.recovery.clone() else { return };
         for key in keys {
+            // One prompt owns its bytes and recovery association until answered. Leave all
+            // later entries on offer instead of replacing a prompt with the next document.
+            if self.password_prompt.is_some() {
+                break;
+            }
             let Some(meta) = self.recoverable.iter().find(|m| &m.key == key).cloned() else { continue };
             let bytes = match store.read(key) {
                 Ok(b) => b,
@@ -227,19 +232,32 @@ impl PdfCraftApp {
                 }
             };
             match self.open_bytes(&meta.name, None, bytes) {
-                Ok(()) if self.password_prompt.is_none() => self.finish_recovery(&meta),
-                // Encrypted: the password prompt opens it, and finishes its recovery once it
-                // does. The association travels with the prompt, so cancelling it cannot hand
-                // this snapshot's path to the next document that is unlocked (#813).
                 Ok(()) => {
                     if let Some(prompt) = self.password_prompt.as_mut() {
                         prompt.recovered = Some(meta.clone());
+                    } else {
+                        self.finish_recovery(&meta);
                     }
+                    // Only a successful open (or its pending password prompt) consumes the
+                    // offer. Read/open failures and deferred entries remain retryable.
+                    self.recoverable.retain(|m| &m.key != key);
                 }
                 Err(e) => self.notify_fmt("Couldn't recover {name}: {e}", &[("name", &meta.name), ("e", &e.to_string())]),
             }
         }
-        self.recoverable.retain(|m| !keys.contains(&m.key));
+    }
+
+    pub(crate) fn show_pending_recovery(&mut self) {
+        if !self.recoverable.is_empty() && self.password_prompt.is_none() && self.dialog.is_none() {
+            self.dialog = Some(crate::Dialog::Recovery);
+        }
+    }
+
+    pub(crate) fn return_recovery(&mut self, meta: RecoveryMeta) {
+        if !self.recoverable.iter().any(|m| m.key == meta.key) {
+            self.recoverable.push(meta);
+        }
+        self.show_pending_recovery();
     }
 
     /// The most recently opened tab came from `meta`: keep its recovery entry and path.

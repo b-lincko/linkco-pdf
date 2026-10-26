@@ -1320,6 +1320,9 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     } else {
         app.dialog = Some(next);
     }
+    if recover == Some(true) {
+        app.show_pending_recovery();
+    }
     if let Some(cmd) = link_command {
         app.execute(cmd);
     }

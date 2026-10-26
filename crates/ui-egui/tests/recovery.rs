@@ -429,3 +429,124 @@ fn forged_recovery_keys_cannot_redirect_recovery_or_discard_outside_the_store() 
         }
     }
 }
+
+#[test]
+fn failed_recovery_stays_visible_and_can_be_retried_after_read_or_parse_repair() {
+    for read_failure in [false, true] {
+        let s = store(&format!("recover-retry-{read_failure}"));
+        crashed_session(&s, fixture(3), None, Some("/docs/retry.pdf"));
+        let meta = s.list().remove(0);
+        let saved = s.read(&meta.key).unwrap();
+        let pdf = s.dir().join(format!("{}.pdf", meta.key));
+        let mut h = harness(s.clone());
+        // Damage the bytes after startup, as an interrupted replacement or media error would.
+        if read_failure {
+            std::fs::remove_file(&pdf).unwrap();
+            std::fs::create_dir(&pdf).unwrap();
+        } else {
+            std::fs::write(&pdf, b"not a PDF").unwrap();
+        }
+        h.get_by_label("Recover").click();
+        h.run_steps(4);
+        assert!(h.state().views.is_empty());
+        assert_eq!(h.state().recoverable, [meta.clone()]);
+        h.get_by_label("Recover unsaved documents?");
+        assert!(s.dir().join(format!("{}.json", meta.key)).is_file());
+        if read_failure {
+            std::fs::remove_dir(&pdf).unwrap();
+        }
+        std::fs::write(&pdf, saved).unwrap();
+        h.get_by_label("Recover").click();
+        h.run_steps(4);
+        assert!(h.state().recoverable.is_empty());
+        let doc = h.state().session.get(h.state().views[0].id).unwrap();
+        assert!(doc.dirty);
+        assert_eq!(doc.path.as_deref(), Some("/docs/retry.pdf"));
+        assert_eq!(doc.info.pages.len(), 2);
+        s.clear();
+        std::fs::remove_dir_all(s.dir()).unwrap();
+    }
+}
+
+#[test]
+fn repeated_recovery_keys_do_not_open_duplicate_tabs() {
+    let s = store("duplicate-recover");
+    crashed_session(&s, fixture(2), None, None);
+    let key = s.list().remove(0).key;
+    let mut app = PdfCraftApp::new();
+    app.enable_recovery(s.clone());
+    app.recover(&[key.clone(), key]);
+    assert_eq!(app.views.len(), 1);
+    assert!(app.recoverable.is_empty());
+    s.clear();
+    std::fs::remove_dir_all(s.dir()).unwrap();
+}
+
+#[test]
+fn multiple_encrypted_recoveries_keep_their_own_prompts_and_reoffer_deferred_entries() {
+    let s = store("serial-passwords");
+    let mut initial = PdfCraftApp::new();
+    initial.enable_recovery(s.clone());
+    for (name, path, password) in [("A.pdf", "/docs/A.pdf", "pw-a"), ("B.pdf", "/docs/B.pdf", "pw-b")] {
+        initial.open_bytes(name, Some(path.into()), encrypted(fixture(3), password)).unwrap();
+        initial.submit_password(Some(password.into()));
+        assert!(initial.apply_edit(Edit::DeletePages { pages: vec![0] }));
+    }
+    initial.autosave_now();
+    drop(initial);
+    let mut h = harness(s.clone());
+    let entries = h.state().recoverable.clone();
+    assert_eq!(entries.len(), 2);
+    let password = |name: &str| if name == "A.pdf" { "pw-a" } else { "pw-b" };
+    h.get_by_label("Recover").click();
+    h.run_steps(3);
+    assert!(h.state().password_prompt.is_some());
+    assert_eq!(h.state().recoverable.as_slice(), &entries[1..]);
+    h.state_mut().submit_password(Some("wrong".into()));
+    h.run_steps(3);
+    assert!(h.state().views.is_empty());
+    assert_eq!(h.state().recoverable.as_slice(), &entries[1..]);
+    h.state_mut().submit_password(Some(password(&entries[0].name).into()));
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 1);
+    h.get_by_label("Recover unsaved documents?");
+    h.get_by_label("Recover").click();
+    h.run_steps(3);
+    h.state_mut().submit_password(None);
+    h.run_steps(3);
+    assert_eq!(h.state().recoverable.as_slice(), &entries[1..], "cancel returns only that pending snapshot");
+    h.get_by_label("Recover").click();
+    h.run_steps(3);
+    h.state_mut().submit_password(Some(password(&entries[1].name).into()));
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 2);
+    for view in &h.state().views {
+        let doc = h.state().session.get(view.id).unwrap();
+        assert!(doc.dirty);
+        assert_eq!(doc.info.pages.len(), 2);
+        assert_eq!(doc.path.as_deref(), Some(if doc.name == "A.pdf" { "/docs/A.pdf" } else { "/docs/B.pdf" }));
+    }
+    assert!(h.state().recoverable.is_empty());
+    assert_eq!(s.list().len(), 2, "the entries persist until the user saves or discards");
+    s.clear();
+    std::fs::remove_dir_all(s.dir()).unwrap();
+}
+
+#[test]
+fn recovery_does_not_dismiss_an_unrelated_password_prompt() {
+    let s = store("unrelated-prompt");
+    crashed_session(&s, fixture(2), None, None);
+    let keys: Vec<_> = s.list().into_iter().map(|m| m.key).collect();
+    let mut app = PdfCraftApp::new();
+    app.enable_recovery(s.clone());
+    app.open_bytes("unrelated.pdf", None, encrypted(fixture(2), "pw")).unwrap();
+    app.recover(&keys);
+    assert!(app.password_prompt.is_some());
+    assert!(app.views.is_empty());
+    assert_eq!(app.recoverable.len(), 1);
+    app.submit_password(Some("pw".into()));
+    assert_eq!(app.session.get(app.views[0].id).unwrap().name, "unrelated.pdf");
+    assert_eq!(app.recoverable.len(), 1);
+    s.clear();
+    std::fs::remove_dir_all(s.dir()).unwrap();
+}

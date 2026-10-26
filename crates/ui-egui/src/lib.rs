@@ -1140,16 +1140,22 @@ impl PdfCraftApp {
     /// Answer the password prompt (`None` cancels).
     pub fn submit_password(&mut self, password: Option<String>) {
         let Some(p) = self.password_prompt.take() else { return };
+        let recovering = p.recovered.is_some();
         let Some(pw) = password else {
             // A cancelled recovery goes back on offer; its snapshot stays in the store and must
             // not attach itself to whatever document is unlocked next (#813).
             if let Some(meta) = p.recovered {
-                self.recoverable.push(meta);
+                self.return_recovery(meta);
             }
             return;
         };
         match self.try_open(&p.name, p.path, p.bytes, Some(&pw), p.activate) {
-            Err(e) => self.notify_fmt("Couldn't open {name}: {e}", &[("name", &p.name), ("e", &e.to_string())]),
+            Err(e) => {
+                self.notify_fmt("Couldn't open {name}: {e}", &[("name", &p.name), ("e", &e.to_string())]);
+                if let Some(meta) = p.recovered {
+                    self.return_recovery(meta);
+                }
+            }
             // A recovered encrypted document is open once its prompt is gone.
             Ok(()) if self.password_prompt.is_none() => {
                 if let Some(meta) = &p.recovered {
@@ -1162,6 +1168,9 @@ impl PdfCraftApp {
                     prompt.recovered = p.recovered;
                 }
             }
+        }
+        if recovering {
+            self.show_pending_recovery();
         }
     }
 

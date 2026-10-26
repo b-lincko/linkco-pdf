@@ -4,17 +4,17 @@
 
 [Workflow and completion rules](README.md) · [Filterable CSV](TODO.csv) · [Original research](../research/pdf-product-strategy-2026-10-25/README.md)
 
-Order: **basic → advanced → future**. Implement → audit → fix → re-audit → test → push → verify CI → ask the user to continue.
+Order: **basic → advanced → future**. Implement → audit → fix → re-audit → test → push → verify CI → continue the user-authorized basic batch; ask before changing stage.
 
 Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus bounded components. These overlap; they are not 629 distinct new functions. Existing shipped features are not marked missing. Complete a gap only when its own criteria are demonstrated, not just because a related component landed.
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B007 · **Active stage:** basic
+**Active component:** B008 · **Active stage:** basic
 
-## Basic (338 records)
+## Basic (339 records)
 
-complete: 7, in_progress: 1, pending: 330
+ci_pending: 1, complete: 7, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -25,6 +25,7 @@ complete: 7, in_progress: 1, pending: 330
 | B005 | [x] Process-termination boundaries and safe retry for atomic saves | P0 | complete | REC-R01 |
 | B006 | [x] Retry recovery autosaves until complete persistence succeeds | P0 | complete | REC-R01 |
 | B007 | [x] Validate recovery keys and bind metadata to its entry filename | P0 | complete | REC-R01 |
+| B008 | [ ] Keep failed recovery offers retryable and serialize password prompts | P0 | ci_pending | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -805,3 +806,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728229
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728210
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728476
+
+### B008: Keep failed recovery offers retryable and serialize password prompts
+
+- Status: **ci_pending**; parent(s): REC-R01.
+- Acceptance: A read or parse failure leaves the recovery entry on offer and retryable after the store is repaired; only a successful open (or the password prompt that owns its bytes) consumes an offer. Recovering several encrypted snapshots must not overwrite a pending password prompt, and an unrelated document's prompt must not be replaced. Duplicate keys never open duplicate tabs.
+- Audit: Focused harness of the actual recover() method: five of six tests failed before the fix (both read and open failures consumed offers, duplicate keys opened twice, an unrelated prompt was replaced, the second encrypted snapshot overwrote the first prompt). After the fix only successful opens or their pending prompt consume an offer; iteration stops while a prompt is pending; cancelled/failed metadata returns to the offer without duplicates; the dialog is re-shown for remaining offers. submit_password returns the association for failed or cancelled recovery and keeps it for wrong-password retries. Re-audit checked dialog sequencing, notification paths and that no view/undo/save behaviour changed.
+- Verification Limit: Full local workspace gates remain blocked by the missing craft-libs checkout; the new full-app regressions are compile-verified patterns but execute in remote CI only. The loop harness uses the actual recover() source with stubbed document opening, so it is not GUI/engine integration evidence. Serializing prompts trades parallelism for correctness: recovering several encrypted snapshots now requires answering one prompt at a time. Not claimed: PDF-load resource bounds, transactional pair recovery, whole-process restart, power-loss durability or metadata authenticity.
+- Ci: pending
+- Notes: The user authorized implementing all remaining basic components as a batch with a post-code audit. The audit of the recovery flow reproduced three defects: failed opens removed the offer while the files stayed in the store, a second encrypted recovery overwrote the pending prompt so the first snapshot lost its offer and association, and recovery could replace an unrelated password prompt. CI is pending.
+- Local evidence: Six actual-source recovery-loop tests pass; five failed before the fix.
+- Local evidence: Standalone clippy-driver with warnings denied and cargo fmt --check pass.
+- Local evidence: Four new full-app regressions cover repair-and-retry after read or parse failure, duplicate keys, sequential encrypted recovery with wrong/cancelled passwords, and an unrelated pending prompt.
+- Local evidence: Two scratch mutations (no per-key consumption, no prompt serialization) each failed two tests.

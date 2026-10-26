@@ -20,7 +20,11 @@ A P0 gate means “mandatory when the affected workflow is offered,” not “bu
 
 When a baseline gap is referenced by several recommendations, its stage is the earliest applicable recommendation stage. Unmapped gaps inherit their baseline tier (P0/P1 basic, P2 advanced, P3 future). Review a component's real dependencies before starting; record and resolve dependency conflicts rather than silently claiming an entire stage is complete.
 
-## One-component workflow — remember this between sessions
+## Batch authorization — 26 October 2026
+
+The user revised the earlier per-component approval requirement: “ok finish all basic at once, make sure you audit it after coding it.” Continue the **basic** stage without approval stops between its components. Keep separate acceptance, post-code audit, fixes, re-audit and tests for each component; a batch may share fresh full CI when that exact verification commit includes every component's final code and regressions. Do not merge, publish, deploy or advance to advanced/future under this authorization. Blocked or unverified records stay open; this instruction is not a waiver of acceptance criteria or evidence. The earlier component stop notes below are historical and superseded for basic-stage continuation only.
+
+## Per-component quality workflow — applies inside the batch
 
 For **every** component:
 
@@ -33,7 +37,7 @@ For **every** component:
 7. **Push:** commit to and push only `arena/25355b3c-linkco-pdf`. Keep unrelated work out of the commit. The push does not authorize merge, publication, deployment or a production-readiness claim.
 8. **Verify GitHub CI:** examine relevant checks for that implementation commit. A pending/failed check is not a pass. If a regression is found, fix and re-audit it before marking completion; do not hide it by weakening the test.
 9. **Record:** update component evidence, exact CI run links, limitations and parent status. A small component does **not** complete its whole workstream or related gap automatically.
-10. **Stop and ask:** summarize the completed component and ask the user whether to continue to the next. **Do not begin that next component without their confirmation.**
+10. **Continue within scope:** record verified results and continue the authorized basic batch. Ask before changing stage or taking an action requiring a separate user decision. A batch report must distinguish completed components from the unfinished basic queue.
 
 Finish the relevant basic queue before advancing to advanced, then future. Do not automatically jump stages. Items blocked on credentials, legal decisions, hardware, proprietary services or architecture choices stay visibly blocked until resolved; absence of evidence is not completion. Intentional exclusions/waivers need an explicit user decision and a recorded reason, not a silent checkbox.
 
@@ -110,6 +114,14 @@ A private shared path helper now validates keys **before** read/write/remove fil
 Local evidence: **17 actual-source tests** (six new recovery-store plus 11 staging) pass serially and in parallel with the real desktop atomic writer and real Serde/JSON at Cargo.lock versions; standalone Cargo Clippy with warnings denied and formatting pass. Five tests failed against the baseline; four scratch mutations are rejected. Only portable-mode directory selection is stubbed in the harness, and none of these tests use it. This is not GUI/engine integration evidence. A full-app regression adds plain/encrypted recovery and discard with forged traversal/alias metadata alongside a valid edited PDF, and checks outside bytes remain intact. **Verified at `6f19614`:** all five replacement workflows passed: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 tests/install checks, FreeBSD build/test/package, packaging lint and preview-handler tests (links in `progress.toml`). These workspace suites include the six new store regressions and full-app plain/encrypted recovery/discard coverage. Full local workspace gates remained dependency-blocked. Existing workflow policy skipped mutation fuzzing; the four scratch checks are not a fuzz run.
 
 This fixes existing recovery-store behavior, not a new user control or automation tool. It is **lexical key validation and filename binding**, not protection against symlinks/hardlinks, hostile parents or concurrent directory/file replacement. Metadata contents and original-document paths are not authenticated; JSON/PDF loading is not newly resource-bounded. Pair-transactionality, automatic staging-orphan recovery, physical volume-full, power loss, web recovery and native macOS/network-filesystem certification remain outside this component. REC-R01 stays open. Stop for approval before another component.
+
+## Batch component: B008 — retryable recovery offers and serialized password prompts
+
+Parent: **REC-R01, save integrity**. The post-code audit of the recovery flow reproduced three defects. A failed read or a PDF the engine rejected still removed every requested key from the offer, so a damaged snapshot disappeared from the dialog until restart even though its files stayed in the store. Recovering more than one encrypted snapshot replaced the pending password prompt, so the earlier entry was already gone from the offer and its recovery association was lost. Recovery could also replace an unrelated document's pending password prompt.
+
+Now only a successful open — or the password prompt that owns that document's bytes — consumes an offer. A read/open failure leaves the entry retryable, iteration stops while a prompt is pending so later entries stay on offer, and the dialog is re-shown when work remains. Cancelled or failed password recovery returns the association to the offer, deduplicated; wrong-password retries keep it. Duplicate requested keys no longer open duplicate tabs.
+
+Local evidence: six tests of the actual `recover()` method pass, five of which failed before the fix; four new full-app regressions cover repair-and-retry after read/parse failure, duplicate keys, sequential encrypted recovery with wrong and cancelled passwords, and an unrelated pending prompt. Standalone Clippy and formatting pass. **CI is pending**; full local workspace gates remain dependency-blocked by the craft-libs checkout. The trade-off is explicit: encrypted snapshots are recovered one prompt at a time. PDF-load bounds, transactional pairs, power-loss durability and metadata authenticity remain open.
 
 ## Regeneration and verification
 

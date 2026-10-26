@@ -23,7 +23,10 @@ class BacklogTests(unittest.TestCase):
     def test_current_stage_and_confirmation_gate(self):
         rows, progress = backlog.build()
         self.assertEqual(progress["workflow"]["order"], ["basic", "advanced", "future"])
-        self.assertTrue(progress["workflow"]["confirmation_required_after_each_component"])
+        self.assertFalse(progress["workflow"]["confirmation_required_after_each_component"])
+        self.assertEqual(progress["workflow"]["batch_authorized_stage"], "basic")
+        self.assertTrue(progress["workflow"]["batch_authorization"].strip())
+        self.assertTrue(progress["workflow"]["confirmation_required_before_stage_change"])
         self.assertFalse(progress["workflow"]["auto_advance"])
         active = progress["workflow"]["active_component"]
         self.assertEqual(progress["components"][active]["stage"], progress["workflow"]["active_stage"])
@@ -46,10 +49,32 @@ class BacklogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "confirmation gate"):
                 backlog.build()
 
+    def test_batch_permission_cannot_expand_to_another_stage(self):
+        _, original = backlog.build()
+        for field, value in [("batch_authorized_stage", "advanced"),
+                             ("batch_authorization", ""),
+                             ("batch_authorization_date", ""),
+                             ("confirmation_required_before_stage_change", False)]:
+            changed = copy.deepcopy(original)
+            changed["workflow"][field] = value
+            with self.subTest(field=field), patch.object(backlog.tomllib, "loads", return_value=changed):
+                with self.assertRaisesRegex(ValueError, "confirmation gate"):
+                    backlog.build()
+
+    def test_legacy_component_confirmation_mode_is_still_valid(self):
+        _, original = backlog.build()
+        changed = copy.deepcopy(original)
+        changed["workflow"]["confirmation_required_after_each_component"] = True
+        changed["workflow"].pop("batch_authorized_stage")
+        with patch.object(backlog.tomllib, "loads", return_value=changed):
+            backlog.build()
+
     def test_cannot_advance_past_unfinished_basics(self):
         _, original = backlog.build()
         changed = copy.deepcopy(original)
         changed["workflow"]["active_stage"] = "advanced"
+        changed["workflow"]["confirmation_required_after_each_component"] = True
+        changed["workflow"].pop("batch_authorized_stage")
         with patch.object(backlog.tomllib, "loads", return_value=changed):
             with self.assertRaisesRegex(ValueError, "earlier stages"):
                 backlog.build()

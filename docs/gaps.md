@@ -19,7 +19,7 @@ update the numbers.
 
 ## Owner-directed implementation queue
 
-The 25 October 2026 owner instruction adds the complete research scope to a [live TODO](implementation/TODO.md), ordered basic → advanced → future, with implement/audit/fix/re-audit/test/push/CI and confirmation after each component. B001 hardens shared save staging; it does not close a broad gap or change the historical readiness estimates below. Current verification is in [the component record](implementation/progress.toml).
+The 25 October 2026 owner instruction adds the complete research scope to a [live TODO](implementation/TODO.md), ordered basic → advanced → future, with implement/audit/fix/re-audit/test/push/CI. On 26 October the owner authorized basic-stage batch continuation without per-component approval stops; approval is still required before advanced/future work. B001 hardens shared save staging; it does not close a broad gap or change the historical readiness estimates below. Current verification is in [the component record](implementation/progress.toml).
 
 ## Summary
 
