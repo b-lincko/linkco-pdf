@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B009"
+active_component = "B010"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -166,3 +166,17 @@ verification_limit = "Full local workspace gates remain blocked by the missing c
 ci = "passed"
 ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40312231270", "https://github.com/b-lincko/linkco-pdf/actions/runs/40312231324", "https://github.com/b-lincko/linkco-pdf/actions/runs/40312231256", "https://github.com/b-lincko/linkco-pdf/actions/runs/40312231352", "https://github.com/b-lincko/linkco-pdf/actions/runs/40312231317"]
 ci_notes = "Verified together with B008 at 9ddec76 by the same five workflows. The store regression runs in the workspace suites on Linux, Windows and native ARM64; FreeBSD builds and tests the workspace. Not covered by CI: the read byte cap as distinct from the size/string acceptance checks, PDF byte loading bounds, and macOS/network filesystems."
+
+[components.B010]
+title = "Refuse to overwrite a file another program changed on disk"
+stage = "basic"
+parent_tasks = ["REC-R05"]
+status = "ci_pending"
+acceptance = "Saving in place when the file's bytes differ from what the app loaded or last wrote must not write; the app keeps the other program's version, explains the conflict and offers Save As, Overwrite or Cancel. Unchanged files, new files, Save As to another path and the first save of a document without a prior stamp keep working without a prompt."
+notes = "Bounded part of REC-R05 (external-file change and save-conflict detection), which stays open. Detection is content-based (length plus a streamed 64-bit hash of the loaded bytes), recorded when a file is opened from disk and again after every successful save. The batch audit for this stage found no existing check at all: save_doc_to wrote straight over the path. CI is pending."
+code = ["crates/ui-egui/src/conflict.rs", "crates/ui-egui/src/editing.rs", "crates/ui-egui/src/dialogs.rs", "crates/ui-egui/src/lib.rs", "crates/ui-egui/tests/conflict.rs"]
+audit = "Traced every write: desktop save_doc_to and automation write their own bytes; this component covers the desktop in-place path, which is the one that replaces a file the user has open. Stamps are taken from the bytes on disk at open and re-read after each successful write, so the comparison is against what the app itself last saw rather than a timestamp. Identical bytes rewritten by another program are not a conflict (nothing is lost) and a vanished file is not one either (writing recreates it). The prompt is a modal like the save prompt, defaults to the non-destructive choice, treats Escape or an outside click as Cancel, and is compiled out on wasm where the path save does not exist. Re-audit after wiring: the overwrite agreement is a one-shot flag consumed by the next save, Cancel clears both the prompt and the flag, and the reminder stamp is refreshed inside the same success branch that marks the document saved."
+local_evidence = ["Three standalone tests of the new stamp module pass, including same-length-different-bytes detection and a 300 KiB file that crosses read-buffer boundaries", "The stamp module passes rustc with warnings denied as a standalone test binary", "cargo fmt --all --check passes", "Full-app regressions cover unchanged in-place saves, a blocked save with the other version preserved, Overwrite replacing it, and Cancel keeping it with the conflict raised again on the next save (executed in CI only)"]
+verification_limit = "Full local workspace gates remain blocked by the missing craft-libs checkout, so the new full-app regressions execute in remote CI only. This is a check between two filesystem operations, not a lock or a transaction: another program can still write between the check and the rename. Automation saves, physical volume-full behaviour, power loss and hostile parents/links are outside this component. REC-R05 stays open for rename/delete/move detection, external-change notification while idle, and merge or reload choices."
+ci = "pending"
+ci_run_urls = []

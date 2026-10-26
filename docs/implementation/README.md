@@ -131,6 +131,16 @@ Metadata reads now stop after 64 KiB + 1 bytes and entries larger than 64 KiB ar
 
 Local evidence: a new actual-source store test failed before the fix (padded 64 KiB+1 metadata, 4,097-byte name and path) and passes now, with 18 store/staging tests green and Clippy/formatting clean. Removing the acceptance checks is rejected by that test; removing only the read byte cap is not observable in tests and is recorded as defense-in-depth. **Verified at `9ddec76`** by the same five workflows; the store regression runs in the Linux, Windows and ARM64 suites and FreeBSD builds/tests the workspace. This bounds metadata only: PDF bytes and engine loading keep their existing limits, and authenticity, transactions, symlink/hostile-parent safety and power-loss durability remain open.
 
+## Batch component: B010 — external file changes block a silent overwrite
+
+Parent: **REC-R05, external-file change and save-conflict detection** (bounded; R05 stays open). There was no check at all: `save_doc_to` wrote over the document's path whatever had happened to that file meanwhile, so a version another program wrote disappeared without a word.
+
+The app now stamps a file's contents (length plus a streamed 64-bit hash) when it opens a document from disk and again after each successful save. Saving in place compares the stamp with the file: if the bytes differ, nothing is written and a modal explains the conflict, offering **Save As…** (primary), **Cancel**, and **Overwrite**. Identical bytes are not a conflict, and a missing file is not one either (writing recreates it). The prompt is compiled out on wasm, where the in-place path save does not exist.
+
+Local evidence: three standalone stamp tests pass (same-length different bytes; a 300 KiB file crossing read buffers; missing/unreadable paths), the module compiles with warnings denied, and formatting passes. Four full-app expectations (unchanged save, blocked save, overwrite, cancel-then-ask-again) run in CI only, because full local workspace gates remain dependency-blocked. **CI is pending.**
+
+Not claimed: this is a check between two filesystem operations, not a lock — another program can still write between the check and the rename. Automation saves, rename/delete/move detection, idle-time notification and merge/reload choices remain open in REC-R05.
+
 ## Regeneration and verification
 
 ```sh

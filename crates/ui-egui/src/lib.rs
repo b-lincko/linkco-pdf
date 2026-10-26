@@ -38,6 +38,7 @@ mod chrome;
 mod combine_grid;
 pub use combine_grid::ThumbState as CombineThumb;
 mod combine_ui;
+mod conflict;
 pub mod docking;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
@@ -483,6 +484,13 @@ pub struct PdfCraftApp {
     pub close_request: Option<CloseRequest>,
     /// Save to this path instead of asking (tests and automation).
     pub save_override: Option<String>,
+    /// Content stamps of the files documents were opened from or last saved to, so saving can
+    /// notice that another program replaced one. See [`conflict`].
+    pub(crate) disk_stamps: std::collections::HashMap<pdfcraft_engine::DocId, conflict::Stamp>,
+    /// A save held back because its file changed on disk; the prompt asks what to do.
+    pub save_conflict: Option<SaveConflict>,
+    /// One overwrite the user agreed to, consumed by the next save of the conflicting file.
+    pub(crate) overwrite_agreed: bool,
     /// Document Properties ▸ Description fields being edited: (document, Title/Author/Subject/Keywords).
     pub props_draft: Option<(DocId, [String; 4])>,
     /// Document Properties ▸ Initial View (and reading options) being edited.
@@ -691,6 +699,17 @@ impl Default for PdfCraftApp {
     }
 }
 
+/// A save refused because the file changed on disk after the app loaded or last wrote it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaveConflict {
+    /// The document whose save was deferred.
+    pub id: pdfcraft_engine::DocId,
+    /// The file it would have replaced.
+    pub dest: String,
+    /// The document's title, for the prompt.
+    pub name: String,
+}
+
 /// What the operating system says about light and dark, as "draw dark". `None` means nobody
 /// answered, not a preference, so the caller keeps what it chose.
 fn system_theme(ctx: &egui::Context, desktop_dark: Option<bool>) -> Option<bool> {
@@ -772,6 +791,9 @@ impl PdfCraftApp {
             host_dirty: None,
             close_request: None,
             save_override: None,
+            disk_stamps: std::collections::HashMap::new(),
+            save_conflict: None,
+            overwrite_agreed: false,
             props_draft: None,
             view_draft: None,
             requests: Default::default(),
@@ -945,6 +967,9 @@ impl PdfCraftApp {
     ) -> Result<(), String> {
         use pdfcraft_render::OpenError;
         let size = bytes.len();
+        // Remember what was on disk, but only for a file this open actually read: recovered
+        // snapshots and browser uploads have no readable original here.
+        let stamp = path.as_deref().and_then(|p| conflict::Stamp::of_path(std::path::Path::new(p)));
         let id = match self.session.open(name, path.clone(), bytes.clone(), password) {
             Ok(id) => id,
             Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
@@ -956,6 +981,9 @@ impl PdfCraftApp {
             Err(e) => return Err(e.to_string()),
         };
         self.password_prompt = None;
+        if let Some(stamp) = stamp {
+            self.disk_stamps.insert(id, stamp);
+        }
         let doc = self.session.get(id).ok_or("the document could not be opened")?;
         let pages = doc.info.pages.len();
         // Acrobat opens straight to the Comments panel when a document has comments.
@@ -1135,6 +1163,22 @@ impl PdfCraftApp {
     pub fn set_full_screen(&mut self, ctx: &egui::Context, on: bool) {
         self.full_screen = on;
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+    }
+
+    /// Act on the save-conflict prompt: save a copy, overwrite, or write nothing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn resolve_conflict(&mut self, choice: dialogs::ConflictChoice) {
+        let Some(conflict) = self.save_conflict.clone() else { return };
+        match choice {
+            dialogs::ConflictChoice::Cancel => self.dismiss_conflict(),
+            dialogs::ConflictChoice::Overwrite => self.overwrite_conflict(),
+            dialogs::ConflictChoice::SaveAs => {
+                self.dismiss_conflict();
+                // Save As keeps the open document and asks where on the next frame.
+                let Some(index) = self.views.iter().position(|v| v.id == conflict.id) else { return };
+                self.save_view(index, editing::SaveTarget::As);
+            }
+        }
     }
 
     /// Answer the password prompt (`None` cancels).

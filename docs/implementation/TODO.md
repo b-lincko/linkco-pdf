@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B009 · **Active stage:** basic
+**Active component:** B010 · **Active stage:** basic
 
-## Basic (340 records)
+## Basic (341 records)
 
-complete: 9, in_progress: 1, pending: 330
+ci_pending: 1, complete: 9, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -27,6 +27,7 @@ complete: 9, in_progress: 1, pending: 330
 | B007 | [x] Validate recovery keys and bind metadata to its entry filename | P0 | complete | REC-R01 |
 | B008 | [x] Keep failed recovery offers retryable and serialize password prompts | P0 | complete | REC-R01 |
 | B009 | [x] Bound recovery metadata reads | P0 | complete | REC-R01 |
+| B010 | [ ] Refuse to overwrite a file another program changed on disk | P0 | ci_pending | REC-R05 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -844,3 +845,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40312231256
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40312231352
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40312231317
+
+### B010: Refuse to overwrite a file another program changed on disk
+
+- Status: **ci_pending**; parent(s): REC-R05.
+- Acceptance: Saving in place when the file's bytes differ from what the app loaded or last wrote must not write; the app keeps the other program's version, explains the conflict and offers Save As, Overwrite or Cancel. Unchanged files, new files, Save As to another path and the first save of a document without a prior stamp keep working without a prompt.
+- Audit: Traced every write: desktop save_doc_to and automation write their own bytes; this component covers the desktop in-place path, which is the one that replaces a file the user has open. Stamps are taken from the bytes on disk at open and re-read after each successful write, so the comparison is against what the app itself last saw rather than a timestamp. Identical bytes rewritten by another program are not a conflict (nothing is lost) and a vanished file is not one either (writing recreates it). The prompt is a modal like the save prompt, defaults to the non-destructive choice, treats Escape or an outside click as Cancel, and is compiled out on wasm where the path save does not exist. Re-audit after wiring: the overwrite agreement is a one-shot flag consumed by the next save, Cancel clears both the prompt and the flag, and the reminder stamp is refreshed inside the same success branch that marks the document saved.
+- Verification Limit: Full local workspace gates remain blocked by the missing craft-libs checkout, so the new full-app regressions execute in remote CI only. This is a check between two filesystem operations, not a lock or a transaction: another program can still write between the check and the rename. Automation saves, physical volume-full behaviour, power loss and hostile parents/links are outside this component. REC-R05 stays open for rename/delete/move detection, external-change notification while idle, and merge or reload choices.
+- Ci: pending
+- Notes: Bounded part of REC-R05 (external-file change and save-conflict detection), which stays open. Detection is content-based (length plus a streamed 64-bit hash of the loaded bytes), recorded when a file is opened from disk and again after every successful save. The batch audit for this stage found no existing check at all: save_doc_to wrote straight over the path. CI is pending.
+- Local evidence: Three standalone tests of the new stamp module pass, including same-length-different-bytes detection and a 300 KiB file that crosses read-buffer boundaries.
+- Local evidence: The stamp module passes rustc with warnings denied as a standalone test binary.
+- Local evidence: cargo fmt --all --check passes.
+- Local evidence: Full-app regressions cover unchanged in-place saves, a blocked save with the other version preserved, Overwrite replacing it, and Cancel keeping it with the conflict raised again on the next save (executed in CI only).

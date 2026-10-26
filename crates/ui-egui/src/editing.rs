@@ -456,6 +456,21 @@ impl PdfCraftApp {
         }
     }
 
+    /// Replace the file anyway after the user was shown that it changed on disk.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn overwrite_conflict(&mut self) {
+        let Some(c) = self.save_conflict.take() else { return };
+        self.overwrite_agreed = true;
+        self.save_doc_to(c.id, &c.dest, SaveTarget::InPlace);
+    }
+
+    /// Drop a deferred save without writing anything (the user chose not to overwrite).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn dismiss_conflict(&mut self) {
+        self.save_conflict = None;
+        self.overwrite_agreed = false;
+    }
+
     /// Write document `id` to `dest` and make it the document's file. Returns `true` if written.
     #[cfg(not(target_arch = "wasm32"))]
     fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget) -> bool {
@@ -485,12 +500,31 @@ impl PdfCraftApp {
                 return false;
             }
         };
+        // Refuse to replace a file another program changed since the app loaded or last wrote
+        // it: the deferred save is offered again with an explicit overwrite.
+        let previous = self.session.get(id).and_then(|d| d.path.clone());
+        let overwriting = previous.as_deref().is_some_and(|p| crate::same_file(p, dest));
+        if overwriting
+            && !self.overwrite_agreed
+            && let Some(then) = self.disk_stamps.get(&id).copied()
+            && crate::conflict::changed(then, crate::conflict::Stamp::of_path(std::path::Path::new(dest)))
+        {
+            self.save_conflict = Some(crate::SaveConflict { id, dest: dest.to_string(), name: name.clone() });
+            return false;
+        }
+        self.overwrite_agreed = false;
         if let Err(e) = write_atomically(dest, &bytes) {
             self.notify_fmt("Couldn't save {name}: {e}", &[("name", dest), ("e", &e.to_string())]);
             return false;
         }
         match self.session.mark_saved(id, bytes, Some(dest.to_string())) {
             Ok(()) => {
+                // From now on, conflicts compare against what this save wrote.
+                match crate::conflict::Stamp::of_path(std::path::Path::new(dest)) {
+                    Some(stamp) => self.disk_stamps.insert(id, stamp),
+                    None => self.disk_stamps.remove(&id),
+                };
+                self.save_conflict = None;
                 self.forget_recovery(id);
                 if let Some(doc) = self.session.get(id)
                     && let Some(view) = self.views.iter_mut().find(|v| v.id == id)
