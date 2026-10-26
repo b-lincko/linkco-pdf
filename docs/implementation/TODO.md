@@ -14,14 +14,14 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (335 records)
 
-ci_pending: 1, complete: 3, in_progress: 1, pending: 330
+complete: 4, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
 | B001 | [x] Reject paths as atomic-save staging filenames | P0 | complete | REC-R01 |
 | B002 | [x] Audit and harden flush-before-replace in automation saves | P0 | complete | REC-R01 |
 | B003 | [x] Create Unix atomic-save staging files with private permissions | P0 | complete | REC-R01 |
-| B004 | [ ] Deterministic atomic-save write and rename fault coverage | P0 | ci_pending | REC-R01 |
+| B004 | [x] Deterministic atomic-save write and rename fault coverage | P0 | complete | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -728,14 +728,19 @@ pending: 65, scope_review: 23
 
 ### B004: Deterministic atomic-save write and rename fault coverage
 
-- Status: **ci_pending**; parent(s): REC-R01.
+- Status: **complete**; parent(s): REC-R01.
 - Acceptance: For both automation and desktop atomic writers, inject partial-write disk-full and post-flush rename failures for existing/new targets; preserve original bytes or absence of new targets, return errors and remove staging. Verify recoverable Interrupted/short writes finish before replacement, and on Windows verify the staging writer is closed before rename. Keep fault controls private and production I/O unchanged.
 - Audit: Prior code already propagated write/rename errors, but portable post-staging failure tests were missing (the existing real rename-denial fixtures were Windows-only). Introduced private I/O seams with unchanged standard operations in production. Re-audit checked exact call order, descriptor scope, unchanged cleanup/error mapping, failure cases for existing/new outputs, retry semantics and no public runtime fault switches.
-- Verification Limit: Local workspace gates remain blocked by the missing craft-libs checkout; fresh platform CI is required. The new tests inject operation errors against real staging files; they do not physically fill a volume, kill a process, simulate power loss or validate native macOS/network filesystems. Cleanup remains best-effort when unlink itself fails; broader recovery/metadata/parent-directory guarantees remain outside this component.
-- Ci: pending
-- Notes: The user approved continuation on 2026-10-26. This closes a deterministic coverage gap, not a newly reproduced production data-loss defect. It does not complete the broad REC-R01 release gate. Stop for explicit approval after B004 verification.
+- Verification Limit: Local workspace gates were blocked by the missing craft-libs checkout; remote Linux/Windows/wasm, native ARM64 and FreeBSD gates passed, including Windows exclusive-handle reopening checks. The new tests inject operation errors against real staging files; they do not physically fill a volume, kill a process, simulate power loss or validate native macOS/network filesystems. Cleanup remains best-effort when unlink itself fails; broader recovery/metadata/parent-directory guarantees remain outside this component.
+- Ci: passed
+- Notes: The user approved continuation on 2026-10-26. This closes a deterministic coverage gap, not a newly reproduced production data-loss defect. It does not complete the broad REC-R01 release gate. All five replacement workflows passed at db25dbb. Stop and await explicit approval before another component.
 - Local evidence: 23 actual automation/staging standalone tests passed.
 - Local evidence: 22 actual desktop/staging standalone tests passed.
 - Local evidence: Four scratch mutation checks rejected swallowed write/rename errors in both save pipelines.
 - Local evidence: Standalone Clippy with warnings denied passed for both actual save pipelines.
 - Local evidence: cargo fmt --all -- --check passed.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40274000272
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40274000472
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40274000276
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40274000403
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40274000545

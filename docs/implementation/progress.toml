@@ -11,7 +11,7 @@ steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verif
 
 [task_status.REC-R01]
 status = "in_progress"
-notes = "B001–B003 harden staging names, flush-before-replace and Unix creation modes. R01 remains open: these do not complete fault injection, crash recovery or the full save-integrity gate."
+notes = "B001–B004 cover staging names, flush-before-replace, Unix creation modes and controlled operation faults. R01 remains open: physical volume-full, process-kill, crash recovery and the full save-integrity release gate are not complete."
 
 [components.B001]
 title = "Reject paths as atomic-save staging filenames"
@@ -67,12 +67,15 @@ verification_commit = "fc5fd97b2c3f91c176e33dc5ad79e8470a62da57"
 title = "Deterministic atomic-save write and rename fault coverage"
 stage = "basic"
 parent_tasks = ["REC-R01"]
-status = "ci_pending"
+status = "complete"
 acceptance = "For both automation and desktop atomic writers, inject partial-write disk-full and post-flush rename failures for existing/new targets; preserve original bytes or absence of new targets, return errors and remove staging. Verify recoverable Interrupted/short writes finish before replacement, and on Windows verify the staging writer is closed before rename. Keep fault controls private and production I/O unchanged."
-notes = "The user approved continuation on 2026-10-26. This closes a deterministic coverage gap, not a newly reproduced production data-loss defect. It does not complete the broad REC-R01 release gate. Stop for explicit approval after B004 verification."
+notes = "The user approved continuation on 2026-10-26. This closes a deterministic coverage gap, not a newly reproduced production data-loss defect. It does not complete the broad REC-R01 release gate. All five replacement workflows passed at db25dbb. Stop and await explicit approval before another component."
 code = ["crates/automation/src/lib.rs", "crates/ui-egui/src/editing.rs"]
 audit = "Prior code already propagated write/rename errors, but portable post-staging failure tests were missing (the existing real rename-denial fixtures were Windows-only). Introduced private I/O seams with unchanged standard operations in production. Re-audit checked exact call order, descriptor scope, unchanged cleanup/error mapping, failure cases for existing/new outputs, retry semantics and no public runtime fault switches."
 local_evidence = ["23 actual automation/staging standalone tests passed", "22 actual desktop/staging standalone tests passed", "Four scratch mutation checks rejected swallowed write/rename errors in both save pipelines", "Standalone Clippy with warnings denied passed for both actual save pipelines", "cargo fmt --all -- --check passed"]
-verification_limit = "Local workspace gates remain blocked by the missing craft-libs checkout; fresh platform CI is required. The new tests inject operation errors against real staging files; they do not physically fill a volume, kill a process, simulate power loss or validate native macOS/network filesystems. Cleanup remains best-effort when unlink itself fails; broader recovery/metadata/parent-directory guarantees remain outside this component."
-ci = "pending"
-ci_run_urls = []
+verification_limit = "Local workspace gates were blocked by the missing craft-libs checkout; remote Linux/Windows/wasm, native ARM64 and FreeBSD gates passed, including Windows exclusive-handle reopening checks. The new tests inject operation errors against real staging files; they do not physically fill a volume, kill a process, simulate power loss or validate native macOS/network filesystems. Cleanup remains best-effort when unlink itself fails; broader recovery/metadata/parent-directory guarantees remain outside this component."
+ci = "passed"
+ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40274000272", "https://github.com/b-lincko/linkco-pdf/actions/runs/40274000472", "https://github.com/b-lincko/linkco-pdf/actions/runs/40274000276", "https://github.com/b-lincko/linkco-pdf/actions/runs/40274000403", "https://github.com/b-lincko/linkco-pdf/actions/runs/40274000545"]
+ci_notes = "All five workflows passed at db25dbb: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler tests. The native Windows tests include exclusive reopening before rename. Existing workflow policy skipped mutation fuzzing; the four scratch error-swallowing mutation checks are local evidence, not a fuzz run. No safety assertions or deadlines were weakened."
+implementation_commit = "db25dbb5cb9d0b43ad2a6a47d5c5138f96abdc4d"
+verification_commit = "db25dbb5cb9d0b43ad2a6a47d5c5138f96abdc4d"
