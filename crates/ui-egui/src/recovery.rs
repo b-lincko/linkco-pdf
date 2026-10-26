@@ -138,7 +138,8 @@ impl RecoveryStore {
 
     /// Complete entries, newest first. Metadata keys must match their filenames and each metadata
     /// file is read within a fixed budget. Invalid, oversized or overlong entries and incomplete
-    /// leftovers (bytes without metadata) are removed inside the store.
+    /// leftovers (bytes without metadata) are removed inside the store; an invalid metadata
+    /// file takes its paired snapshot with it regardless of iteration order.
     pub fn list(&self) -> Vec<RecoveryMeta> {
         let Ok(dir) = std::fs::read_dir(&self.dir) else { return Vec::new() };
         let mut out = Vec::new();
@@ -161,7 +162,10 @@ impl RecoveryStore {
                     }) {
                         Some(m) => out.push(m),
                         _ => {
+                            // Drop the metadata and the snapshot it would have described
+                            // together: cleanup must not depend on directory iteration order.
                             let _ = std::fs::remove_file(&path);
+                            let _ = std::fs::remove_file(path.with_extension("pdf"));
                         }
                     }
                 }
