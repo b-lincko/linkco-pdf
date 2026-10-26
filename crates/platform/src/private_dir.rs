@@ -84,63 +84,66 @@ fn tighten(dir: &Path) -> std::io::Result<()> {
     std::fs::metadata(dir).map(|_| ())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
+    #![cfg(unix)]
+
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::PathBuf;
 
-    fn test_dir(test: &str) -> PathBuf {
+    /// A fresh, empty folder for one test. Returning the error keeps this helper free of panics,
+    /// which the crate denies outside `#[test]` functions.
+    fn test_dir(test: &str) -> std::io::Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!("pdfcraft-platform-private-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
     }
 
-    fn mode(path: &Path) -> u32 {
-        std::fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    fn mode(path: &Path) -> std::io::Result<u32> {
+        Ok(std::fs::symlink_metadata(path)?.permissions().mode() & 0o777)
     }
 
     #[test]
     fn a_new_folder_is_private_to_its_owner() {
-        let root = test_dir("new");
+        let root = test_dir("new").unwrap();
         let dir = root.join("recovery");
         create_private_dir(&dir).unwrap();
         assert!(dir.is_dir());
-        assert_eq!(mode(&dir), 0o700);
-        // Nothing else was touched.
-        assert_ne!(mode(&root), 0);
+        assert_eq!(mode(&dir).unwrap(), 0o700);
+        // The folder that already existed is not changed beyond the mode.
+        assert_ne!(mode(&root).unwrap(), 0);
     }
 
     #[test]
     fn an_existing_loose_folder_is_tightened_and_kept_usable() {
-        let root = test_dir("loose");
-        std::fs::create_dir_all(&root).unwrap();
+        let root = test_dir("loose").unwrap();
         let dir = root.join("recovery");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(mode(&dir), 0o755);
+        assert_eq!(mode(&dir).unwrap(), 0o755);
         create_private_dir(&dir).unwrap();
-        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&dir).unwrap(), 0o700);
         // A second call is a no-op that still succeeds, and the folder still takes files.
         create_private_dir(&dir).unwrap();
-        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&dir).unwrap(), 0o700);
         std::fs::write(dir.join("entry.pdf"), b"snapshot").unwrap();
         assert_eq!(std::fs::read(dir.join("entry.pdf")).unwrap(), b"snapshot");
     }
 
     #[test]
     fn missing_parents_are_created_private_too() {
-        let root = test_dir("parents");
+        let root = test_dir("parents").unwrap();
         let dir = root.join("editor").join("recovery");
         create_private_dir(&dir).unwrap();
-        assert_eq!(mode(&dir), 0o700);
-        assert_eq!(mode(&root.join("editor")), 0o700);
+        assert_eq!(mode(&dir).unwrap(), 0o700);
+        assert_eq!(mode(&root.join("editor")).unwrap(), 0o700);
     }
 
     #[test]
     fn a_symbolic_link_is_refused_and_its_target_is_left_alone() {
-        let root = test_dir("link");
+        let root = test_dir("link").unwrap();
         let target = root.join("elsewhere");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -149,13 +152,13 @@ mod tests {
         let error = create_private_dir(&link).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
         // The directory the app does not own keeps its mode.
-        assert_eq!(mode(&target), 0o755);
+        assert_eq!(mode(&target).unwrap(), 0o755);
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
     }
 
     #[test]
     fn a_dangling_symbolic_link_is_refused_instead_of_created_through() {
-        let root = test_dir("dangling");
+        let root = test_dir("dangling").unwrap();
         let link = root.join("recovery");
         std::os::unix::fs::symlink(root.join("missing"), &link).unwrap();
         let error = create_private_dir(&link).unwrap_err();
@@ -165,7 +168,7 @@ mod tests {
 
     #[test]
     fn a_file_at_the_path_is_refused() {
-        let root = test_dir("file");
+        let root = test_dir("file").unwrap();
         let path = root.join("recovery");
         std::fs::write(&path, b"not a folder").unwrap();
         let error = create_private_dir(&path).unwrap_err();
