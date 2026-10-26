@@ -381,3 +381,51 @@ fn control_click_effects_are_visible_when_the_reply_arrives() {
     assert_eq!(files_in(&s), 0, "discarded by the time the click is answered");
     assert_eq!(call(&mut h, "ui.state", serde_json::json!({}))["dialog"], serde_json::Value::Null);
 }
+
+/// Store-discovered JSON cannot redirect recovery or cleanup to a different filename/key.
+#[test]
+fn forged_recovery_keys_cannot_redirect_recovery_or_discard_outside_the_store() {
+    for protected in [false, true] {
+        for discard in [false, true] {
+            let s = store(&format!("key-binding-{protected}-{discard}"));
+            let bytes = if protected { encrypted(fixture(3), "pw") } else { fixture(3) };
+            crashed_session(&s, bytes, protected.then_some("pw"), Some("/docs/valid.pdf"));
+            let valid = s.list().remove(0);
+            let outside_pdf = s.dir().with_extension("outside.pdf");
+            let outside_json = outside_pdf.with_extension("json");
+            std::fs::write(&outside_pdf, b"OUTSIDE PDF").unwrap();
+            std::fs::write(&outside_json, b"OUTSIDE METADATA").unwrap();
+            let mut escape = valid.clone();
+            escape.key = format!("../{}", outside_pdf.file_stem().unwrap().to_string_lossy());
+            escape.path = Some(outside_pdf.to_string_lossy().into_owned());
+            std::fs::write(s.dir().join("escape.json"), serde_json::to_vec(&escape).unwrap()).unwrap();
+            std::fs::write(s.dir().join("alias.json"), serde_json::to_vec(&valid).unwrap()).unwrap();
+            let mut app = PdfCraftApp::new();
+            app.enable_recovery(s.clone());
+            assert_eq!(app.recoverable.as_slice(), std::slice::from_ref(&valid), "only the filename-bound legitimate entry is offered");
+            assert!(!s.dir().join("escape.json").exists());
+            assert!(!s.dir().join("alias.json").exists());
+            if discard {
+                // Include an invalid direct request as well as the offered entry.
+                app.discard_recovered(&[escape.key.clone(), valid.key.clone()]);
+                assert!(s.list().is_empty());
+            } else {
+                app.recover(std::slice::from_ref(&valid.key));
+                if protected {
+                    app.submit_password(Some("pw".into()));
+                }
+                assert_eq!(app.views.len(), 1);
+                let doc = app.session.get(app.views[0].id).unwrap();
+                assert!(doc.dirty);
+                assert_eq!(doc.info.pages.len(), 2, "the legitimate edited PDF still recovers");
+                assert_eq!(doc.path.as_deref(), Some("/docs/valid.pdf"));
+            }
+            assert_eq!(std::fs::read(&outside_pdf).unwrap(), b"OUTSIDE PDF");
+            assert_eq!(std::fs::read(&outside_json).unwrap(), b"OUTSIDE METADATA");
+            s.clear();
+            std::fs::remove_dir_all(s.dir()).unwrap();
+            std::fs::remove_file(outside_pdf).unwrap();
+            std::fs::remove_file(outside_json).unwrap();
+        }
+    }
+}

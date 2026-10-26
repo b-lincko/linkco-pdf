@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B006"
+active_component = "B007"
 confirmation_required_after_each_component = true
 auto_advance = false
 steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verify_ci", "ask_to_continue"]
@@ -113,3 +113,17 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40289115131"
 ci_notes = "All five workflows passed at 7f77ac6: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler tests. Full workspace suites include the new engine acknowledgement tests and real recovery-store failure/retry/fresh-app tests for plain/encrypted PDFs. Existing workflow policy skipped mutation fuzzing; the three scratch checks are not a fuzz run. No existing safety assertions or deadlines were weakened."
 implementation_commit = "7f77ac6c267f9d758ab1f6d2a526af2d447ab798"
 verification_commit = "7f77ac6c267f9d758ab1f6d2a526af2d447ab798"
+
+[components.B007]
+title = "Validate recovery keys and bind metadata to its entry filename"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "ci_pending"
+acceptance = "Reject path/stream/device/control/oversized recovery keys before read/write/remove filesystem access, including before write creates the store; keep generated and ordinary Unicode keys compatible. Require each discovered JSON key to match its filename before probing/returning its PDF. Invalid removal requests are no-ops. Preserve outside files and normal plain/encrypted recovery/discard."
+notes = "The user approved continuation after B006. Baseline actual-store tests reproduced outside reads, replacement/deletion via traversal keys and alias metadata impersonating another entry. This is lexical key safety and filename binding, not a complete recovery-store sandbox or metadata authenticity guarantee. Stop for explicit approval after verification."
+code = ["crates/ui-egui/src/recovery.rs", "crates/ui-egui/tests/recovery.rs"]
+audit = "All key-derived read/write/remove paths share a private validator; list validates the key and corresponding JSON file before its PDF probe, allowing native canonical-equivalent filenames without accepting a different regular file. The policy bounds keys to 128 UTF-8 bytes before case-fold allocation, rejects portable separators/streams/controls/device aliases and preserves normal Unicode/hidden/generated keys. Re-audit found and fixed allocation-before-length-rejection; added canonical filename comparison to preserve normalizing-filesystem spellings; confirmed no change to original document path metadata, atomic-save or B006 acknowledgement ordering. Invalid JSON is cleaned only at the discovered store path."
+local_evidence = ["Five new regression tests failed before the fix against actual RecoveryStore, desktop atomic writer and staging source with real pinned Serde/JSON", "17 actual-source store/staging tests passed serially and in parallel, including six new store tests", "Standalone Cargo Clippy with all targets and warnings denied passed", "Four scratch mutations rejected unchecked keys, unchecked removal, filename-alias acceptance and directory creation before validation", "cargo fmt --all -- --check passed"]
+verification_limit = "Full local workspace gates remain blocked by the unavailable craft-libs checkout; fresh platform CI must run full application/encrypted-PDF recovery/discard integration. The local harness uses actual store/write/staging code and real Serde/JSON at Cargo.lock versions, but omits the GUI/engine and stubs only portable-mode directory selection (not used by these tests). This is lexical key validation, not symlink/hardlink/hostile-parent or concurrent-replacement protection, metadata/original-path authenticity, resource-bounded JSON/PDF loading, transactional pair recovery, physical volume-full, power-loss or web recovery. Native macOS/network filesystems remain unverified."
+ci = "pending"
+ci_run_urls = []

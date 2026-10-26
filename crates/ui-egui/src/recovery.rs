@@ -10,6 +10,8 @@
 //! plaintext of a protected document to disk. The web build has no recovery store yet.
 //! A snapshot is acknowledged only after both store writes succeed; failed revisions remain
 //! pending for retry without another edit. The PDF and metadata are still separate replacements.
+//! Recovery keys are bounded portable identifiers, never paths. Discovered JSON must name its
+//! own filename key. This does not authenticate metadata or sandbox symbolic links/parent races.
 
 use std::path::{Path, PathBuf};
 
@@ -21,6 +23,7 @@ pub const AUTOSAVE_SECS: f64 = 60.0;
 /// What a recovery entry records next to the PDF bytes.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RecoveryMeta {
+    /// A portable filename identifier, not a path (at most 128 UTF-8 bytes).
     pub key: String,
     pub name: String,
     /// Where the document was saved before (Save writes back there after recovery).
@@ -64,21 +67,57 @@ impl RecoveryStore {
         &self.dir
     }
 
+    /// Derive both entry paths only after checking the entire key. Generated keys already obey
+    /// this portable policy; normal Unicode identifiers remain valid. This is lexical validation,
+    /// not protection against symbolic links or replacement of the store directory itself.
+    fn entry_paths(&self, key: &str) -> std::io::Result<(PathBuf, PathBuf)> {
+        let invalid = key.is_empty()
+            || key.len() > 128
+            || key.starts_with(' ')
+            || key.ends_with(['.', ' '])
+            || key.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'));
+        let invalid_key = || {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "a recovery key must be a portable filename identifier of 1–128 bytes, not a path or device name",
+            )
+        };
+        // Bound the allocation below as well as the eventual filenames.
+        if invalid {
+            return Err(invalid_key());
+        }
+        // Windows treats these names as devices even with an extension; reject them on every
+        // platform so a recovery key has the same meaning when the store is copied elsewhere.
+        let device = key.split('.').next().unwrap_or_default().trim_end_matches(' ').to_ascii_uppercase();
+        let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$" | "CONIN$" | "CONOUT$")
+            || ["COM", "LPT"].iter().any(|prefix| {
+                device.strip_prefix(prefix).is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+            });
+        if reserved {
+            return Err(invalid_key());
+        }
+        Ok((self.dir.join(format!("{key}.pdf")), self.dir.join(format!("{key}.json"))))
+    }
+
     /// Write (or replace) an entry. The PDF is written before its metadata, both atomically, so
     /// a listed entry always has complete bytes.
     pub fn write(&self, meta: &RecoveryMeta, bytes: &[u8]) -> std::io::Result<()> {
+        let (pdf, metadata) = self.entry_paths(&meta.key)?;
         std::fs::create_dir_all(&self.dir)?;
-        crate::editing::write_atomically(&self.dir.join(format!("{}.pdf", meta.key)).to_string_lossy(), bytes)?;
+        crate::editing::write_atomically(&pdf.to_string_lossy(), bytes)?;
         let json = serde_json::to_vec_pretty(meta).map_err(std::io::Error::other)?;
-        crate::editing::write_atomically(&self.dir.join(format!("{}.json", meta.key)).to_string_lossy(), &json)
+        crate::editing::write_atomically(&metadata.to_string_lossy(), &json)
     }
 
+    /// Remove a pair; invalid keys are ignored without filesystem access.
     pub fn remove(&self, key: &str) {
-        let _ = std::fs::remove_file(self.dir.join(format!("{key}.json")));
-        let _ = std::fs::remove_file(self.dir.join(format!("{key}.pdf")));
+        let Ok((pdf, metadata)) = self.entry_paths(key) else { return };
+        let _ = std::fs::remove_file(metadata);
+        let _ = std::fs::remove_file(pdf);
     }
 
-    /// Complete entries, newest first. Incomplete leftovers (bytes without metadata) are removed.
+    /// Complete entries, newest first. Metadata keys must match their filenames. Invalid JSON
+    /// entries and incomplete leftovers (bytes without metadata) are removed inside the store.
     pub fn list(&self) -> Vec<RecoveryMeta> {
         let Ok(dir) = std::fs::read_dir(&self.dir) else { return Vec::new() };
         let mut out = Vec::new();
@@ -87,8 +126,19 @@ impl RecoveryStore {
             match path.extension().and_then(|e| e.to_str()) {
                 Some("json") => {
                     let meta = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<RecoveryMeta>(&b).ok());
-                    match meta {
-                        Some(m) if self.dir.join(format!("{}.pdf", m.key)).is_file() => out.push(m),
+                    // Do not trust a JSON key to identify a different entry, even inside the
+                    // store. Check the filename binding before probing its paired PDF.
+                    match meta.filter(|m| {
+                        self.entry_paths(&m.key).is_ok_and(|(pdf, json)| {
+                            // Case/Unicode-normalizing filesystems may return a different native
+                            // spelling of the same filename. Different regular files still fail.
+                            // Canonicalization follows links: this is not a symlink sandbox.
+                            let same_json =
+                                json == path || matches!((std::fs::canonicalize(&json), std::fs::canonicalize(&path)), (Ok(a), Ok(b)) if a == b);
+                            same_json && pdf.is_file()
+                        })
+                    }) {
+                        Some(m) => out.push(m),
                         _ => {
                             let _ = std::fs::remove_file(&path);
                         }
@@ -105,7 +155,8 @@ impl RecoveryStore {
     }
 
     pub fn read(&self, key: &str) -> std::io::Result<Vec<u8>> {
-        std::fs::read(self.dir.join(format!("{key}.pdf")))
+        let (pdf, _) = self.entry_paths(key)?;
+        std::fs::read(pdf)
     }
 
     /// Remove every entry (clean quit, or "Discard all").
@@ -218,5 +269,149 @@ impl PdfCraftApp {
             }
             self.recovery_keys.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+
+    fn fixture_store(tag: &str) -> (PathBuf, RecoveryStore) {
+        let root = std::env::temp_dir().join(format!("pdfcraft-recovery-keys-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let store = RecoveryStore::new(root.join("store"));
+        (root, store)
+    }
+
+    fn metadata(key: &str) -> RecoveryMeta {
+        RecoveryMeta { key: key.into(), name: "work.pdf".into(), path: Some("/docs/work.pdf".into()), saved_at: 7, encrypted: false }
+    }
+
+    #[test]
+    fn invalid_recovery_keys_are_rejected_before_writing_or_creating_the_store() {
+        let (root, store) = fixture_store("invalid-write");
+        std::fs::write(root.join("victim.pdf"), b"ORIGINAL PDF").unwrap();
+        std::fs::write(root.join("victim.json"), b"ORIGINAL METADATA").unwrap();
+        let absolute = root.join("victim").to_string_lossy().into_owned();
+        let long = "a".repeat(129);
+        let long_unicode = "é".repeat(65);
+        for key in [
+            "../victim",
+            absolute.as_str(),
+            "",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "a:b",
+            "a\0b",
+            "a\nb",
+            "a*b",
+            "a?b",
+            "a<b",
+            "a>b",
+            "a|b",
+            "a\"b",
+            "trailing.",
+            "trailing ",
+            " CON",
+            "CON .txt",
+            "CON",
+            "con",
+            "CON.txt",
+            "AUX",
+            "PRN",
+            "NUL",
+            "COM1",
+            "COM9",
+            "LPT1",
+            "LPT9",
+            "COM¹",
+            "LPT²",
+            "CONIN$",
+            "CONOUT$",
+            long.as_str(),
+            long_unicode.as_str(),
+        ] {
+            let error = store.write(&metadata(key), b"REPLACEMENT").unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{key:?}");
+            assert!(!store.dir().exists(), "validation must precede directory creation: {key:?}");
+            assert_eq!(std::fs::read(root.join("victim.pdf")).unwrap(), b"ORIGINAL PDF");
+            assert_eq!(std::fs::read(root.join("victim.json")).unwrap(), b"ORIGINAL METADATA");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_reject_escape_keys_before_probing_a_target() {
+        let (root, store) = fixture_store("invalid-read");
+        std::fs::create_dir(store.dir()).unwrap();
+        std::fs::write(root.join("victim.pdf"), b"OUTSIDE").unwrap();
+        let absolute = root.join("victim").to_string_lossy().into_owned();
+        for key in ["../victim", absolute.as_str(), "missing/child", "missing:stream", "NUL", ""] {
+            assert_eq!(store.read(key).unwrap_err().kind(), std::io::ErrorKind::InvalidInput, "{key:?}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removal_ignores_escape_keys_and_preserves_outside_files() {
+        let (root, store) = fixture_store("invalid-remove");
+        std::fs::create_dir(store.dir()).unwrap();
+        let absolute = root.join("victim").to_string_lossy().into_owned();
+        for key in ["../victim", absolute.as_str()] {
+            std::fs::write(root.join("victim.pdf"), b"OUTSIDE PDF").unwrap();
+            std::fs::write(root.join("victim.json"), b"OUTSIDE JSON").unwrap();
+            store.remove(key);
+            assert_eq!(std::fs::read(root.join("victim.pdf")).unwrap(), b"OUTSIDE PDF");
+            assert_eq!(std::fs::read(root.join("victim.json")).unwrap(), b"OUTSIDE JSON");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn listing_and_clearing_reject_escape_keys_and_mismatched_metadata() {
+        let (root, store) = fixture_store("poisoned-list");
+        store.write(&metadata("valid"), b"VALID SNAPSHOT").unwrap();
+        std::fs::write(root.join("victim.pdf"), b"OUTSIDE PDF").unwrap();
+        std::fs::write(root.join("victim.json"), b"OUTSIDE JSON").unwrap();
+        for (file, key) in [("escape.json", "../victim"), ("alias.json", "valid")] {
+            std::fs::write(store.dir().join(file), serde_json::to_vec(&metadata(key)).unwrap()).unwrap();
+        }
+        // clear used to follow the forged traversal key and delete the outside pair.
+        store.clear();
+        assert_eq!(std::fs::read(root.join("victim.pdf")).unwrap(), b"OUTSIDE PDF");
+        assert_eq!(std::fs::read(root.join("victim.json")).unwrap(), b"OUTSIDE JSON");
+        assert!(!store.dir().join("valid.pdf").exists(), "valid entries are still cleared");
+        assert!(store.list().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_metadata_alias_cannot_impersonate_a_valid_entry() {
+        let (root, store) = fixture_store("alias");
+        store.write(&metadata("valid"), b"VALID SNAPSHOT").unwrap();
+        std::fs::write(store.dir().join("alias.json"), serde_json::to_vec(&metadata("valid")).unwrap()).unwrap();
+        assert_eq!(store.list(), [metadata("valid")]);
+        assert!(!store.dir().join("alias.json").exists());
+        assert_eq!(store.read("valid").unwrap(), b"VALID SNAPSHOT");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ordinary_and_generated_recovery_keys_round_trip_without_changing_original_paths() {
+        let (root, store) = fixture_store("valid");
+        let limit = "a".repeat(128);
+        let unicode_limit = "é".repeat(64);
+        for key in ["1800000000-12345-9", "a_b-c", ".hidden", "report.v2", "clé-鍵", "COM10", "conductor", limit.as_str(), unicode_limit.as_str()] {
+            let meta = metadata(key);
+            store.write(&meta, b"COMPLETE SNAPSHOT").unwrap();
+            assert_eq!(store.list(), [meta]);
+            assert_eq!(store.read(key).unwrap(), b"COMPLETE SNAPSHOT");
+            store.remove(key);
+            assert!(store.list().is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
