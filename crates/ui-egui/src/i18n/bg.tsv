@@ -2188,5 +2188,5 @@ key	Space	Интервал
 	Developer: {name}	Разработчик: {name}
 	Overwrite	Запиши върху
 	Save As…	Запази като…
-	“{name}” changed on disk while you were working on it.	„{name}“ се промени на диска, докато работехе по него.
-	Saving over it would replace the version another program wrote. Save a copy if you need both.	Записът върху него ще замени версията, която друга програма е записала. Запазете копие, ако ви трябват и двете.
+	“{name}” changed on disk while you were working on it.	„{name}“ се промени на диска, докато работеше по него.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Записът върху него ще замени версията, която друга програма е записала. Запази копие, ако ти трябват и двете.
