@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B004"
+active_component = "B005"
 confirmation_required_after_each_component = true
 auto_advance = false
 steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verify_ci", "ask_to_continue"]
@@ -79,3 +79,17 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40274000272"
 ci_notes = "All five workflows passed at db25dbb: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler tests. The native Windows tests include exclusive reopening before rename. Existing workflow policy skipped mutation fuzzing; the four scratch error-swallowing mutation checks are local evidence, not a fuzz run. No safety assertions or deadlines were weakened."
 implementation_commit = "db25dbb5cb9d0b43ad2a6a47d5c5138f96abdc4d"
 verification_commit = "db25dbb5cb9d0b43ad2a6a47d5c5138f96abdc4d"
+
+[components.B005]
+title = "Process-termination boundaries and safe retry for atomic saves"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "ci_pending"
+acceptance = "For automation and desktop save pipelines, kill real children during a partial staging write, after flush/before rename and immediately after rename, for existing/new targets. Before replacement keep old bytes/target absence; after replacement keep complete new bytes. Verify private Unix orphans survive pre-rename kills and retry skips them without clobbering. Reap children on assertion/timeout paths. No production fault switch or behavior change."
+notes = "The user approved the next basic component on 2026-10-26 after B004 verification. This is controlled process-kill coverage with synthetic bytes, not full application crash recovery, physical disk-full or power-loss certification. Stop for approval after B005 verification."
+code = ["crates/automation/src/lib.rs", "crates/ui-egui/src/editing.rs"]
+audit = "Added only cfg(test) cases using B004 private seams. Real children signal phase-specific fresh-file barriers before the parent calls Child::kill and wait; Unix status must report SIGKILL. Re-audit added a reaping guard that does not kill an already reaped child, rejects stale/empty-filter barriers and checks retry collision behavior plus Unix orphan mode. Production code and safety deadlines are unchanged."
+local_evidence = ["24 actual automation/staging standalone tests passed", "23 actual desktop/staging standalone tests passed", "Each new test exercises three phases for existing/new targets: 12 real child terminations across both callers", "Four scratch mutation checks rejected in-place target corruption and unsafe orphan reuse in both pipelines", "Standalone Clippy with warnings denied passed for both actual save pipelines", "cargo fmt --all -- --check passed"]
+verification_limit = "Local workspace gates require the unavailable craft-libs checkout; fresh platform CI is pending. The tests use local-filesystem synthetic byte payloads, not PDF semantic/conformance checks or whole-application recovery. Pre-rename kills deliberately leave private staging orphans; no automatic orphan cleanup/recovery is added. Physical volume-full, power loss, parent-directory durability, native macOS/network filesystems and restart/session recovery remain outside this component."
+ci = "pending"
+ci_run_urls = []

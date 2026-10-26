@@ -2123,6 +2123,129 @@ mod tests {
         }
     }
 
+    /// Parent kills a real child at a verified I/O boundary; no destructors can clean staging.
+    #[test]
+    fn process_kill_preserves_atomic_save_boundary_and_retry() {
+        use std::io::Write as _;
+        const PHASE: &str = "PDFCRAFT_SAVE_KILL_PHASE";
+        const DIRECTORY: &str = "PDFCRAFT_SAVE_KILL_DIRECTORY";
+        const NEW: &[u8] = b"COMPLETE NEW FILE";
+        fn pause(ready: &Path, phase: &str) -> ! {
+            std::fs::write(ready, phase).unwrap();
+            loop {
+                std::thread::park();
+            }
+        }
+        if let Some(phase) = std::env::var_os(PHASE) {
+            let phase = phase.to_str().unwrap();
+            assert!(matches!(phase, "partial" | "flushed" | "renamed"));
+            let dir = PathBuf::from(std::env::var_os(DIRECTORY).unwrap());
+            let target = dir.join("out.pdf");
+            let ready = dir.join("ready");
+            write_atomic_using(
+                &target,
+                NEW,
+                [7],
+                |file, bytes| {
+                    if phase == "partial" {
+                        file.write_all(b"PARTIAL")?;
+                        pause(&ready, phase);
+                    }
+                    file.write_all(bytes)
+                },
+                std::fs::File::sync_all,
+                |from, to| {
+                    if phase == "flushed" {
+                        pause(&ready, phase);
+                    }
+                    std::fs::rename(from, to)?;
+                    pause(&ready, phase);
+                },
+            )
+            .unwrap();
+            panic!("the child returned instead of waiting for termination");
+        }
+        struct Reap(std::process::Child);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                // Also kill/reap on assertion failure or readiness timeout: no orphan processes.
+                if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                    let _ = self.0.kill();
+                }
+                let _ = self.0.wait();
+            }
+        }
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::process_kill_preserves_atomic_save_boundary_and_retry");
+        for phase in ["partial", "flushed", "renamed"] {
+            for existing in [false, true] {
+                let dir = staging_dir(&format!("kill-{phase}-{existing}"));
+                let target = dir.join("out.pdf");
+                let ready = dir.join("ready");
+                assert!(!ready.exists(), "a fresh case must not reuse a stale barrier");
+                if existing {
+                    std::fs::write(&target, b"ORIGINAL FILE").unwrap();
+                }
+                let mut child = Reap(
+                    std::process::Command::new(std::env::current_exe().unwrap())
+                        .args(["--exact", &test, "--nocapture"])
+                        .env(PHASE, phase)
+                        .env(DIRECTORY, &dir)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::inherit())
+                        .spawn()
+                        .unwrap(),
+                );
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    if std::fs::read(&ready).is_ok_and(|bytes| bytes == phase.as_bytes()) {
+                        break;
+                    }
+                    assert!(child.0.try_wait().unwrap().is_none(), "child exited before the {phase} barrier");
+                    assert!(std::time::Instant::now() < deadline, "child did not reach the {phase} barrier");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                child.0.kill().unwrap();
+                let status = child.0.wait().unwrap();
+                assert!(!status.success(), "termination was not a graceful successful return");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt as _;
+                    assert_eq!(status.signal(), Some(9), "the child must die from SIGKILL");
+                }
+                if phase == "renamed" {
+                    assert_eq!(std::fs::read(&target).unwrap(), NEW);
+                    assert!(!staged(&dir, 7).exists());
+                } else {
+                    if existing {
+                        assert_eq!(read(&target), "ORIGINAL FILE");
+                    } else {
+                        assert!(!target.exists(), "no partial target was published");
+                    }
+                    let orphan = std::fs::read(staged(&dir, 7)).unwrap();
+                    let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };
+                    assert_eq!(orphan, expected);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt as _;
+                        assert_eq!(std::fs::metadata(staged(&dir, 7)).unwrap().permissions().mode() & 0o777, 0o600);
+                    }
+                }
+                // Deterministic collision with an orphan: retry must skip, never overwrite it.
+                write_atomic_with(&target, b"RETRY COMPLETE", [7, 8]).unwrap();
+                assert_eq!(read(&target), "RETRY COMPLETE");
+                assert!(!staged(&dir, 8).exists());
+                if phase == "renamed" {
+                    assert!(!staged(&dir, 7).exists());
+                } else {
+                    let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };
+                    assert_eq!(std::fs::read(staged(&dir, 7)).unwrap(), expected, "orphan was not reused or overwritten");
+                }
+                std::fs::remove_dir_all(dir).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn a_partial_disk_full_write_never_replaces_the_target() {
         use std::io::Write as _;
