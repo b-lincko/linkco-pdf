@@ -11,14 +11,34 @@
 //! A snapshot is acknowledged only after both store writes succeed; failed revisions remain
 //! pending for retry without another edit. The PDF and metadata are still separate replacements.
 //! Recovery keys are bounded portable identifiers, never paths. Discovered JSON must name its
-//! own filename key. This does not authenticate metadata or sandbox symbolic links/parent races.
+//! own filename key, and metadata reads are size-bounded. This does not authenticate metadata,
+//! bound PDF loading or sandbox symbolic links/parent races.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::PdfCraftApp;
 
 /// How often unsaved changes are written to the recovery folder.
 pub const AUTOSAVE_SECS: f64 = 60.0;
+
+/// Metadata is a handful of strings; a larger file is corrupt or hostile, not a recovery entry.
+const META_LIMIT: u64 = 64 * 1024;
+/// Bound the name/path strings a listing carries into the UI and save paths.
+const META_STRING_LIMIT: usize = 4096;
+
+/// Read one entry's metadata within fixed bounds. The document bytes themselves are limited by
+/// the engine, not here.
+fn read_metadata(path: &Path) -> Option<RecoveryMeta> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path).ok()?.take(META_LIMIT + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > META_LIMIT {
+        return None;
+    }
+    let meta: RecoveryMeta = serde_json::from_slice(&bytes).ok()?;
+    let bounded = |s: &String| s.len() <= META_STRING_LIMIT;
+    (bounded(&meta.name) && meta.path.as_ref().is_none_or(bounded)).then_some(meta)
+}
 
 /// What a recovery entry records next to the PDF bytes.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -116,8 +136,9 @@ impl RecoveryStore {
         let _ = std::fs::remove_file(pdf);
     }
 
-    /// Complete entries, newest first. Metadata keys must match their filenames. Invalid JSON
-    /// entries and incomplete leftovers (bytes without metadata) are removed inside the store.
+    /// Complete entries, newest first. Metadata keys must match their filenames and each metadata
+    /// file is read within a fixed budget. Invalid, oversized or overlong entries and incomplete
+    /// leftovers (bytes without metadata) are removed inside the store.
     pub fn list(&self) -> Vec<RecoveryMeta> {
         let Ok(dir) = std::fs::read_dir(&self.dir) else { return Vec::new() };
         let mut out = Vec::new();
@@ -125,7 +146,7 @@ impl RecoveryStore {
             let path = entry.path();
             match path.extension().and_then(|e| e.to_str()) {
                 Some("json") => {
-                    let meta = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<RecoveryMeta>(&b).ok());
+                    let meta = read_metadata(&path);
                     // Do not trust a JSON key to identify a different entry, even inside the
                     // store. Check the filename binding before probing its paired PDF.
                     match meta.filter(|m| {
@@ -431,5 +452,35 @@ mod store_tests {
             assert!(store.list().is_empty());
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn oversized_metadata_and_overlong_strings_are_ignored_and_cleaned_up_in_the_store() {
+        let (root, store) = fixture_store("metadata-bounds");
+        std::fs::create_dir_all(store.dir()).unwrap();
+        let mut padded = serde_json::to_vec(&metadata("padded")).unwrap();
+        padded.resize(64 * 1024 + 1, b' ');
+        std::fs::write(store.dir().join("padded.json"), padded).unwrap();
+        std::fs::write(store.dir().join("padded.pdf"), b"%PDF-1.7").unwrap();
+        for (key, name_len, path_len) in [("longname", 4097, 0), ("longpath", 5, 4097)] {
+            let mut meta = metadata(key);
+            meta.name = "n".repeat(name_len);
+            meta.path = (path_len > 0).then(|| "p".repeat(path_len));
+            std::fs::write(store.dir().join(format!("{key}.json")), serde_json::to_vec(&meta).unwrap()).unwrap();
+            std::fs::write(store.dir().join(format!("{key}.pdf")), b"%PDF-1.7").unwrap();
+        }
+        // Long but bounded native names still list: the limit is a memory bound, not a new
+        // portable-filename policy for document names.
+        let mut long_ok = metadata("long-ok");
+        long_ok.name = "n".repeat(4096);
+        store.write(&long_ok, b"%PDF-1.7").unwrap();
+        store.write(&metadata("normal"), b"%PDF-1.7").unwrap();
+
+        let mut listed: Vec<_> = store.list().into_iter().map(|m| (m.key, m.name.len())).collect();
+        listed.sort();
+        assert_eq!(listed, [("long-ok".to_string(), 4096), ("normal".to_string(), 8)]);
+        assert_eq!(std::fs::read_dir(store.dir()).unwrap().count(), 4, "only the complete bounded pair survives");
+        assert!(!store.dir().join("padded.pdf").exists(), "the rejected entry's bytes are cleaned up inside the store");
+        assert!(!root.join("store").join("longname.pdf").exists());
+        assert!(!root.join("store").join("longpath.json").exists());
     }
 }

@@ -123,6 +123,14 @@ Now only a successful open — or the password prompt that owns that document's 
 
 Local evidence: six tests of the actual `recover()` method pass, five of which failed before the fix; four new full-app regressions cover repair-and-retry after read/parse failure, duplicate keys, sequential encrypted recovery with wrong and cancelled passwords, and an unrelated pending prompt. Standalone Clippy and formatting pass. **CI is pending**; full local workspace gates remain dependency-blocked by the craft-libs checkout. The trade-off is explicit: encrypted snapshots are recovered one prompt at a time. PDF-load bounds, transactional pairs, power-loss durability and metadata authenticity remain open.
 
+## Batch component: B009 — bounded recovery metadata
+
+Parent: **REC-R01, save integrity**. Follow-up to B007: discovery still read each `<key>.json` whole with `std::fs::read` and accepted unbounded `name`/`path` strings, so a corrupt or hostile entry could allocate without limit and overlong strings flowed into the dialog and save path.
+
+Metadata reads now stop after 64 KiB + 1 bytes and entries larger than 64 KiB are rejected; `name` and a present `path` must be at most 4,096 bytes. Rejected entries are cleaned up only at their discovered path inside the store, like other invalid metadata. Complete bounded entries — including a 4,096-byte native name — still list.
+
+Local evidence: a new actual-source store test failed before the fix (padded 64 KiB+1 metadata, 4,097-byte name and path) and passes now, with 18 store/staging tests green and Clippy/formatting clean. Removing the acceptance checks is rejected by that test; removing only the read byte cap is not observable in tests and is recorded as defense-in-depth. **CI is pending.** This bounds metadata only: PDF bytes and engine loading keep their existing limits, and authenticity, transactions, symlink/hostile-parent safety and power-loss durability remain open.
+
 ## Regeneration and verification
 
 ```sh

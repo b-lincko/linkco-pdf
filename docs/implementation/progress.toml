@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B008"
+active_component = "B009"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -146,5 +146,19 @@ code = ["crates/ui-egui/src/recovery.rs", "crates/ui-egui/src/lib.rs", "crates/u
 audit = "Focused harness of the actual recover() method: five of six tests failed before the fix (both read and open failures consumed offers, duplicate keys opened twice, an unrelated prompt was replaced, the second encrypted snapshot overwrote the first prompt). After the fix only successful opens or their pending prompt consume an offer; iteration stops while a prompt is pending; cancelled/failed metadata returns to the offer without duplicates; the dialog is re-shown for remaining offers. submit_password returns the association for failed or cancelled recovery and keeps it for wrong-password retries. Re-audit checked dialog sequencing, notification paths and that no view/undo/save behaviour changed."
 local_evidence = ["Six actual-source recovery-loop tests pass; five failed before the fix", "Standalone clippy-driver with warnings denied and cargo fmt --check pass", "Four new full-app regressions cover repair-and-retry after read or parse failure, duplicate keys, sequential encrypted recovery with wrong/cancelled passwords, and an unrelated pending prompt", "Two scratch mutations (no per-key consumption, no prompt serialization) each failed two tests"]
 verification_limit = "Full local workspace gates remain blocked by the missing craft-libs checkout; the new full-app regressions are compile-verified patterns but execute in remote CI only. The loop harness uses the actual recover() source with stubbed document opening, so it is not GUI/engine integration evidence. Serializing prompts trades parallelism for correctness: recovering several encrypted snapshots now requires answering one prompt at a time. Not claimed: PDF-load resource bounds, transactional pair recovery, whole-process restart, power-loss durability or metadata authenticity."
+ci = "pending"
+ci_run_urls = []
+
+[components.B009]
+title = "Bound recovery metadata reads"
+stage = "basic"
+parent_tasks = ["REC-R01"]
+status = "ci_pending"
+acceptance = "Listing the recovery store reads each metadata file within a fixed byte budget and rejects metadata whose name or original path exceeds a fixed length, cleaning those entries inside the store like other invalid metadata. Complete bounded entries, including long native names, still list and recover unchanged."
+notes = "Batch follow-up to the B007 key/filename work: discovery still used an unbounded std::fs::read for JSON and accepted unbounded name/path strings. Metadata is now capped at 64 KiB per file with name/path at 4,096 bytes; document bytes remain engine-limited. CI is pending."
+code = ["crates/ui-egui/src/recovery.rs"]
+audit = "Audited the discovery path after B008. Metadata was read whole into memory and deserialized without any length bound, so a corrupt or hostile entry could allocate arbitrarily, and unbounded name/path strings flowed into the recovery dialog and save path. Reads now open the file, take at most 64 KiB + 1 bytes, reject anything larger, and require name and path within 4,096 bytes before listing; rejected entries are removed only at their discovered path inside the store, consistent with existing incomplete-entry cleanup. Re-audit confirmed the PDF probe still happens after key/filename binding, that the document-bytes read is unchanged and still engine-limited, and that the byte cap is defense-in-depth while the acceptance check is what tests can observe."
+local_evidence = ["A new actual-source store test failed before the fix and passes now (18 store/staging tests total, serial)", "The test rejects a padded 64 KiB+1 metadata file and 4,097-byte name/path entries, keeps a 4,096-byte name, and checks rejected pairs are cleaned inside the store", "Removing the post-read size and string checks was rejected by that test", "Removing the read byte cap alone is not detectable in tests and is recorded as defense-in-depth, not as covered behavior", "Standalone Clippy with warnings denied and cargo fmt --check pass"]
+verification_limit = "Full local workspace gates remain blocked by the missing craft-libs checkout. The bound applies to recovery metadata only: document PDF bytes, engine loading and rendering remain limited by existing engine budgets, not this component. Not claimed: metadata authenticity, transactional pairs, symlink/hostile-parent protection, power-loss durability or recovery of over-budget entries (they are cleaned up like other invalid metadata). Native macOS/network-filesystem behaviour remains unverified."
 ci = "pending"
 ci_run_urls = []

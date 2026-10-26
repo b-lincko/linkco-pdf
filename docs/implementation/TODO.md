@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B008 · **Active stage:** basic
+**Active component:** B009 · **Active stage:** basic
 
-## Basic (339 records)
+## Basic (340 records)
 
-ci_pending: 1, complete: 7, in_progress: 1, pending: 330
+ci_pending: 2, complete: 7, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -26,6 +26,7 @@ ci_pending: 1, complete: 7, in_progress: 1, pending: 330
 | B006 | [x] Retry recovery autosaves until complete persistence succeeds | P0 | complete | REC-R01 |
 | B007 | [x] Validate recovery keys and bind metadata to its entry filename | P0 | complete | REC-R01 |
 | B008 | [ ] Keep failed recovery offers retryable and serialize password prompts | P0 | ci_pending | REC-R01 |
+| B009 | [ ] Bound recovery metadata reads | P0 | ci_pending | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -819,3 +820,17 @@ pending: 65, scope_review: 23
 - Local evidence: Standalone clippy-driver with warnings denied and cargo fmt --check pass.
 - Local evidence: Four new full-app regressions cover repair-and-retry after read or parse failure, duplicate keys, sequential encrypted recovery with wrong/cancelled passwords, and an unrelated pending prompt.
 - Local evidence: Two scratch mutations (no per-key consumption, no prompt serialization) each failed two tests.
+
+### B009: Bound recovery metadata reads
+
+- Status: **ci_pending**; parent(s): REC-R01.
+- Acceptance: Listing the recovery store reads each metadata file within a fixed byte budget and rejects metadata whose name or original path exceeds a fixed length, cleaning those entries inside the store like other invalid metadata. Complete bounded entries, including long native names, still list and recover unchanged.
+- Audit: Audited the discovery path after B008. Metadata was read whole into memory and deserialized without any length bound, so a corrupt or hostile entry could allocate arbitrarily, and unbounded name/path strings flowed into the recovery dialog and save path. Reads now open the file, take at most 64 KiB + 1 bytes, reject anything larger, and require name and path within 4,096 bytes before listing; rejected entries are removed only at their discovered path inside the store, consistent with existing incomplete-entry cleanup. Re-audit confirmed the PDF probe still happens after key/filename binding, that the document-bytes read is unchanged and still engine-limited, and that the byte cap is defense-in-depth while the acceptance check is what tests can observe.
+- Verification Limit: Full local workspace gates remain blocked by the missing craft-libs checkout. The bound applies to recovery metadata only: document PDF bytes, engine loading and rendering remain limited by existing engine budgets, not this component. Not claimed: metadata authenticity, transactional pairs, symlink/hostile-parent protection, power-loss durability or recovery of over-budget entries (they are cleaned up like other invalid metadata). Native macOS/network-filesystem behaviour remains unverified.
+- Ci: pending
+- Notes: Batch follow-up to the B007 key/filename work: discovery still used an unbounded std::fs::read for JSON and accepted unbounded name/path strings. Metadata is now capped at 64 KiB per file with name/path at 4,096 bytes; document bytes remain engine-limited. CI is pending.
+- Local evidence: A new actual-source store test failed before the fix and passes now (18 store/staging tests total, serial).
+- Local evidence: The test rejects a padded 64 KiB+1 metadata file and 4,097-byte name/path entries, keeps a 4,096-byte name, and checks rejected pairs are cleaned inside the store.
+- Local evidence: Removing the post-read size and string checks was rejected by that test.
+- Local evidence: Removing the read byte cap alone is not detectable in tests and is recorded as defense-in-depth, not as covered behavior.
+- Local evidence: Standalone Clippy with warnings denied and cargo fmt --check pass.
