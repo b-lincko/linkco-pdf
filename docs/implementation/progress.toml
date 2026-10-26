@@ -11,7 +11,7 @@ steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verif
 
 [task_status.REC-R01]
 status = "in_progress"
-notes = "B001–B004 cover staging names, flush-before-replace, Unix creation modes and controlled operation faults. R01 remains open: physical volume-full, process-kill, crash recovery and the full save-integrity release gate are not complete."
+notes = "B001–B005 cover staging names, flush-before-replace, Unix creation modes, controlled operation faults and bounded process-termination/retry checks. R01 remains open: physical volume-full, whole-application restart/session recovery, power-loss durability and the full save-integrity release gate are not complete."
 
 [components.B001]
 title = "Reject paths as atomic-save staging filenames"
@@ -84,12 +84,15 @@ verification_commit = "db25dbb5cb9d0b43ad2a6a47d5c5138f96abdc4d"
 title = "Process-termination boundaries and safe retry for atomic saves"
 stage = "basic"
 parent_tasks = ["REC-R01"]
-status = "ci_pending"
+status = "complete"
 acceptance = "For automation and desktop save pipelines, kill real children during a partial staging write, after flush/before rename and immediately after rename, for existing/new targets. Before replacement keep old bytes/target absence; after replacement keep complete new bytes. Verify private Unix orphans survive pre-rename kills and retry skips them without clobbering. Reap children on assertion/timeout paths. No production fault switch or behavior change."
-notes = "The user approved the next basic component on 2026-10-26 after B004 verification. This is controlled process-kill coverage with synthetic bytes, not full application crash recovery, physical disk-full or power-loss certification. Stop for approval after B005 verification."
+notes = "The user approved the next basic component on 2026-10-26 after B004 verification. This is controlled process-kill coverage with synthetic bytes, not full application crash recovery, physical disk-full or power-loss certification. All five replacement workflows passed at 4b3a22b. Stop and await explicit approval before another component."
 code = ["crates/automation/src/lib.rs", "crates/ui-egui/src/editing.rs"]
 audit = "Added only cfg(test) cases using B004 private seams. Real children signal phase-specific fresh-file barriers before the parent calls Child::kill and wait; Unix status must report SIGKILL. Re-audit added a reaping guard that does not kill an already reaped child, rejects stale/empty-filter barriers and checks retry collision behavior plus Unix orphan mode. Production code and safety deadlines are unchanged."
 local_evidence = ["24 actual automation/staging standalone tests passed", "23 actual desktop/staging standalone tests passed", "Each new test exercises three phases for existing/new targets: 12 real child terminations across both callers", "Four scratch mutation checks rejected in-place target corruption and unsafe orphan reuse in both pipelines", "Standalone Clippy with warnings denied passed for both actual save pipelines", "cargo fmt --all -- --check passed"]
-verification_limit = "Local workspace gates require the unavailable craft-libs checkout; fresh platform CI is pending. The tests use local-filesystem synthetic byte payloads, not PDF semantic/conformance checks or whole-application recovery. Pre-rename kills deliberately leave private staging orphans; no automatic orphan cleanup/recovery is added. Physical volume-full, power loss, parent-directory durability, native macOS/network filesystems and restart/session recovery remain outside this component."
-ci = "pending"
-ci_run_urls = []
+verification_limit = "Local workspace gates were dependency-blocked by the missing craft-libs checkout; remote Linux/Windows/wasm, native ARM64 and FreeBSD gates passed, including the new child-termination unit tests in both callers. The tests use local-filesystem synthetic byte payloads, not PDF semantic/conformance checks or whole-application recovery. Pre-rename kills deliberately leave private staging orphans; no automatic orphan cleanup/recovery is added. Physical volume-full, power loss, parent-directory durability, native macOS/network filesystems and restart/session recovery remain outside this component."
+ci = "passed"
+ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40279282248", "https://github.com/b-lincko/linkco-pdf/actions/runs/40279282322", "https://github.com/b-lincko/linkco-pdf/actions/runs/40279282211", "https://github.com/b-lincko/linkco-pdf/actions/runs/40279282228", "https://github.com/b-lincko/linkco-pdf/actions/runs/40279282235"]
+ci_notes = "All five workflows passed at 4b3a22b: main Linux/Windows/wasm/consistency/advisory gates, native ARM64 test/install, FreeBSD build/test/package, packaging lint and preview-handler tests. Both new test functions are included in the workspace unit suites. Existing workflow policy skipped mutation fuzzing; the four local scratch regression-mutation checks are not a fuzz run. No production behavior, existing safety assertions or deadlines were changed."
+implementation_commit = "4b3a22bd6e9d82f86e60a855bcacb5ff8a59a701"
+verification_commit = "4b3a22bd6e9d82f86e60a855bcacb5ff8a59a701"

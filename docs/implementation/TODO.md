@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (336 records)
 
-ci_pending: 1, complete: 4, in_progress: 1, pending: 330
+complete: 5, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -22,7 +22,7 @@ ci_pending: 1, complete: 4, in_progress: 1, pending: 330
 | B002 | [x] Audit and harden flush-before-replace in automation saves | P0 | complete | REC-R01 |
 | B003 | [x] Create Unix atomic-save staging files with private permissions | P0 | complete | REC-R01 |
 | B004 | [x] Deterministic atomic-save write and rename fault coverage | P0 | complete | REC-R01 |
-| B005 | [ ] Process-termination boundaries and safe retry for atomic saves | P0 | ci_pending | REC-R01 |
+| B005 | [x] Process-termination boundaries and safe retry for atomic saves | P0 | complete | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -748,15 +748,20 @@ pending: 65, scope_review: 23
 
 ### B005: Process-termination boundaries and safe retry for atomic saves
 
-- Status: **ci_pending**; parent(s): REC-R01.
+- Status: **complete**; parent(s): REC-R01.
 - Acceptance: For automation and desktop save pipelines, kill real children during a partial staging write, after flush/before rename and immediately after rename, for existing/new targets. Before replacement keep old bytes/target absence; after replacement keep complete new bytes. Verify private Unix orphans survive pre-rename kills and retry skips them without clobbering. Reap children on assertion/timeout paths. No production fault switch or behavior change.
 - Audit: Added only cfg(test) cases using B004 private seams. Real children signal phase-specific fresh-file barriers before the parent calls Child::kill and wait; Unix status must report SIGKILL. Re-audit added a reaping guard that does not kill an already reaped child, rejects stale/empty-filter barriers and checks retry collision behavior plus Unix orphan mode. Production code and safety deadlines are unchanged.
-- Verification Limit: Local workspace gates require the unavailable craft-libs checkout; fresh platform CI is pending. The tests use local-filesystem synthetic byte payloads, not PDF semantic/conformance checks or whole-application recovery. Pre-rename kills deliberately leave private staging orphans; no automatic orphan cleanup/recovery is added. Physical volume-full, power loss, parent-directory durability, native macOS/network filesystems and restart/session recovery remain outside this component.
-- Ci: pending
-- Notes: The user approved the next basic component on 2026-10-26 after B004 verification. This is controlled process-kill coverage with synthetic bytes, not full application crash recovery, physical disk-full or power-loss certification. Stop for approval after B005 verification.
+- Verification Limit: Local workspace gates were dependency-blocked by the missing craft-libs checkout; remote Linux/Windows/wasm, native ARM64 and FreeBSD gates passed, including the new child-termination unit tests in both callers. The tests use local-filesystem synthetic byte payloads, not PDF semantic/conformance checks or whole-application recovery. Pre-rename kills deliberately leave private staging orphans; no automatic orphan cleanup/recovery is added. Physical volume-full, power loss, parent-directory durability, native macOS/network filesystems and restart/session recovery remain outside this component.
+- Ci: passed
+- Notes: The user approved the next basic component on 2026-10-26 after B004 verification. This is controlled process-kill coverage with synthetic bytes, not full application crash recovery, physical disk-full or power-loss certification. All five replacement workflows passed at 4b3a22b. Stop and await explicit approval before another component.
 - Local evidence: 24 actual automation/staging standalone tests passed.
 - Local evidence: 23 actual desktop/staging standalone tests passed.
 - Local evidence: Each new test exercises three phases for existing/new targets: 12 real child terminations across both callers.
 - Local evidence: Four scratch mutation checks rejected in-place target corruption and unsafe orphan reuse in both pipelines.
 - Local evidence: Standalone Clippy with warnings denied passed for both actual save pipelines.
 - Local evidence: cargo fmt --all -- --check passed.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282248
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282322
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282211
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282228
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40279282235
