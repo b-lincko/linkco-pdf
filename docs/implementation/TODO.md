@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (338 records)
 
-ci_pending: 1, complete: 6, in_progress: 1, pending: 330
+complete: 7, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -24,7 +24,7 @@ ci_pending: 1, complete: 6, in_progress: 1, pending: 330
 | B004 | [x] Deterministic atomic-save write and rename fault coverage | P0 | complete | REC-R01 |
 | B005 | [x] Process-termination boundaries and safe retry for atomic saves | P0 | complete | REC-R01 |
 | B006 | [x] Retry recovery autosaves until complete persistence succeeds | P0 | complete | REC-R01 |
-| B007 | [ ] Validate recovery keys and bind metadata to its entry filename | P0 | ci_pending | REC-R01 |
+| B007 | [x] Validate recovery keys and bind metadata to its entry filename | P0 | complete | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -789,14 +789,19 @@ pending: 65, scope_review: 23
 
 ### B007: Validate recovery keys and bind metadata to its entry filename
 
-- Status: **ci_pending**; parent(s): REC-R01.
+- Status: **complete**; parent(s): REC-R01.
 - Acceptance: Reject path/stream/device/control/oversized recovery keys before read/write/remove filesystem access, including before write creates the store; keep generated and ordinary Unicode keys compatible. Require each discovered JSON key to match its filename before probing/returning its PDF. Invalid removal requests are no-ops. Preserve outside files and normal plain/encrypted recovery/discard.
 - Audit: All key-derived read/write/remove paths share a private validator; list validates the key and corresponding JSON file before its PDF probe, allowing native canonical-equivalent filenames without accepting a different regular file. The policy bounds keys to 128 UTF-8 bytes before case-fold allocation, rejects portable separators/streams/controls/device aliases and preserves normal Unicode/hidden/generated keys. Re-audit found and fixed allocation-before-length-rejection; added canonical filename comparison to preserve normalizing-filesystem spellings; confirmed no change to original document path metadata, atomic-save or B006 acknowledgement ordering. Invalid JSON is cleaned only at the discovered store path.
-- Verification Limit: Full local workspace gates remain blocked by the unavailable craft-libs checkout; fresh platform CI must run full application/encrypted-PDF recovery/discard integration. The local harness uses actual store/write/staging code and real Serde/JSON at Cargo.lock versions, but omits the GUI/engine and stubs only portable-mode directory selection (not used by these tests). This is lexical key validation, not symlink/hardlink/hostile-parent or concurrent-replacement protection, metadata/original-path authenticity, resource-bounded JSON/PDF loading, transactional pair recovery, physical volume-full, power-loss or web recovery. Native macOS/network filesystems remain unverified.
-- Ci: pending
-- Notes: The user approved continuation after B006. Baseline actual-store tests reproduced outside reads, replacement/deletion via traversal keys and alias metadata impersonating another entry. This is lexical key safety and filename binding, not a complete recovery-store sandbox or metadata authenticity guarantee. Stop for explicit approval after verification.
+- Verification Limit: Full local workspace gates remained dependency-blocked by the unavailable craft-libs checkout; remote Linux/Windows/wasm, native ARM64 and FreeBSD gates passed, including the actual recovery-store and full-app plain/encrypted recovery/discard regressions. The local harness uses actual store/write/staging code and real Serde/JSON at Cargo.lock versions, but omits the GUI/engine and stubs only portable-mode directory selection (not used by these tests). This is lexical key validation, not symlink/hardlink/hostile-parent or concurrent-replacement protection, metadata/original-path authenticity, resource-bounded JSON/PDF loading, transactional pair recovery, physical volume-full, power-loss or web recovery. Native macOS/network filesystems remain unverified.
+- Ci: passed
+- Notes: The user approved continuation after B006. Baseline actual-store tests reproduced outside reads, replacement/deletion via traversal keys and alias metadata impersonating another entry. This is lexical key safety and filename binding, not a complete recovery-store sandbox or metadata authenticity guarantee. All five replacement workflows passed at 6f19614. Stop and await explicit approval before another component.
 - Local evidence: Five new regression tests failed before the fix against actual RecoveryStore, desktop atomic writer and staging source with real pinned Serde/JSON.
 - Local evidence: 17 actual-source store/staging tests passed serially and in parallel, including six new store tests.
 - Local evidence: Standalone Cargo Clippy with all targets and warnings denied passed.
 - Local evidence: Four scratch mutations rejected unchecked keys, unchecked removal, filename-alias acceptance and directory creation before validation.
 - Local evidence: cargo fmt --all -- --check passed.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728212
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728273
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728229
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728210
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40295728476
