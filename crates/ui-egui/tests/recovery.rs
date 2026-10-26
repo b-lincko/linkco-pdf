@@ -550,3 +550,54 @@ fn recovery_does_not_dismiss_an_unrelated_password_prompt() {
     s.clear();
     std::fs::remove_dir_all(s.dir()).unwrap();
 }
+
+/// The store owns a folder of unsaved work, so the folder is for this user alone and every
+/// snapshot in it is readable only by them (Unix modes; other platforms inherit a per-user
+/// profile). An older folder that an earlier version created looser is tightened when the app
+/// opens the store, and the snapshots themselves are written private from their first byte.
+#[cfg(unix)]
+#[test]
+fn the_recovery_folder_and_its_snapshots_are_private_to_the_user() {
+    use std::os::unix::fs::PermissionsExt as _;
+    fn mode(path: &std::path::Path) -> u32 {
+        std::fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    }
+    let s = store("private");
+    crashed_session(&s, fixture(2), None, None);
+    assert_eq!(mode(s.dir()), 0o700, "the folder is created private");
+    let entries: Vec<_> = std::fs::read_dir(s.dir()).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(entries.len(), 2, "one snapshot and one metadata file");
+    for entry in &entries {
+        assert_eq!(mode(entry), 0o600, "{entry:?} is readable only by its owner");
+    }
+    // A folder left looser by an earlier version is tightened when the store is opened, without
+    // losing what it holds.
+    std::fs::set_permissions(s.dir(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let found = s.list();
+    assert_eq!(found.len(), 1);
+    assert_eq!(mode(s.dir()), 0o700);
+    assert_eq!(s.list().len(), 1);
+    s.clear();
+    std::fs::remove_dir_all(s.dir()).unwrap();
+}
+
+/// A recovery folder that a link replaced is refused rather than followed: recovery must not
+/// write snapshots into a folder the app does not own.
+#[cfg(unix)]
+#[test]
+fn a_linked_recovery_folder_is_refused_instead_of_written_through() {
+    let root = store("linked-root");
+    let elsewhere = std::env::temp_dir().join(format!("pdfcraft-recovery-elsewhere-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&elsewhere);
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::create_dir_all(root.dir()).unwrap();
+    let link = root.dir().join("link");
+    std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+    let store_through_link = RecoveryStore::new(&link);
+    let meta = pdfcraft_ui_egui::RecoveryMeta { key: "link-test".into(), name: "draft.pdf".into(), path: None, saved_at: 1, encrypted: false };
+    let error = store_through_link.write(&meta, &fixture(2)).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
+    assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0, "nothing was written through the link");
+    std::fs::remove_dir_all(&elsewhere).unwrap();
+    std::fs::remove_dir_all(root.dir()).unwrap();
+}

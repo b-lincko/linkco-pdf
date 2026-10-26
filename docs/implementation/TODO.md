@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B010 · **Active stage:** basic
+**Active component:** B011 · **Active stage:** basic
 
-## Basic (341 records)
+## Basic (342 records)
 
-ci_pending: 1, complete: 9, in_progress: 1, pending: 330
+ci_pending: 2, complete: 9, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -28,6 +28,7 @@ ci_pending: 1, complete: 9, in_progress: 1, pending: 330
 | B008 | [x] Keep failed recovery offers retryable and serialize password prompts | P0 | complete | REC-R01 |
 | B009 | [x] Bound recovery metadata reads | P0 | complete | REC-R01 |
 | B010 | [ ] Refuse to overwrite a file another program changed on disk | P0 | ci_pending | REC-R05 |
+| B011 | [ ] Create the recovery folder private to its user | P0 | ci_pending | REC-S08 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -858,3 +859,15 @@ pending: 65, scope_review: 23
 - Local evidence: The stamp module passes rustc with warnings denied as a standalone test binary.
 - Local evidence: cargo fmt --all --check passes.
 - Local evidence: Full-app regressions cover unchanged in-place saves, a blocked save with the other version preserved, Overwrite replacing it, and Cancel keeping it with the conflict raised again on the next save (executed in CI only).
+
+### B011: Create the recovery folder private to its user
+
+- Status: **ci_pending**; parent(s): REC-S08.
+- Acceptance: The recovery folder is created with owner-only access on Unix (mode 0700 in the creation call, so no looser window exists), a folder an earlier version created looser is tightened when the app opens it, the snapshots and metadata inside are readable only by their owner, and a path that is a link or a file is refused instead of followed or written through. Other platforms keep their per-user profile defaults.
+- Audit: Traced every writer into the recovery folder: RecoveryStore::write creates it, ReadDir/list and read_metadata only read, and remove is limited to validated entry paths. The two files per entry already inherit the staging file's 0600 through the rename, so the exposure was the directory listing (0755 under the usual umask), not the bytes; a test now pins both modes so a later change to the staging creation cannot silently reopen it. The helper refuses symlinks, dangling links and plain files via symlink_metadata before any creation, so a tampered path never becomes a write target and never changes the mode of a directory the app does not own. The mode is changed through an open handle rather than the path, so a swap between the check and the change cannot redirect it. Tightening only removes access, and its failure is ignored on the write path so a filesystem without Unix modes cannot turn a permission bit into a failed autosave; listing still works even when the folder cannot be tightened. Re-audit: the AlreadyExists branch covers a concurrent creator, non-Unix builds only verify that the folder exists, and the store documentation now states that a folder replaced by a link is still listed but not written through.
+- Verification Limit: Full local workspace gates remain blocked by the missing craft-libs checkout, so the store regressions run in remote CI only. This is not a sandbox: replacing the folder or its parent between two filesystem operations is outside the component, and filesystems without Unix modes (FAT/exFAT, some network shares) keep their own behavior. Thumbnails, saved settings, printed spool output and local history are not covered, and REC-S08 stays open.
+- Ci: pending
+- Notes: Bounded part of REC-S08 (secure temporary files, thumbnails and local history), which stays open. The audit found that recovery snapshots were already written through the staging file, which is created 0600 (B003), but the folder itself was made with std::fs::create_dir_all and the process umask, so 0755 was normal and other local accounts could list the entry names. The new helper is used for the folder on every recovery write, and opening an existing store tightens it. Thumbnails, settings, printed output, the portable data folder and the automation side are untouched. CI is pending.
+- Local evidence: Six standalone tests of the new helper pass: new folder 0700, existing 0755 folder tightened and kept usable, missing parents created private, symlink refused with its target left at 0755, dangling symlink refused without creating the target, file at the path refused.
+- Local evidence: The helper compiles as a standalone test binary and cargo fmt --all --check passes.
+- Local evidence: The two new store regressions (folder and snapshot modes, tightening on open, linked folder refused) execute in remote CI only.

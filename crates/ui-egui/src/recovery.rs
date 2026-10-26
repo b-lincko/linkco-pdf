@@ -55,6 +55,12 @@ pub struct RecoveryMeta {
 }
 
 /// The recovery folder.
+///
+/// The folder and the snapshots in it are private to the current user: it is created (and
+/// re-tightened) with owner-only access by [`pdfcraft_platform::private_dir::create_private_dir`],
+/// and each snapshot and its metadata are written through the staging file, which is created with
+/// mode `0o600` before any bytes go in. A path that is not a real folder (a link, a file) is
+/// refused instead of followed, so recovery never writes through a link into another folder.
 #[derive(Clone, Debug)]
 pub struct RecoveryStore {
     dir: PathBuf,
@@ -123,7 +129,7 @@ impl RecoveryStore {
     /// a listed entry always has complete bytes.
     pub fn write(&self, meta: &RecoveryMeta, bytes: &[u8]) -> std::io::Result<()> {
         let (pdf, metadata) = self.entry_paths(&meta.key)?;
-        std::fs::create_dir_all(&self.dir)?;
+        pdfcraft_platform::private_dir::create_private_dir(&self.dir)?;
         crate::editing::write_atomically(&pdf.to_string_lossy(), bytes)?;
         let json = serde_json::to_vec_pretty(meta).map_err(std::io::Error::other)?;
         crate::editing::write_atomically(&metadata.to_string_lossy(), &json)
@@ -141,6 +147,12 @@ impl RecoveryStore {
     /// leftovers (bytes without metadata) are removed inside the store; an invalid metadata
     /// file takes its paired snapshot with it regardless of iteration order.
     pub fn list(&self) -> Vec<RecoveryMeta> {
+        // Opening the store is when an older, looser recovery folder gets its owner-only access
+        // back. The listing itself does not need the change and must not be hidden by it: an
+        // unusual filesystem that refuses it still has recoverable work to offer.
+        if self.dir.exists() {
+            let _ = pdfcraft_platform::private_dir::create_private_dir(&self.dir);
+        }
         let Ok(dir) = std::fs::read_dir(&self.dir) else { return Vec::new() };
         let mut out = Vec::new();
         for entry in dir.flatten() {

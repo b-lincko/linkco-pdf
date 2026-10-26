@@ -141,6 +141,16 @@ Local evidence: three standalone stamp tests pass (same-length different bytes; 
 
 Not claimed: this is a check between two filesystem operations, not a lock — another program can still write between the check and the rename. Automation saves, rename/delete/move detection, idle-time notification and merge/reload choices remain open in REC-R05.
 
+## Batch component: B011 — the recovery folder is private to its user
+
+Parent: **REC-S08, secure temporary files, thumbnails and local history** (bounded; S08 stays open). Recovery snapshots were already written through the staging file, which is created `0600` before the first byte (B003). The folder holding them was not: `create_dir_all` plus the process umask produced `0755`, so another local account could list the entry names of work the user had not saved yet.
+
+`pdfcraft_platform::private_dir::create_private_dir` now creates the folder with mode `0700` in the creation call itself, tightens a looser folder when the app opens the store, and refuses a path that is a link, a dangling link or a file instead of following or writing through it. The mode is changed through an open handle, so a swap between the check and the change cannot redirect it. Restricting a folder further is the only change it makes, and a failure to tighten is ignored on the write path so a filesystem without Unix modes cannot turn a permission bit into a failed autosave. Windows and macOS keep their per-user profile defaults.
+
+Local evidence: six standalone helper tests pass (new folder, loosened folder tightened and still usable, missing parents, symlink, dangling symlink, file at the path), the module compiles as a standalone test binary, and formatting passes. Two store regressions (modes of the folder and both files; tightening on open; linked folder refused) run in CI only. **CI is pending.**
+
+Not claimed: this is not a sandbox — replacing the folder or its parent between two filesystem operations is outside the component. Thumbnails, saved settings, printed output, local history, the portable data folder and the automation side are untouched, so REC-S08 stays open.
+
 ## Regeneration and verification
 
 ```sh
