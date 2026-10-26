@@ -36,8 +36,8 @@ fn read_metadata(path: &Path) -> Option<RecoveryMeta> {
         return None;
     }
     let meta: RecoveryMeta = serde_json::from_slice(&bytes).ok()?;
-    let bounded = |s: &String| s.len() <= META_STRING_LIMIT;
-    (bounded(&meta.name) && meta.path.as_ref().is_none_or(bounded)).then_some(meta)
+    let bounded = meta.name.len() <= META_STRING_LIMIT && meta.path.as_ref().is_none_or(|path| path.len() <= META_STRING_LIMIT);
+    bounded.then_some(meta)
 }
 
 /// What a recovery entry records next to the PDF bytes.

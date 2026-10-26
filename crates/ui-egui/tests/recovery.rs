@@ -501,11 +501,11 @@ fn multiple_encrypted_recoveries_keep_their_own_prompts_and_reoffer_deferred_ent
     h.get_by_label("Recover").click();
     h.run_steps(3);
     assert!(h.state().password_prompt.is_some());
-    assert_eq!(h.state().recoverable.as_slice(), &entries[1..]);
+    assert_eq!(h.state().recoverable, entries[1..].to_vec());
     h.state_mut().submit_password(Some("wrong".into()));
     h.run_steps(3);
     assert!(h.state().views.is_empty());
-    assert_eq!(h.state().recoverable.as_slice(), &entries[1..]);
+    assert_eq!(h.state().recoverable, entries[1..].to_vec());
     h.state_mut().submit_password(Some(password(&entries[0].name).into()));
     h.run_steps(3);
     assert_eq!(h.state().views.len(), 1);
@@ -514,7 +514,7 @@ fn multiple_encrypted_recoveries_keep_their_own_prompts_and_reoffer_deferred_ent
     h.run_steps(3);
     h.state_mut().submit_password(None);
     h.run_steps(3);
-    assert_eq!(h.state().recoverable.as_slice(), &entries[1..], "cancel returns only that pending snapshot");
+    assert_eq!(h.state().recoverable, entries[1..].to_vec(), "cancel returns only that pending snapshot");
     h.get_by_label("Recover").click();
     h.run_steps(3);
     h.state_mut().submit_password(Some(password(&entries[1].name).into()));
