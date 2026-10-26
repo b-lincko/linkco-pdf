@@ -86,14 +86,16 @@ fn tighten(dir: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    #![cfg(unix)]
-
+    #[cfg(unix)]
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt as _;
+    #[cfg(unix)]
     use std::path::PathBuf;
 
     /// A fresh, empty folder for one test. Returning the error keeps this helper free of panics,
     /// which the crate denies outside `#[test]` functions.
+    #[cfg(unix)]
     fn test_dir(test: &str) -> std::io::Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!("pdfcraft-platform-private-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -101,11 +103,13 @@ mod tests {
         Ok(dir)
     }
 
+    #[cfg(unix)]
     fn mode(path: &Path) -> std::io::Result<u32> {
         Ok(std::fs::symlink_metadata(path)?.permissions().mode() & 0o777)
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_new_folder_is_private_to_its_owner() {
         let root = test_dir("new").unwrap();
         let dir = root.join("recovery");
@@ -117,6 +121,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn an_existing_loose_folder_is_tightened_and_kept_usable() {
         let root = test_dir("loose").unwrap();
         let dir = root.join("recovery");
@@ -133,6 +138,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn missing_parents_are_created_private_too() {
         let root = test_dir("parents").unwrap();
         let dir = root.join("editor").join("recovery");
@@ -142,6 +148,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_symbolic_link_is_refused_and_its_target_is_left_alone() {
         let root = test_dir("link").unwrap();
         let target = root.join("elsewhere");
@@ -157,6 +164,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_dangling_symbolic_link_is_refused_instead_of_created_through() {
         let root = test_dir("dangling").unwrap();
         let link = root.join("recovery");
@@ -167,6 +175,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_file_at_the_path_is_refused() {
         let root = test_dir("file").unwrap();
         let path = root.join("recovery");
