@@ -149,6 +149,90 @@ pub enum Alert {
     Gone,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::PdfCraftApp {
+    /// Check the files of the open documents, at most every [`DISK_CHECK_SECS`].
+    ///
+    /// A change is reported once for each new situation: another program writing the file, the
+    /// file being moved or renamed inside its folder, and the file being gone. Nothing is
+    /// reported while a dialog or prompt is open — the user is answering something else, and the
+    /// notice would arrive on top of it — and the same state is not repeated, so an idle window
+    /// stays quiet. Every check is a read-only look at the filesystem.
+    pub(crate) fn disk_tick(&mut self, now: f64) {
+        if now - self.last_disk_check < DISK_CHECK_SECS {
+            return;
+        }
+        self.last_disk_check = now;
+        if self.modal_open() || self.dialog.is_some() || self.password_prompt.is_some() {
+            return;
+        }
+        let mut reports = Vec::new();
+        for view in &self.views {
+            let id = view.id;
+            let Some(watch) = self.disk_watch.get(&id).copied() else { continue };
+            let Some(path) = self.session.get(id).and_then(|d| d.path.clone()) else { continue };
+            let last = self.disk_verified.get(&id).copied().unwrap_or(f64::NEG_INFINITY);
+            let deep = now - last >= DISK_CONFIRM_SECS;
+            if deep {
+                self.disk_verified.insert(id, now);
+            }
+            let alert = watch.probe(std::path::Path::new(&path), deep);
+            if self.disk_alerts.get(&id) == Some(&alert) {
+                continue;
+            }
+            let name = self.session.get(id).map(|d| d.name.clone()).unwrap_or_default();
+            reports.push((id, alert, name, path));
+        }
+        for (id, alert, name, path) in reports {
+            match &alert {
+                Alert::Fine => {
+                    self.disk_alerts.remove(&id);
+                }
+                Alert::Changed => {
+                    self.disk_alerts.insert(id, alert);
+                    // The same words the save-time prompt uses: both describe one situation.
+                    self.notify_fmt("“{name}” changed on disk while you were working on it.", &[("name", &name)]);
+                }
+                Alert::Renamed(to) => {
+                    let to = to.display().to_string();
+                    self.disk_alerts.insert(id, alert);
+                    self.notify_fmt("“{name}” was moved or renamed to “{found}”.", &[("name", &name), ("found", &to)]);
+                }
+                Alert::Gone => {
+                    self.disk_alerts.insert(id, alert);
+                    self.notify_fmt(
+                        "“{name}” is no longer at “{path}”; it was moved to another folder or deleted.",
+                        &[("name", &name), ("path", &path)],
+                    );
+                }
+            }
+        }
+    }
+
+    /// Check the open documents' files now, whatever the interval says, and return what each one
+    /// is like (tests and automation; the frame loop uses [`Self::disk_tick`]).
+    pub fn check_disk_now(&mut self) -> Vec<(pdfcraft_engine::DocId, Alert)> {
+        self.last_disk_check = f64::NEG_INFINITY;
+        self.disk_verified.clear();
+        self.disk_tick(0.0);
+        let mut states: Vec<_> = self.disk_alerts.iter().map(|(id, alert)| (*id, alert.clone())).collect();
+        states.sort_by_key(|(id, _)| id.0);
+        states
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl crate::PdfCraftApp {
+    /// The web build has no path-based files to watch ([`crate::disk_watch`] is desktop-only).
+    /// The bookkeeping fields are still touched here, so the shared struct needs no desktop-only
+    /// `cfg` on a dozen field initializers.
+    pub(crate) fn disk_tick(&mut self, now: f64) {
+        self.last_disk_check = now.max(self.last_disk_check);
+        self.disk_verified.clear();
+        self.disk_alerts.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,89 +321,5 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         std::fs::write(&path, b"%PDF-1.7 one").unwrap();
         assert_eq!(watch.probe(&path, true), Alert::Fine);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl crate::PdfCraftApp {
-    /// Check the files of the open documents, at most every [`DISK_CHECK_SECS`].
-    ///
-    /// A change is reported once for each new situation: another program writing the file, the
-    /// file being moved or renamed inside its folder, and the file being gone. Nothing is
-    /// reported while a dialog or prompt is open — the user is answering something else, and the
-    /// notice would arrive on top of it — and the same state is not repeated, so an idle window
-    /// stays quiet. Every check is a read-only look at the filesystem.
-    pub(crate) fn disk_tick(&mut self, now: f64) {
-        if now - self.last_disk_check < DISK_CHECK_SECS {
-            return;
-        }
-        self.last_disk_check = now;
-        if self.modal_open() || self.dialog.is_some() || self.password_prompt.is_some() {
-            return;
-        }
-        let mut reports = Vec::new();
-        for view in &self.views {
-            let id = view.id;
-            let Some(watch) = self.disk_watch.get(&id).copied() else { continue };
-            let Some(path) = self.session.get(id).and_then(|d| d.path.clone()) else { continue };
-            let last = self.disk_verified.get(&id).copied().unwrap_or(f64::NEG_INFINITY);
-            let deep = now - last >= DISK_CONFIRM_SECS;
-            if deep {
-                self.disk_verified.insert(id, now);
-            }
-            let alert = watch.probe(std::path::Path::new(&path), deep);
-            if self.disk_alerts.get(&id) == Some(&alert) {
-                continue;
-            }
-            let name = self.session.get(id).map(|d| d.name.clone()).unwrap_or_default();
-            reports.push((id, alert, name, path));
-        }
-        for (id, alert, name, path) in reports {
-            match &alert {
-                Alert::Fine => {
-                    self.disk_alerts.remove(&id);
-                }
-                Alert::Changed => {
-                    self.disk_alerts.insert(id, alert);
-                    // The same words the save-time prompt uses: both describe one situation.
-                    self.notify_fmt("“{name}” changed on disk while you were working on it.", &[("name", &name)]);
-                }
-                Alert::Renamed(to) => {
-                    let to = to.display().to_string();
-                    self.disk_alerts.insert(id, alert);
-                    self.notify_fmt("“{name}” was moved or renamed to “{found}”.", &[("name", &name), ("found", &to)]);
-                }
-                Alert::Gone => {
-                    self.disk_alerts.insert(id, alert);
-                    self.notify_fmt(
-                        "“{name}” is no longer at “{path}”; it was moved to another folder or deleted.",
-                        &[("name", &name), ("path", &path)],
-                    );
-                }
-            }
-        }
-    }
-
-    /// Check the open documents' files now, whatever the interval says, and return what each one
-    /// is like (tests and automation; the frame loop uses [`Self::disk_tick`]).
-    pub fn check_disk_now(&mut self) -> Vec<(pdfcraft_engine::DocId, Alert)> {
-        self.last_disk_check = f64::NEG_INFINITY;
-        self.disk_verified.clear();
-        self.disk_tick(0.0);
-        let mut states: Vec<_> = self.disk_alerts.iter().map(|(id, alert)| (*id, alert.clone())).collect();
-        states.sort_by_key(|(id, _)| id.0);
-        states
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl crate::PdfCraftApp {
-    /// The web build has no path-based files to watch ([`crate::disk_watch`] is desktop-only).
-    /// The bookkeeping fields are still touched here, so the shared struct needs no desktop-only
-    /// `cfg` on a dozen field initializers.
-    pub(crate) fn disk_tick(&mut self, now: f64) {
-        self.last_disk_check = now.max(self.last_disk_check);
-        self.disk_verified.clear();
-        self.disk_alerts.clear();
     }
 }
