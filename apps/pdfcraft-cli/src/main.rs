@@ -155,7 +155,7 @@ impl CliError {
     }
 
     /// The same failure, reported as part of a larger piece of work that partly happened.
-    fn as_partial(self) -> Self {
+    fn into_partial(self) -> Self {
         match self {
             Self::Message(failure) => Self::Message(exit::Failure::new(exit::Kind::Partial, failure.message)),
             stdout => stdout,
@@ -879,7 +879,7 @@ fn run(args: &[String]) -> Result<(), CliError> {
             // Steps before this one already ran, so their work stands: the failure is partial
             // (`exit::Kind::Partial`), which tells a script to look at what was done rather than
             // to assume nothing happened.
-            run_step(&mut auto, step, i).map_err(|e| if i > 0 { e.as_partial() } else { e })?;
+            run_step(&mut auto, step, i).map_err(|e| if i > 0 { e.into_partial() } else { e })?;
         }
         return Ok(());
     }
