@@ -188,6 +188,22 @@ cargo run --release -p pdfcraft-cli -- text document.pdf
 cargo run --release -p pdfcraft-cli -- mcp --compact
 ```
 
+Every command reports why it failed through its exit code, so a script does not have to read the
+message; `--error-format=json` (anywhere on the line) turns the message into one JSON line on
+standard error, `{"error":{"kind":"malformed","exit_code":4,"message":"in.pdf: …"}}`.
+
+| Exit | Kind | Meaning |
+|---|---|---|
+| 0 | — | The command did what was asked. |
+| 1 | `failed` | An I/O error, or a failure not classed below. |
+| 2 | `usage` | The command line cannot be run as written (an unknown option, a missing argument, a value the option does not take). Nothing was read or written. |
+| 3 | `unsupported` | This build cannot do it at all: no such tool, or the MCP feature was left out. |
+| 4 | `malformed` | The input is not a document that can be read. |
+| 5 | `refused` | The tool declined to use something it cannot trust — a control file that is a link, owned by someone else, or open to other users. |
+| 6 | `partial` | Part of the work happened and was reported (`text` printed some pages, a `--script` step failed after earlier steps ran). |
+
+The numbers are stable: a new kind is added with a new code, and an existing code is never reused.
+
 ### Driving the Running App (agents and UI automation)
 
 Start the editor with a control file and an agent (or a test script) can see and operate the real interface: the widget tree with labels and positions, clicks, typing, keys, commands, panel layout and screenshots. The control channel is off unless `--control` is given; it then listens only on a random loopback port (this computer only) and requires the token written to the owner-only control file. Keep the control file in a folder only you can write; `pdfcraft-cli ui` refuses a control file that is a symbolic link.

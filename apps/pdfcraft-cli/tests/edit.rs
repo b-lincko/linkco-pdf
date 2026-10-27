@@ -132,7 +132,9 @@ mod one_based_arguments {
                     ("edit", "--insert-blank", "0", "--insert-blank must be at least 1"),
                 ] {
                     let out = Command::new(BIN).current_dir(&dir.0).args([command, input, "--out", destination, option, value]).output().unwrap();
-                    assert_eq!(out.status.code(), Some(1), "{command} {input} {option} {value}");
+                    // A value the option cannot take is a usage error (exit 2), not a failed
+                    // operation: nothing was read or written.
+                    assert_eq!(out.status.code(), Some(2), "{command} {input} {option} {value}");
                     assert_eq!(out.stderr, format!("pdfcraft-cli: {diagnostic}\n").as_bytes());
                     assert!(out.stdout.is_empty());
                     assert_eq!(std::fs::read(dir.0.join("input.pdf")).unwrap(), source);

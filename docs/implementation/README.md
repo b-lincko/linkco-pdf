@@ -183,6 +183,18 @@ Local evidence: six standalone tests pass (fresh folder, existing `0644` file ti
 
 Not claimed: one launch of exposure for `app.ron` written by the framework; non-Unix platforms keep profile defaults; Unix modes do not stop another process running as the same user. Thumbnails, printed output and the rest of REC-S08 stay open.
 
+## Batch component: B015 — stable exit codes and machine-readable failures
+
+Parent: **REC-B02** (bounded; the versioned automation schemas stay open). Until now every command-line failure exited `1` and explained itself in English, so a script that wanted to tell a mistyped option from a damaged document had to parse prose. `apps/pdfcraft-cli/src/exit.rs` now names six kinds — `failed` 1, `usage` 2, `unsupported` 3, `malformed` 4, `refused` 5, `partial` 6 — with the numbers documented as stable and never renumbered.
+
+`main` classifies each failure where it happens: the option check and every required argument and option value are `usage`, a document the renderer or the engine cannot open is `malformed`, a tool this build does not have is `unsupported`, and the control file the `ui` command refuses to trust is `refused`. Two cases are judged by what was actually done rather than where the failure arose: `text` reports `partial` only when some text reached stdout before pages failed (nothing printed stays `failed`), and a `--script` step that fails after earlier steps ran is `partial`, because their work stands.
+
+`--error-format=json` is stripped before any command sees it and writes exactly one JSON line to standard error: `{"error":{"kind":"malformed","exit_code":4,"message":"…"}}`. The escaping is the JSON one and nothing else, so a file name with quotes cannot add a line or end the string. The default prose line is byte-identical to what it was, and a broken pipe on stdout still exits 0.
+
+Local evidence: six standalone tests of the exit module pass with warnings denied, and formatting is clean. Everything that runs the real commands — including the new end-to-end test and the two updated expectations (an unusable option value now exits 2 instead of 1) — needs the engine and its dependencies and so runs in remote CI. **CI is pending.**
+
+Not claimed: versioned automation schemas; `refused` for a document that forbids an operation (a wrong password still reports `malformed`, since the engine does not type the difference); the MCP server, which reports errors inside its protocol.
+
 ## Regeneration and verification
 
 ```sh

@@ -17,6 +17,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod exit;
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -64,11 +66,15 @@ pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open
     mcp_usage!(),
     "\
 pdfcraft-cli ui     --control FILE <method> [key=value …] [--out shot.png]
-                                                           drive a running app started with --control FILE"
+                                                           drive a running app started with --control FILE
+
+Every command takes --error-format=json, which reports a failure on stderr as one JSON line
+({"error":{"kind":…,"exit_code":…,"message":…}}). Exit codes (stable, never renumbered):
+0 done · 1 failed · 2 usage · 3 unsupported · 4 malformed document · 5 refused · 6 partial"
 );
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (args, json_errors) = take_error_format(std::env::args().skip(1).collect());
     // `<command> --help` too; only right after the command, so a later `-h` (a value) still reaches it.
     let command = match args.get(1).map(String::as_str) {
         Some("--help" | "-h") => Some("--help"),
@@ -76,7 +82,7 @@ fn main() -> ExitCode {
     };
     let result = match command {
         Some("--help" | "-h" | "help") => stdout_line(format_args!("{USAGE}")),
-        None => Err(format!("usage:\n{USAGE}").into()),
+        None => Err(usage(format!("usage:\n{USAGE}"))),
         Some("info") => info(&args[1..]),
         Some("render") => render(&args[1..]),
         Some("preview") => preview(&args[1..]),
@@ -93,43 +99,122 @@ fn main() -> ExitCode {
         #[cfg(feature = "mcp")]
         Some("mcp") => mcp(&args[1..]),
         #[cfg(not(feature = "mcp"))]
-        Some("mcp") => Err("mcp: this build leaves out the MCP server (built without the `mcp` feature)".into()),
+        Some("mcp") => Err(unsupported("mcp: this build leaves out the MCP server (built without the `mcp` feature)")),
         Some("--version") => version(),
-        Some(other) => Err(format!("unknown command '{other}'; see pdfcraft-cli --help").into()),
+        Some(other) => Err(usage(format!("unknown command '{other}'; see pdfcraft-cli --help"))),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(CliError::Stdout(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
-        Err(e) => {
-            let _ = writeln!(std::io::stderr().lock(), "pdfcraft-cli: {e}");
-            ExitCode::FAILURE
+        Err(e) => ExitCode::from(e.report(json_errors)),
+    }
+}
+
+/// Split the global `--error-format` option out of the arguments, before any command sees them.
+///
+/// It is accepted anywhere on the line because it decides how a failure is *reported*, not what
+/// the command does. `json` turns failures into one JSON line on stderr; `text` is the default
+/// and is accepted so a wrapper can be explicit. Anything else is left in place, where the
+/// command's own option check refuses it.
+fn take_error_format(args: Vec<String>) -> (Vec<String>, bool) {
+    let mut kept = Vec::with_capacity(args.len());
+    let mut json = false;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--error-format=json" => json = true,
+            "--error-format=text" => json = false,
+            "--error-format" => match rest.next() {
+                Some(value) if value == "json" => json = true,
+                Some(value) if value == "text" => json = false,
+                // Put the option back, so the command reports the value it cannot use.
+                Some(value) => kept.extend([arg, value]),
+                None => kept.push(arg),
+            },
+            _ => kept.push(arg),
         }
     }
+    (kept, json)
 }
 
 // Keep stdout errors typed: a closed pipe is normal, but file and command errors still fail.
 #[derive(Debug)]
 enum CliError {
-    Message(String),
+    /// A failure and the kind a script can act on (`exit`).
+    Message(exit::Failure),
     Stdout(std::io::Error),
+}
+
+impl CliError {
+    /// Report on stderr in the format asked for and return the exit code.
+    fn report(&self, json: bool) -> u8 {
+        match self {
+            Self::Message(failure) => failure.report(json),
+            Self::Stdout(error) => exit::Failure::new(exit::Kind::Failed, format!("stdout: {error}")).report(json),
+        }
+    }
+
+    /// The same failure, reported as part of a larger piece of work that partly happened.
+    fn as_partial(self) -> Self {
+        match self {
+            Self::Message(failure) => Self::Message(exit::Failure::new(exit::Kind::Partial, failure.message)),
+            stdout => stdout,
+        }
+    }
+
+    /// Prefix the message with what was being attempted — `step 2 (doc_open): …` — keeping the
+    /// kind, so a script still sees why it failed.
+    fn context(self, what: &str) -> Self {
+        match self {
+            Self::Message(failure) => Self::Message(exit::Failure::new(failure.kind, format!("{what}: {}", failure.message))),
+            stdout => stdout,
+        }
+    }
+}
+
+/// The command line cannot be run as written: an unknown option, a missing argument, a value the
+/// option does not accept. Nothing was written, so a script may fix the call and retry.
+fn usage(message: impl Into<String>) -> CliError {
+    CliError::Message(exit::Failure::new(exit::Kind::Usage, message))
+}
+
+/// The input is not a document that can be read.
+fn malformed(message: impl Into<String>) -> CliError {
+    CliError::Message(exit::Failure::new(exit::Kind::Malformed, message))
+}
+
+/// This build cannot do it at all (the tool does not exist, the feature was left out).
+fn unsupported(message: impl Into<String>) -> CliError {
+    CliError::Message(exit::Failure::new(exit::Kind::Unsupported, message))
+}
+
+/// Part of the work was done and reported; the rest failed.
+fn partial(message: impl Into<String>) -> CliError {
+    CliError::Message(exit::Failure::new(exit::Kind::Partial, message))
+}
+
+/// The tool declines to use something it cannot trust, such as a control file another user could
+/// have written: the request is refused rather than carried out with it.
+fn refused(message: impl Into<String>) -> CliError {
+    CliError::Message(exit::Failure::new(exit::Kind::Refused, message))
 }
 
 impl From<String> for CliError {
     fn from(message: String) -> Self {
-        Self::Message(message)
+        Self::Message(exit::Failure::new(exit::Kind::Failed, message))
     }
 }
 
 impl From<&str> for CliError {
     fn from(message: &str) -> Self {
-        Self::Message(message.to_string())
+        Self::Message(exit::Failure::new(exit::Kind::Failed, message))
     }
 }
 
 impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Message(message) => f.write_str(message),
+            Self::Message(failure) => write!(f, "{failure}"),
             Self::Stdout(error) => write!(f, "stdout: {error}"),
         }
     }
@@ -162,7 +247,7 @@ fn validate_options(command: &str, args: &[String], specs: &[OptionSpec]) -> Res
     while let Some(arg) = args.get(i) {
         if let Some(name) = arg.strip_prefix("--") {
             let Some(spec) = specs.iter().find(|spec| spec.name == arg) else {
-                return Err(format!("{command}: unknown option --{name}").into());
+                return Err(usage(format!("{command}: unknown option --{name}")));
             };
             // A missing or malformed value is left to the command, which reports it in its own
             // terms (`text` and `extract` explain what a page value must be).
@@ -233,10 +318,10 @@ fn read(path: &str) -> Result<Arc<Vec<u8>>, String> {
 
 fn info(args: &[String]) -> Result<(), CliError> {
     validate_options("info", args, INFO_OPTIONS)?;
-    let path = *positional(args).first().ok_or("info: missing file")?;
+    let path = *positional(args).first().ok_or_else(|| usage("info: missing file"))?;
     let bytes = read(path)?;
     let password = flag(args, "--password");
-    let info = inspect(bytes.clone(), password).map_err(|e| e.to_string())?;
+    let info = inspect(bytes.clone(), password).map_err(|e| malformed(e.to_string()))?;
     // Dynamic XFA forms: say what laying the template out gives (what the app shows).
     let xfa_layout = (info.xfa == Some(pdfcraft_render::Xfa::Dynamic))
         .then(|| {
@@ -275,7 +360,7 @@ fn info(args: &[String]) -> Result<(), CliError> {
 
 fn text(args: &[String]) -> Result<(), CliError> {
     validate_options("text", args, TEXT_OPTIONS)?;
-    let path = *positional(args).first().ok_or("text: missing file")?;
+    let path = *positional(args).first().ok_or_else(|| usage("text: missing file"))?;
     let mut selected_page = None;
     // Validate every supplied value before reading, retaining the first valid selection.
     let mut options = args.iter();
@@ -285,7 +370,7 @@ fn text(args: &[String]) -> Result<(), CliError> {
                 .next()
                 .and_then(|value| value.parse::<usize>().ok())
                 .filter(|page| *page > 0)
-                .ok_or("bad --page: expected a positive page number")?;
+                .ok_or_else(|| usage("bad --page: expected a positive page number"))?;
             selected_page.get_or_insert(page - 1);
         } else if option.starts_with("--") {
             // Match positional(): an option's operand is not itself another option.
@@ -299,9 +384,9 @@ fn text(args: &[String]) -> Result<(), CliError> {
     // no pages, and "extract every page" of nothing would print nothing and exit 0 (#132). Ask
     // `inspect` why instead, so a protected file fails the same way `info` does.
     if r.page_count() == 0 {
-        let info = inspect(bytes, password).map_err(|e| format!("text: {e}"))?;
+        let info = inspect(bytes, password).map_err(|e| malformed(format!("text: {e}")))?;
         if !info.pages.is_empty() {
-            return Err("text: the document could not be parsed".into());
+            return Err(malformed("text: the document could not be parsed"));
         }
     }
     let pages: Vec<usize> = match selected_page {
@@ -309,6 +394,7 @@ fn text(args: &[String]) -> Result<(), CliError> {
         None => (0..r.page_count()).collect(),
     };
     let mut failed: Vec<usize> = Vec::new();
+    let mut printed = 0usize;
     for (n, p) in pages.iter().enumerate() {
         let out = r.render(RenderRequest { page: *p, kind: RequestKind::Text, tile: None, scale: 1.0, tag: 0 });
         if let Some(e) = out.error {
@@ -320,17 +406,25 @@ fn text(args: &[String]) -> Result<(), CliError> {
             stdout_line(format_args!("\u{c}"))?;
         }
         stdout_line(format_args!("{}", out.text.map(|t| t.plain_text()).unwrap_or_default()))?;
+        printed += 1;
     }
+    let unreadable = failed.iter().map(usize::to_string).collect::<Vec<_>>().join(", ");
     if failed.is_empty() {
         Ok(())
+    } else if printed > 0 {
+        // Some text reached the caller and some pages failed: a partial result, not a failure.
+        Err(partial(format!("text: page(s) {unreadable} could not be read")))
     } else {
-        Err(format!("text: page(s) {} could not be read", failed.iter().map(usize::to_string).collect::<Vec<_>>().join(", ")).into())
+        // Nothing was printed, so nothing was half-done.
+        Err(format!("text: page(s) {unreadable} could not be read").into())
     }
 }
 
 /// 1-based page list ("1,3,5") → 0-based indices.
-fn page_list(s: &str) -> Result<Vec<usize>, String> {
-    s.split(',').map(|p| p.trim().parse::<usize>().ok().filter(|n| *n > 0).map(|n| n - 1).ok_or(format!("bad page number {p:?}"))).collect()
+fn page_list(s: &str) -> Result<Vec<usize>, CliError> {
+    s.split(',')
+        .map(|p| p.trim().parse::<usize>().ok().filter(|n| *n > 0).map(|n| n - 1).ok_or_else(|| usage(format!("bad page number {p:?}"))))
+        .collect()
 }
 
 /// The options `edit` understands, for its "unknown option" message.
@@ -372,18 +466,25 @@ fn edit(args: &[String]) -> Result<(), CliError> {
             "--out" => out = Some(value),
             "--password" => password = Some(value),
             "--rotate" => {
-                let (pages, deg) = value.split_once(':').ok_or("--rotate PAGES:DEGREES")?;
-                edits.push(Edit::RotatePages { pages: page_list(pages)?, degrees: deg.parse().map_err(|_| "bad degrees")? });
+                let (pages, deg) = value.split_once(':').ok_or_else(|| usage("--rotate PAGES:DEGREES"))?;
+                edits.push(Edit::RotatePages { pages: page_list(pages)?, degrees: deg.parse().map_err(|_| usage("bad degrees"))? });
             }
             "--delete" => edits.push(Edit::DeletePages { pages: page_list(value)? }),
             "--move" => {
-                let (pages, to) = value.split_once(':').ok_or("--move PAGES:TO")?;
-                let to: usize = to.parse().map_err(|_| "bad target")?;
-                edits.push(Edit::MovePages { pages: page_list(pages)?, to: to.checked_sub(1).ok_or("--move target must be at least 1")? });
+                let (pages, to) = value.split_once(':').ok_or_else(|| usage("--move PAGES:TO"))?;
+                let to: usize = to.parse().map_err(|_| usage("bad target"))?;
+                edits.push(Edit::MovePages {
+                    pages: page_list(pages)?,
+                    to: to.checked_sub(1).ok_or_else(|| usage("--move target must be at least 1"))?,
+                });
             }
             "--insert-blank" => {
-                let at: usize = value.parse().map_err(|_| "bad position")?;
-                edits.push(Edit::InsertBlankPage { at: at.checked_sub(1).ok_or("--insert-blank must be at least 1")?, width: 612.0, height: 792.0 });
+                let at: usize = value.parse().map_err(|_| usage("bad position"))?;
+                edits.push(Edit::InsertBlankPage {
+                    at: at.checked_sub(1).ok_or_else(|| usage("--insert-blank must be at least 1"))?,
+                    width: 612.0,
+                    height: 792.0,
+                });
             }
             "--title" => edits.push(Edit::SetInfo { key: "Title".into(), value: value.into() }),
             "--author" => edits.push(Edit::SetInfo { key: "Author".into(), value: value.into() }),
@@ -391,10 +492,10 @@ fn edit(args: &[String]) -> Result<(), CliError> {
         }
         i += 2;
     }
-    let path = path.ok_or("edit: missing file")?;
-    let out = out.ok_or("edit: missing --out")?;
+    let path = path.ok_or_else(|| usage("edit: missing file"))?;
+    let out = out.ok_or_else(|| usage("edit: missing --out"))?;
     let mut session = Session::new();
-    let id = session.open(path, Some(path.to_string()), read(path)?, password).map_err(|e| e.to_string())?;
+    let id = session.open(path, Some(path.to_string()), read(path)?, password).map_err(|e| malformed(e.to_string()))?;
     for e in edits {
         session.apply(id, e).map_err(|e| e.to_string())?;
     }
@@ -408,10 +509,10 @@ fn file_stem(path: &str) -> String {
 
 fn combine(args: &[String]) -> Result<(), CliError> {
     validate_options("combine", args, COMBINE_OPTIONS)?;
-    let out = flag(args, "--out").ok_or("combine: missing --out")?;
+    let out = flag(args, "--out").ok_or_else(|| usage("combine: missing --out"))?;
     let inputs = positional(args);
     if inputs.len() < 2 {
-        return Err("combine: give at least two input files".into());
+        return Err(usage("combine: give at least two input files"));
     }
     let sources = inputs.iter().map(|p| Ok((file_stem(p), read(p)?))).collect::<Result<Vec<_>, String>>()?;
     let bytes = pdfcraft_engine::Session::new().combine(&sources).map_err(|e| e.to_string())?;
@@ -420,11 +521,11 @@ fn combine(args: &[String]) -> Result<(), CliError> {
 
 fn extract(args: &[String]) -> Result<(), CliError> {
     validate_options("extract", args, EXTRACT_OPTIONS)?;
-    let path = *positional(args).first().ok_or("extract: missing file")?;
-    let out = flag(args, "--out").ok_or("extract: missing --out")?;
-    let pages = page_list(flag(args, "--pages").ok_or("extract: missing --pages")?)?;
+    let path = *positional(args).first().ok_or_else(|| usage("extract: missing file"))?;
+    let out = flag(args, "--out").ok_or_else(|| usage("extract: missing --out"))?;
+    let pages = page_list(flag(args, "--pages").ok_or_else(|| usage("extract: missing --pages"))?)?;
     let mut session = pdfcraft_engine::Session::new();
-    let id = session.open(path, None, read(path)?, flag(args, "--password")).map_err(|e| e.to_string())?;
+    let id = session.open(path, None, read(path)?, flag(args, "--password")).map_err(|e| malformed(e.to_string()))?;
     let bytes = session.extract(id, &pages).map_err(|e| e.to_string())?;
     std::fs::write(out, bytes.as_slice()).map_err(|e| format!("{out}: {e}").into())
 }
@@ -432,15 +533,15 @@ fn extract(args: &[String]) -> Result<(), CliError> {
 fn split(args: &[String]) -> Result<(), CliError> {
     validate_options("split", args, SPLIT_OPTIONS)?;
     use pdfcraft_engine::SplitBy;
-    let path = *positional(args).first().ok_or("split: missing file")?;
+    let path = *positional(args).first().ok_or_else(|| usage("split: missing file"))?;
     let by = match (flag(args, "--every"), flag(args, "--before")) {
-        (Some(n), None) => SplitBy::PageCount(n.parse().map_err(|_| "bad --every")?),
+        (Some(n), None) => SplitBy::PageCount(n.parse().map_err(|_| usage("bad --every"))?),
         (None, Some(list)) => SplitBy::Before(page_list(list)?),
-        _ => return Err("split: give either --every N or --before PAGES".into()),
+        _ => return Err(usage("split: give either --every N or --before PAGES")),
     };
     let dir = PathBuf::from(flag(args, "--out-dir").unwrap_or("."));
     let mut session = pdfcraft_engine::Session::new();
-    let id = session.open(path, None, read(path)?, flag(args, "--password")).map_err(|e| e.to_string())?;
+    let id = session.open(path, None, read(path)?, flag(args, "--password")).map_err(|e| malformed(e.to_string()))?;
     let stem = file_stem(path);
     let parts = session.split(id, &by).map_err(|e| e.to_string())?;
     // An output folder that does not exist yet is created (#249); one that can't be is reported
@@ -456,11 +557,11 @@ fn split(args: &[String]) -> Result<(), CliError> {
 
 fn render(args: &[String]) -> Result<(), CliError> {
     validate_options("render", args, RENDER_OPTIONS)?;
-    let path = *positional(args).first().ok_or("render: missing file")?;
-    let page: usize = flag(args, "--page").unwrap_or("1").parse().map_err(|_| "bad --page")?;
-    let page_index = page.checked_sub(1).ok_or("--page must be at least 1")?;
-    let dpi: f32 = flag(args, "--dpi").unwrap_or("96").parse().map_err(|_| "bad --dpi")?;
-    let out = flag(args, "--out").ok_or("render: missing --out (.png, .jpg, .tif or .pam)")?;
+    let path = *positional(args).first().ok_or_else(|| usage("render: missing file"))?;
+    let page: usize = flag(args, "--page").unwrap_or("1").parse().map_err(|_| usage("bad --page"))?;
+    let page_index = page.checked_sub(1).ok_or_else(|| usage("--page must be at least 1"))?;
+    let dpi: f32 = flag(args, "--dpi").unwrap_or("96").parse().map_err(|_| usage("bad --dpi"))?;
+    let out = flag(args, "--out").ok_or_else(|| usage("render: missing --out (.png, .jpg, .tif or .pam)"))?;
     // The file is what its name says (#248): a `.png` used to get a netpbm PAM stream.
     let format = match Path::new(out).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("png") => Some(ImageFormat::Png),
@@ -503,7 +604,7 @@ fn render(args: &[String]) -> Result<(), CliError> {
 /// Emits a single structured `STATUS\t...` line to stdout so the preview host can distinguish
 /// valid PDFs, password-protected PDFs, empty PDFs, and damaged files without opening the main editor.
 fn preview(args: &[String]) -> Result<(), CliError> {
-    let path = *positional(args).first().ok_or("preview: missing file")?;
+    let path = *positional(args).first().ok_or_else(|| usage("preview: missing file"))?;
     let page: usize = flag(args, "--page").unwrap_or("1").parse::<usize>().unwrap_or(1).max(1);
     let dpi: f32 = flag(args, "--dpi").unwrap_or("150").parse::<f32>().unwrap_or(150.0).clamp(36.0, 300.0);
     // `--width PX` asks for a raster exactly as wide as the preview pane needs (the Explorer handler
@@ -511,7 +612,7 @@ fn preview(args: &[String]) -> Result<(), CliError> {
     // sized page can't allocate hundreds of megabytes in the preview host.
     let width_px: Option<f32> = flag(args, "--width").and_then(|w| w.parse::<f32>().ok()).filter(|w| w.is_finite() && *w >= 1.0);
     let max_px: f32 = flag(args, "--max-px").and_then(|m| m.parse::<f32>().ok()).filter(|m| m.is_finite()).unwrap_or(4096.0).clamp(64.0, 8192.0);
-    let out = flag(args, "--out").ok_or("preview: missing --out <file.png>")?;
+    let out = flag(args, "--out").ok_or_else(|| usage("preview: missing --out <file.png>"))?;
     let password = flag(args, "--password");
 
     let bytes = match read(path) {
@@ -572,8 +673,8 @@ fn preview_scale(page_w: f32, page_h: f32, dpi: f32, width_px: Option<f32>, max_
 /// Child-process body for `check`: prints one JSON line.
 fn check_one(args: &[String]) -> Result<(), CliError> {
     validate_options("check-one", args, CHECK_ONE_OPTIONS)?;
-    let path = *positional(args).first().ok_or("check-one: missing file")?;
-    let dpi: f32 = flag(args, "--dpi").unwrap_or("36").parse().map_err(|_| "bad --dpi")?;
+    let path = *positional(args).first().ok_or_else(|| usage("check-one: missing file"))?;
+    let dpi: f32 = flag(args, "--dpi").unwrap_or("36").parse().map_err(|_| usage("bad --dpi"))?;
     let start = Instant::now();
     let bytes = read(path)?;
     let (status, pages, failed, detail, warnings) = match inspect(bytes.clone(), None) {
@@ -655,9 +756,9 @@ fn check(args: &[String]) -> Result<(), CliError> {
     validate_options("check", args, CHECK_OPTIONS)?;
     let files = collect(&positional(args));
     if files.is_empty() {
-        return Err("check: no PDF files found".into());
+        return Err(usage("check: no PDF files found"));
     }
-    let timeout = Duration::from_secs(flag(args, "--timeout").unwrap_or("20").parse().map_err(|_| "bad --timeout")?);
+    let timeout = Duration::from_secs(flag(args, "--timeout").unwrap_or("20").parse().map_err(|_| usage("bad --timeout"))?);
     let dpi = flag(args, "--dpi").unwrap_or("36").to_string();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut results = Vec::new();
@@ -718,11 +819,23 @@ fn run_child(exe: &Path, file: &Path, dpi: &str, timeout: Duration) -> serde_jso
 
 // ---- automation --------------------------------------------------------------------------------
 
-fn automation(args: &[String]) -> Result<pdfcraft_automation::Automation, String> {
+fn automation(args: &[String]) -> Result<pdfcraft_automation::Automation, CliError> {
     let a = pdfcraft_automation::Automation::new();
     match flag(args, "--root") {
-        Some(root) => a.with_root(root).map_err(|e| format!("--root {root}: {e}")),
+        Some(root) => a.with_root(root).map_err(|e| usage(format!("--root {root}: {e}"))),
         None => Ok(a),
+    }
+}
+
+/// A tool failure in the script's terms: a tool that does not exist is not something this build
+/// can do, arguments that don't fit its schema are a bad call, and anything else is the tool
+/// itself failing.
+fn tool_failure(error: pdfcraft_automation::ToolError) -> CliError {
+    use pdfcraft_automation::ToolError;
+    match error {
+        ToolError::UnknownTool(name) => unsupported(format!("unknown tool {name:?} (see `pdfcraft-cli tools`)")),
+        ToolError::InvalidArgs(message) => usage(message),
+        ToolError::Failed(message) => CliError::Message(exit::Failure::new(exit::Kind::Failed, message)),
     }
 }
 
@@ -761,26 +874,31 @@ fn run(args: &[String]) -> Result<(), CliError> {
     let mut auto = automation(args)?;
     if let Some(script) = flag(args, "--script") {
         let text = std::fs::read_to_string(script).map_err(|e| format!("{script}: {e}"))?;
-        let steps: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| format!("{script}: {e}"))?;
+        let steps: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| usage(format!("{script}: {e}")))?;
         for (i, step) in steps.iter().enumerate() {
-            let tool = step["tool"].as_str().ok_or(format!("step {}: missing \"tool\"", i + 1))?;
-            let content = auto.call(tool, &step["args"]).map_err(|e| format!("step {} ({tool}): {e}", i + 1))?;
-            print_output(&auto, content, step["out"].as_str()).map_err(|e| match e {
-                CliError::Message(message) => CliError::Message(format!("step {} ({tool}): {message}", i + 1)),
-                stdout => stdout,
-            })?;
+            // Steps before this one already ran, so their work stands: the failure is partial
+            // (`exit::Kind::Partial`), which tells a script to look at what was done rather than
+            // to assume nothing happened.
+            run_step(&mut auto, step, i).map_err(|e| if i > 0 { e.as_partial() } else { e })?;
         }
         return Ok(());
     }
-    let tool = *positional(args).first().ok_or("run: missing tool name (see `pdfcraft-cli tools`)")?;
+    let tool = *positional(args).first().ok_or_else(|| usage("run: missing tool name (see `pdfcraft-cli tools`)"))?;
     let mut obj = serde_json::Map::new();
     for kv in positional(args).iter().skip(1) {
-        let (k, v) = kv.split_once('=').ok_or(format!("run: expected key=value, got {kv:?}"))?;
+        let (k, v) = kv.split_once('=').ok_or_else(|| usage(format!("run: expected key=value, got {kv:?}")))?;
         let value = serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.to_string()));
         obj.insert(k.to_string(), value);
     }
-    let content = auto.call(tool, &serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
+    let content = auto.call(tool, &serde_json::Value::Object(obj)).map_err(tool_failure)?;
     print_output(&auto, content, flag(args, "--out"))
+}
+
+/// One step of a `--script`, with the step number in every message.
+fn run_step(auto: &mut pdfcraft_automation::Automation, step: &serde_json::Value, i: usize) -> Result<(), CliError> {
+    let tool = step["tool"].as_str().ok_or_else(|| usage(format!("step {}: missing \"tool\"", i + 1)))?;
+    let content = auto.call(tool, &step["args"]).map_err(|e| tool_failure(e).context(&format!("step {} ({tool})", i + 1)))?;
+    print_output(auto, content, step["out"].as_str()).map_err(|e| e.context(&format!("step {} ({tool})", i + 1)))
 }
 
 #[cfg(feature = "mcp")]
@@ -803,18 +921,19 @@ fn mcp(args: &[String]) -> Result<(), CliError> {
 fn ui(args: &[String]) -> Result<(), CliError> {
     validate_options("ui", args, UI_OPTIONS)?;
     use std::io::{BufRead, BufReader, Write as _};
-    let file = flag(args, "--control").ok_or("ui: missing --control FILE (start the app with `pdfcraft --control FILE`)")?;
+    let file = flag(args, "--control").ok_or_else(|| usage("ui: missing --control FILE (start the app with `pdfcraft --control FILE`)"))?;
     let info = read_control_file(file)?;
-    let port = info["port"].as_u64().ok_or(format!("{file}: no port"))?;
+    let port = info["port"].as_u64().ok_or_else(|| malformed(format!("{file}: no port")))?;
     // Refused rather than truncated, which would quietly reach some other port.
-    let port = u16::try_from(port).map_err(|_| format!("{file}: {port} is not a port number"))?;
-    let token = info["token"].as_str().ok_or(format!("{file}: no token"))?;
+    let port = u16::try_from(port).map_err(|_| malformed(format!("{file}: {port} is not a port number")))?;
+    let token = info["token"].as_str().ok_or_else(|| malformed(format!("{file}: no token")))?;
     let pos = positional(args);
-    let method = *pos.first().ok_or("ui: missing method (state, inspect, click, drag, type, key, command, commands, set, open, screenshot)")?;
+    let method =
+        *pos.first().ok_or_else(|| usage("ui: missing method (state, inspect, click, drag, type, key, command, commands, set, open, screenshot)"))?;
     let method = if method.starts_with("ui.") { method.to_string() } else { format!("ui.{method}") };
     let mut params = serde_json::Map::new();
     for kv in pos.iter().skip(1) {
-        let (k, v) = kv.split_once('=').ok_or(format!("ui: expected key=value, got {kv:?}"))?;
+        let (k, v) = kv.split_once('=').ok_or_else(|| usage(format!("ui: expected key=value, got {kv:?}")))?;
         params.insert(k.to_string(), serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.to_string())));
     }
     let stream =
@@ -856,14 +975,14 @@ const CONTROL_FILE_ADVICE: &str =
 /// first; the app then can't write it, and the CLI would talk to the other user's listener.
 /// Refused: a symbolic link, anything but a regular file, and on Unix a file owned by someone
 /// else or open to other users (the app writes it with mode 600).
-fn read_control_file(file: &str) -> Result<serde_json::Value, String> {
+fn read_control_file(file: &str) -> Result<serde_json::Value, CliError> {
     use std::io::Read as _;
     let at_path = std::fs::symlink_metadata(file).map_err(|e| format!("{file}: {e}"))?;
     if at_path.file_type().is_symlink() {
-        return Err(format!("{file}: is a symbolic link, which could point at another user's file. {CONTROL_FILE_ADVICE}"));
+        return Err(refused(format!("{file}: is a symbolic link, which could point at another user's file. {CONTROL_FILE_ADVICE}")));
     }
     if !at_path.is_file() {
-        return Err(format!("{file}: not a regular file. {CONTROL_FILE_ADVICE}"));
+        return Err(refused(format!("{file}: not a regular file. {CONTROL_FILE_ADVICE}")));
     }
     let f = std::fs::File::open(file).map_err(|e| format!("{file}: {e}"))?;
     #[cfg(unix)]
@@ -872,16 +991,16 @@ fn read_control_file(file: &str) -> Result<serde_json::Value, String> {
         // Checked on the open file, so nothing swapped in after `symlink_metadata` gets through.
         let opened = f.metadata().map_err(|e| format!("{file}: {e}"))?;
         if (opened.dev(), opened.ino()) != (at_path.dev(), at_path.ino()) {
-            return Err(format!("{file}: was replaced while being opened. {CONTROL_FILE_ADVICE}"));
+            return Err(refused(format!("{file}: was replaced while being opened. {CONTROL_FILE_ADVICE}")));
         }
         if let Some(problem) = control_file_problem(opened.uid(), opened.mode(), current_uid()) {
-            return Err(format!("{file}: {problem}. {CONTROL_FILE_ADVICE}"));
+            return Err(refused(format!("{file}: {problem}. {CONTROL_FILE_ADVICE}")));
         }
     }
     let mut text = String::new();
     f.take(CONTROL_FILE_MAX.saturating_add(1)).read_to_string(&mut text).map_err(|e| format!("{file}: {e}"))?;
     if u64::try_from(text.len()).unwrap_or(u64::MAX) > CONTROL_FILE_MAX {
-        return Err(format!("{file}: too large for a control file (over {} KiB)", CONTROL_FILE_MAX / 1024));
+        return Err(refused(format!("{file}: too large for a control file (over {} KiB)", CONTROL_FILE_MAX / 1024)));
     }
     serde_json::from_str(&text).map_err(|e| format!("{file}: {e}"))
 }

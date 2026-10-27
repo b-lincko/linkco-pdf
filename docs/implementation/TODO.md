@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B014 · **Active stage:** basic
+**Active component:** B015 · **Active stage:** basic
 
-## Basic (345 records)
+## Basic (346 records)
 
-ci_pending: 1, complete: 13, in_progress: 1, pending: 330
+ci_pending: 2, complete: 13, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -32,6 +32,7 @@ ci_pending: 1, complete: 13, in_progress: 1, pending: 330
 | B012 | [x] Notice a file renamed, moved or deleted while it is open | P0 | complete | REC-R05 |
 | B013 | [x] Keep the recovery folder within a disk budget | P0 | complete | REC-R01; REC-S08 |
 | B014 | [ ] Make the settings folder and its record of recent documents private | P0 | ci_pending | REC-S08 |
+| B015 | [ ] Stable exit codes and machine-readable failures for the command line | P0 | ci_pending | REC-B02 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -943,3 +944,15 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40472751141
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40472751124
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40472751134
+
+### B015: Stable exit codes and machine-readable failures for the command line
+
+- Status: **ci_pending**; parent(s): REC-B02.
+- Acceptance: Every failure the command line reports carries one documented kind with its own exit code (1 failed, 2 usage, 3 unsupported, 4 malformed, 5 refused, 6 partial) that is never renumbered, --error-format=json writes exactly one parseable JSON line to standard error with that kind, code and message, a message that contains quotes or control characters cannot break the JSON, the default prose line stays byte-identical, and a failure after earlier work (a script step, some pages of text) is reported as partial rather than failed.
+- Audit: Started from every failure path in the command: the option check, required arguments, option values, document opens through the renderer and the engine, automation tool errors and the control-file reader. The kinds follow what the failure actually means, not where it happened: a bad invocation is usage even when it is a page number, a document that will not open is malformed, a tool name this build does not have is unsupported, and the control file the tool refuses to trust is refused. Two existing behaviours needed a decision rather than a rewrite: a page that could not be read after other pages were printed is partial only when text actually reached stdout (with nothing printed it stays failed, so the existing reading of that case does not change), and a script step that fails after earlier steps ran is partial because their work stands. The envelope is built by hand with the JSON escaping rules, one line, so no message can add a line or end the string; it also keeps the module dependency-free, which is why it can be tested on its own. Re-audit: the prose default is unchanged byte-for-byte (an existing test asserts the exact line), the broken-pipe special case still exits 0, the exit code comes from the failure rather than from the report succeeding, and --error-format is stripped before any command sees it so no command has to know about it.
+- Verification Limit: The command-line crate cannot be built in this checkout: it depends on the engine and on the craft-libs git dependency, which need the network. The unit tests of the exit module were run standalone with a local rustc; everything that touches the real commands, the new end-to-end test and both updated expectations (a bad option value now exits 2) run in remote CI only. Not claimed: versioned automation schemas, a `refused` code for a document that forbids an operation (a wrong password still reports malformed, since the engine does not type the difference), or the same codes for the MCP server, which reports errors inside the protocol.
+- Ci: pending
+- Notes: Bounded part of REC-B02 (versioned schemas, stable exit codes and structured errors), which stays open: the automation JSON Schemas are not versioned here, and the tool schemas themselves are unchanged. Before this, every failure exited 1 and its reason was prose, so a script had to parse English to tell a mistyped option from a damaged file.
+- Local evidence: Six standalone tests of the exit module pass with warnings denied (one documented code per kind, no shared codes, the envelope fields, a message with quotes/backslashes/newlines/control characters, only the JSON-required escapes, and the display form).
+- Local evidence: cargo fmt --all --check passes.
+- Local evidence: The command-line crate, its new unit tests and the new end-to-end test compile and run in remote CI (the crate depends on the engine and its vendored dependencies, which cannot be built offline here).
