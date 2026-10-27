@@ -69,7 +69,7 @@ pdfcraft-cli ui     --control FILE <method> [key=value …] [--out shot.png]
                                                            drive a running app started with --control FILE
 
 Every command takes --error-format=json, which reports a failure on stderr as one JSON line
-({"error":{"kind":…,"exit_code":…,"message":…}}). Exit codes (stable, never renumbered):
+({\"error\":{\"kind\":…,\"exit_code\":…,\"message\":…}}). Exit codes (stable, never renumbered):
 0 done · 1 failed · 2 usage · 3 unsupported · 4 malformed document · 5 refused · 6 partial"
 );
 
@@ -912,7 +912,9 @@ fn mcp(args: &[String]) -> Result<(), CliError> {
         pdfcraft_automation::mcp::PROTOCOL_VERSIONS[0],
         if compact { ", compact tool list" } else { "" }
     );
-    server.serve(std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| CliError::Message(e.to_string()))
+    server
+        .serve(std::io::stdin().lock(), std::io::stdout().lock())
+        .map_err(|e| CliError::Message(exit::Failure::new(exit::Kind::Failed, e.to_string())))
 }
 
 // ---- UI control channel client -----------------------------------------------------------------
@@ -1002,7 +1004,7 @@ fn read_control_file(file: &str) -> Result<serde_json::Value, CliError> {
     if u64::try_from(text.len()).unwrap_or(u64::MAX) > CONTROL_FILE_MAX {
         return Err(refused(format!("{file}: too large for a control file (over {} KiB)", CONTROL_FILE_MAX / 1024)));
     }
-    serde_json::from_str(&text).map_err(|e| format!("{file}: {e}"))
+    serde_json::from_str(&text).map_err(|e| malformed(format!("{file}: {e}")))
 }
 
 /// Why user `me` can't trust a control file with this owner and mode, if they can't.
