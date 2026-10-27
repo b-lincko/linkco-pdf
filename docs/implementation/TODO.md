@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (344 records)
 
-ci_pending: 2, complete: 11, in_progress: 1, pending: 330
+complete: 13, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -29,8 +29,8 @@ ci_pending: 2, complete: 11, in_progress: 1, pending: 330
 | B009 | [x] Bound recovery metadata reads | P0 | complete | REC-R01 |
 | B010 | [x] Refuse to overwrite a file another program changed on disk | P0 | complete | REC-R05 |
 | B011 | [x] Create the recovery folder private to its user | P0 | complete | REC-S08 |
-| B012 | [ ] Notice a file renamed, moved or deleted while it is open | P0 | ci_pending | REC-R05 |
-| B013 | [ ] Keep the recovery folder within a disk budget | P0 | ci_pending | REC-R01; REC-S08 |
+| B012 | [x] Notice a file renamed, moved or deleted while it is open | P0 | complete | REC-R05 |
+| B013 | [x] Keep the recovery folder within a disk budget | P0 | complete | REC-R01; REC-S08 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -886,26 +886,36 @@ pending: 65, scope_review: 23
 
 ### B012: Notice a file renamed, moved or deleted while it is open
 
-- Status: **ci_pending**; parent(s): REC-R05.
+- Status: **complete**; parent(s): REC-R05.
 - Acceptance: An open document whose file is renamed or moved inside its folder, deleted, or rewritten by another program says so while the user is working, once per new situation, without writing, moving or reopening anything; an untouched file raises nothing, and saving keeps working on the document afterwards.
 - Audit: Traced what the app remembered about a file: only a content stamp, taken from the bytes it had just read or written, so after a rename there was nothing to recognise the file by and no way to tell a rename from a deletion. The record now also holds the file's identity (device and inode on Unix) and its modification time. The poll is ordered cheapest first: one metadata call; if the size and time still match and this is not the deep pass, nothing is read; otherwise the contents are compared, which is the same comparison the save uses, so a replacement holding identical bytes is not reported and one holding different bytes is a conflict whether or not the name is the same. Identity is consulted only when the path holds no regular file, and only inside the document's own folder, so a file moved elsewhere is reported as gone instead of chased. Nothing is reported while a dialog or prompt is open, and state is compared with the last reported one so an idle window does not fill with toasts. Re-audit found that size plus modification time alone can hide a same-length rewrite inside one timestamp tick, so the deep pass compares contents every 60 seconds as well as on every explicit check, which then forced the distinction between the cheap and deep paths into the tests. The web build has no path-based save, so its tick is a no-op.
 - Verification Limit: Full local workspace gates remain blocked: this checkout cannot resolve the craft-libs git dependency or the crates.io packages offline, so the full-app regressions run in remote CI only. Identity needs Unix metadata; elsewhere a rename is reported as a missing file. The poll is a check between two filesystem operations, not a lock, and it reads the document file (never the whole disk) at most every three seconds for metadata and every sixty seconds for contents. Merge or reload choices, automation saves and notification while the app is closed remain open in REC-R05.
-- Ci: pending
+- Ci: passed
 - Notes: The second bounded part of REC-R05 (external-file change and save-conflict detection), which stays open for merge/reload choices and automation saves. B010 made a save refuse to overwrite a changed file, but only when the user saved: a file renamed or deleted in the meantime stayed invisible. This adds a 3-second poll of the open documents' files with a 60-second content confirmation, plus 16 translated notices.
 - Local evidence: Nine standalone tests pass: an untouched file is fine and is not read again, a different length and a same-length rewrite are both changes, identical bytes rewritten are not a change, a deleted file is gone, a renamed file is found by identity, a replacement is reported by its contents, and a missing folder is not a conflict.
 - Local evidence: The module and its dependency compile together as a standalone test binary with clippy warnings denied.
 - Local evidence: cargo fmt --all --check passes.
 - Local evidence: The two full-app regressions (rename then deletion reported once each while the document stays open and still saves; an idle document reporting an external write) execute in remote CI only.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467873226
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872809
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872868
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872891
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872916
 
 ### B013: Keep the recovery folder within a disk budget
 
-- Status: **ci_pending**; parent(s): REC-R01, REC-S08.
+- Status: **complete**; parent(s): REC-R01, REC-S08.
 - Acceptance: The recovery folder stays within fixed entry and byte budgets by deleting the least recently saved snapshots and their metadata; the snapshot just written and the newest snapshot are never deleted, so the folder is never emptied and a snapshot larger than the whole budget is still kept; a folder within budget is untouched and the same folder always produces the same decision.
 - Audit: Traced every way an entry is created and removed: write replaces a pair atomically, remove deletes a validated pair, clear empties the folder, and list cleans leftovers. Nothing bounded growth, and the folder's total size was never read. Pruning therefore reads only the metadata files (bounded to 64 KiB each by B009), pairs each with its snapshot's size, and asks the pure budget module what to delete, so the decision is testable without a filesystem. Metadata is deleted before its snapshot, so an interrupted prune leaves a snapshot without metadata, which the next listing cleans, rather than an entry promising bytes that are gone. Pruning runs only after the metadata write succeeded and its own failure is ignored: losing the new snapshot over housekeeping would be worse than an over-budget folder. Ordering is by recorded save time with ties broken by key, so listing order cannot change the outcome. Selection never deletes the entry just written or the newest entry, and never empties the folder: a single snapshot over budget is the user's only copy of unsaved work, and is removed by the next save or clean quit anyway. Re-audit: the zero-budget and overflowing-size cases exposed a rule that could delete every entry, so the newest is now always kept and a test pins it; a same-timestamp folder is pinned to a key order so the decision is deterministic.
 - Verification Limit: Full local workspace gates remain blocked: this checkout cannot resolve the craft-libs git dependency or the crates.io packages offline, so the store regression runs in remote CI only. The budget is fixed rather than configurable in Preferences; only the recovery folder is pruned, not thumbnails, the portable data folder or local history elsewhere in REC-S08. Nothing here makes the PDF/metadata pair transactional or claims power-loss durability, so REC-R01 stays open.
-- Ci: pending
+- Ci: passed
 - Notes: Bounded part of REC-R01 (save-integrity and crash recovery) and REC-S08 (local history hygiene), both of which stay open. The audit found that snapshots were only removed when the user saved, discarded or quit cleanly, so a crash plus weeks of not opening the app, or a long session with many large documents, left snapshots nothing would ever look at again, with no ceiling on the folder at all. Recovery now prunes after each successful metadata write.
 - Local evidence: Seven standalone tests of the budget module pass: within budget, entry count, byte count, the just-written entry, a never-emptied folder, deterministic ordering and saturating sizes.
 - Local evidence: The budget module compiles as a standalone test binary with warnings denied.
 - Local evidence: cargo fmt --all --check passes.
 - Local evidence: The store regression (two-entry/2,500-byte budget: the oldest is evicted with its metadata, the fourth snapshot larger than the budget is kept alone) executes in remote CI only.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467873226
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872809
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872868
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872891
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872916
