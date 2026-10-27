@@ -125,14 +125,12 @@ fn cancelling_keeps_the_other_version_and_the_next_save_asks_again() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// An open document's file can be moved, renamed or deleted behind the app's back. The poll says
-/// so once per new situation, without writing, moving or reopening anything, and saving still
-/// works on the document rather than silently on the wrong file.
+/// An open document's file can be deleted behind the app's back. The poll says so once, without
+/// writing, moving or reopening anything, and the document stays usable.
 #[test]
-fn a_renamed_or_deleted_file_is_reported_once_while_the_document_stays_open() {
-    let dir = store("watch");
+fn a_deleted_file_is_reported_once_while_the_document_stays_open() {
+    let dir = store("watch-deleted");
     let path = dir.join("work.pdf");
-    let moved = dir.join("moved.pdf");
     std::fs::write(&path, fixture(2)).unwrap();
     let mut h = harness();
     h.state_mut().open_path(&path.to_string_lossy());
@@ -142,12 +140,12 @@ fn a_renamed_or_deleted_file_is_reported_once_while_the_document_stays_open() {
     assert!(h.state_mut().check_disk_now().is_empty(), "an untouched file raises nothing");
     assert!(h.state().toast.is_none(), "and nothing is said about it");
 
-    // Another program renames it inside the same folder.
-    std::fs::rename(&path, &moved).unwrap();
+    // Another program deletes it.
+    std::fs::remove_file(&path).unwrap();
     let states = h.state_mut().check_disk_now();
     assert_eq!(states.len(), 1);
     let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
-    assert!(toast.contains("work.pdf") && toast.contains("moved.pdf"), "the notice names both: {toast}");
+    assert!(toast.contains("no longer at") && toast.contains("work.pdf"), "the notice says the file is gone: {toast}");
     assert_eq!(h.state().views.len(), 1, "the document stays open");
     assert!(!path.exists(), "nothing was re-created");
 
@@ -156,18 +154,39 @@ fn a_renamed_or_deleted_file_is_reported_once_while_the_document_stays_open() {
     assert_eq!(h.state_mut().check_disk_now().len(), 1, "the state is still known");
     assert!(h.state().toast.is_none(), "but it is not said twice");
 
-    // Then the moved file is deleted: the document now has no file at all.
-    std::fs::remove_file(&moved).unwrap();
-    let states = h.state_mut().check_disk_now();
-    assert_eq!(states.len(), 1);
-    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
-    assert!(toast.contains("no longer at"), "the notice says the file is gone: {toast}");
-
-    // Saving still saves the document, and it goes back to the path the document has.
+    // Saving still saves the document, back to the path the document belongs to.
     assert!(h.state_mut().apply_edit(Edit::DeletePages { pages: vec![0] }));
     assert!(h.state_mut().save_active(SaveTarget::InPlace));
     h.run_steps(2);
     assert!(path.exists(), "the save wrote the path the document belongs to");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Unix keeps a file's identity (device and inode), so a rename inside the folder is reported as
+/// the move it was and names where the file went. The notice names the new path, and the moved
+/// file is still the one the document remembers.
+#[cfg(unix)]
+#[test]
+fn a_renamed_file_is_reported_with_where_it_went() {
+    let dir = store("watch-renamed");
+    let path = dir.join("work.pdf");
+    let moved = dir.join("moved.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    h.state_mut().toast = None;
+
+    std::fs::rename(&path, &moved).unwrap();
+    assert_eq!(h.state_mut().check_disk_now().len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("moved or renamed") && toast.contains("moved.pdf"), "the notice names where it went: {toast}");
+    assert!(!path.exists(), "nothing was re-created");
+
+    // The same file under its new name is not a change, and the old name is not reclaimed.
+    h.state_mut().toast = None;
+    assert_eq!(h.state_mut().check_disk_now().len(), 1);
+    assert!(h.state().toast.is_none(), "a settled state is not repeated");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
