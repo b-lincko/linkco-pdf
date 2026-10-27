@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B015 · **Active stage:** basic
+**Active component:** B016 · **Active stage:** basic
 
-## Basic (346 records)
+## Basic (347 records)
 
-ci_pending: 2, complete: 13, in_progress: 1, pending: 330
+ci_pending: 3, complete: 13, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -33,6 +33,7 @@ ci_pending: 2, complete: 13, in_progress: 1, pending: 330
 | B013 | [x] Keep the recovery folder within a disk budget | P0 | complete | REC-R01; REC-S08 |
 | B014 | [ ] Make the settings folder and its record of recent documents private | P0 | ci_pending | REC-S08 |
 | B015 | [ ] Stable exit codes and machine-readable failures for the command line | P0 | ci_pending | REC-B02 |
+| B016 | [ ] Account for every network path, and fail the build when the list drifts | P0 | ci_pending | REC-S09; REC-S03 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -961,3 +962,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499184176
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499132083
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499132082
+
+### B016: Account for every network path, and fail the build when the list drifts
+
+- Status: **ci_pending**; parent(s): REC-S09, REC-S03.
+- Acceptance: Every place the editor or the command line can move bytes off the computer, or hand an address to another program, is listed with what limits it; the list is checked against the source, so a file that gains network code without an entry, a listed file that loses the code its entry names, and a crate that gains an HTTP client nobody explained all fail the check; and the update check is proven reachable only from the menu command, with no check at start.
+- Audit: The audit started from the README's privacy claim and asked what the code actually does: it scanned every product source folder for socket, HTTP-client, browser-launch and URL-handoff code, and read each hit. Five places exist. One can leave the machine: Help ▸ Check for updates, one HTTPS GET to the GitHub API, reachable only from that command through a closure the app installs and nothing else mentions (the script enforces that: the function may appear exactly once, on the line that installs it). Two are loopback: the opt-in --control listener on 127.0.0.1 with a random port and a token from an owner-only file, and the CLI that connects to it after refusing a control file that is a link, another user's, or readable by others. One hands an address to the browser, never fetching it here, and only after the document's own address has passed engine::links::document_url and the user has confirmed the full address. One only parses a printer address as an IPv4 host. Two things looked like egress and are not: rustls_cng in the sign crate is the Windows certificate store, not a TLS client, and the sign crate's timestamp authority is a trait the caller supplies — the app supplies none. Re-audit: comment lines are stripped before scanning (a comment about the webbrowser crate is not a path off the machine) while trailing comments are kept, so the cost of an oddity is a false alarm and not a silent gap; test code is scanned too, since a test that opens a socket is still code in the repository; dev-dependencies and build-dependencies are excluded from the HTTP-client rule because neither ships, and that exclusion is itself tested.
+- Verification Limit: Static, source-level evidence: it proves what the code in this repository can do, not what a future dependency does at run time, and it is not a runtime sandbox. The browser (or mail program) that receives a confirmed address is outside it, as are the operating system's own services. No dashboard or offline-only switch is claimed, since the audit found no automatic request to switch off — a future automatic network feature has to be added to the inventory, and the check will demand its restraint before it can pass. Thumbnails, spooler content and the rest of REC-S09 stay open.
+- Ci: pending
+- Notes: Bounded part of REC-S09 (privacy dashboard with an offline-only switch) and REC-S03 (explicit document network access controls), both of which stay open: there is no dashboard and no switch yet, because the audit found there is nothing to switch — the app makes no request of its own. What the README has claimed since the beginning ('no background network requests; the only activity is the optional update check') is now checked by CI rather than asserted.
+- Local evidence: The checker passes on this checkout: five places accounted for, each naming real code.
+- Local evidence: 19 new unit tests pass: the real checkout is covered, and a fixture tree proves that an unlisted networking file, a place that lost its code, a place that lost one of its tokens, a new HTTP client, a removed one, a startup update check, an update check not installed as the source, an unknown kind, an empty restraint, a duplicate entry and an unexplained dependency each fail the check, while a comment-only mention and a dev-dependency do not.
+- Local evidence: The whole docs test suite CI runs passes locally: 29 tests.
+- Local evidence: cargo fmt --all --check passes (no Rust changed).

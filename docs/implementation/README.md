@@ -195,6 +195,26 @@ Local evidence: six standalone tests of the exit module pass with warnings denie
 
 Not claimed: versioned automation schemas; `refused` for a document that forbids an operation (a wrong password still reports `malformed`, since the engine does not type the difference); the MCP server, which reports errors inside its protocol.
 
+## Batch component: B016 — every network path accounted for
+
+Parents: **REC-S09** and **REC-S03** (both bounded; no dashboard, no switch, no per-document control is claimed). The README has always said the editor makes no background network requests and that the only activity is the optional update check. Nothing checked that claim. Now [`docs/network-egress.md`](../network-egress.md) states it for users, [`network-egress.toml`](../network-egress.toml) lists the places, and `check_egress.py` compares the list with the source.
+
+Five places exist, from an audit of every product source folder:
+
+| Where | What | Limit |
+|---|---|---|
+| `apps/pdfcraft/src/updates.rs` | one HTTPS GET to the GitHub API | only from Help ▸ Check for updates; nothing calls it at start (the check enforces that) |
+| `crates/ui-egui/src/lib.rs` | an address handed to the browser | user-confirmed, and only after `engine::links::document_url` accepts a web or mail address |
+| `crates/ui-egui/src/control.rs` | the `--control` listener | opt-in, `127.0.0.1`, random port, token from an owner-only file |
+| `apps/pdfcraft-cli/src/main.rs` | `pdfcraft-cli ui` | `127.0.0.1`, and only a control file the user owns |
+| `crates/print/src/spool.rs` | parses a printer's IPv4 address | no socket |
+
+Two things that look like egress are not: `rustls_cng` is the Windows certificate store, and the sign crate's timestamp authority is a trait the app never supplies.
+
+The check fails when a file gains network code without an entry, when a listed file stops having the code its entry names, when a crate gains an HTTP client nobody explained, or when the update check is reachable from anywhere but the menu command. Comment lines are stripped first (a comment about the browser is not a path off the machine); trailing comments are kept, so an oddity costs a false alarm rather than a silent gap; dev- and build-dependencies are excluded, and that exclusion is tested.
+
+Local evidence: the checker passes on this checkout, its 19 unit tests pass (including the fixture trees that prove each failure mode fires), and the whole docs suite CI runs passes locally (29 tests). **CI is pending.** Not claimed: a runtime sandbox, a privacy dashboard or an offline switch, the browser's own behaviour, or anything the operating system does.
+
 ## Regeneration and verification
 
 ```sh
