@@ -2152,3 +2152,5 @@ key	Space	Пробел
 	Save As…	Сохранить как…
 	“{name}” changed on disk while you were working on it.	«{name}» изменён на диске, пока вы с ним работали.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Запись поверх заменит версию, записанную другой программой. Сохраните копию, если нужны обе.
+	“{name}” was moved or renamed to “{found}”.	«{name}» перемещён или переименован в «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» больше не находится в «{path}»: файл перемещён в другую папку или удалён.

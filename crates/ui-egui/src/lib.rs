@@ -38,7 +38,12 @@ mod chrome;
 mod combine_grid;
 pub use combine_grid::ThumbState as CombineThumb;
 mod combine_ui;
+// The web build has no path-based files to compare: the shared types stay compiled (a dropped
+// file still has a name) but the desktop-only checks are allowed to go unused there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod conflict;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+mod disk_watch;
 pub mod docking;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
@@ -131,6 +136,7 @@ mod widgets;
 use pdfcraft_engine::{DocId, Session};
 
 pub use canvas::{DocView, RasterMemory};
+pub use disk_watch::Alert;
 pub use editing::{CloseRequest, SaveTarget};
 pub use files::{ExtractDraft, FilePurpose, FileRequest, RotateDraft, SplitDraft, SplitMode, SplitPlan};
 pub use recovery::{AUTOSAVE_SECS, RecoveryMeta, RecoveryStore};
@@ -484,9 +490,16 @@ pub struct PdfCraftApp {
     pub close_request: Option<CloseRequest>,
     /// Save to this path instead of asking (tests and automation).
     pub save_override: Option<String>,
-    /// Content stamps of the files documents were opened from or last saved to, so saving can
-    /// notice that another program replaced one. See [`conflict`].
-    pub(crate) disk_stamps: std::collections::HashMap<pdfcraft_engine::DocId, conflict::Stamp>,
+    /// What the app last saw in the file each document was opened from or saved to, so saving can
+    /// notice that another program replaced one ([`conflict`]) and the poll can notice a file that
+    /// was renamed, moved or deleted ([`disk_watch`]).
+    pub(crate) disk_watch: std::collections::HashMap<pdfcraft_engine::DocId, disk_watch::Watch>,
+    /// The last state reported for each document, so a notice is said once, not every poll.
+    pub(crate) disk_alerts: std::collections::HashMap<pdfcraft_engine::DocId, disk_watch::Alert>,
+    /// When each document's file was last compared by content rather than by size and time.
+    pub(crate) disk_verified: std::collections::HashMap<pdfcraft_engine::DocId, f64>,
+    /// When the open documents' files were last looked at (see [`disk_watch`]).
+    pub(crate) last_disk_check: f64,
     /// A save held back because its file changed on disk; the prompt asks what to do.
     pub save_conflict: Option<SaveConflict>,
     /// One overwrite the user agreed to, consumed by the next save of the conflicting file.
@@ -791,7 +804,10 @@ impl PdfCraftApp {
             host_dirty: None,
             close_request: None,
             save_override: None,
-            disk_stamps: std::collections::HashMap::new(),
+            disk_watch: std::collections::HashMap::new(),
+            disk_alerts: std::collections::HashMap::new(),
+            disk_verified: std::collections::HashMap::new(),
+            last_disk_check: f64::NEG_INFINITY,
             save_conflict: None,
             overwrite_agreed: false,
             props_draft: None,
@@ -969,7 +985,7 @@ impl PdfCraftApp {
         let size = bytes.len();
         // Remember what was on disk, but only for a file this open actually read: the bytes in
         // hand are that file's contents, so no second read is needed.
-        let stamp = path.as_deref().map(|_| conflict::Stamp::of_bytes(bytes.as_slice()));
+        let watch = path.as_deref().map(|p| disk_watch::Watch::of_bytes(std::path::Path::new(p), bytes.as_slice()));
         let id = match self.session.open(name, path.clone(), bytes.clone(), password) {
             Ok(id) => id,
             Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
@@ -981,8 +997,9 @@ impl PdfCraftApp {
             Err(e) => return Err(e.to_string()),
         };
         self.password_prompt = None;
-        if let Some(stamp) = stamp {
-            self.disk_stamps.insert(id, stamp);
+        if let Some(watch) = watch {
+            self.disk_watch.insert(id, watch);
+            self.disk_alerts.remove(&id);
         }
         let doc = self.session.get(id).ok_or("the document could not be opened")?;
         let pages = doc.info.pages.len();
@@ -1281,6 +1298,9 @@ impl PdfCraftApp {
         }
         let id = self.views.remove(index).id;
         self.forget_recovery(id);
+        self.disk_watch.remove(&id);
+        self.disk_alerts.remove(&id);
+        self.disk_verified.remove(&id);
         self.session.close(id);
         self.active = match self.active {
             _ if self.views.is_empty() => None,
@@ -2097,6 +2117,7 @@ impl eframe::App for PdfCraftApp {
         self.guard_quit(ctx);
         let now = ctx.input(|i| i.time);
         self.autosave_tick(now);
+        self.disk_tick(now);
         if self.host_dirty.is_some() {
             let dirty = self.first_dirty().is_some();
             if let Some(report) = self.host_dirty.as_mut() {

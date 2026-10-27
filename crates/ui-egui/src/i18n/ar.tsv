@@ -2248,3 +2248,5 @@ key	Space	مسافة
 	Save As…	حفظ باسم…
 	“{name}” changed on disk while you were working on it.	تغيّر «{name}» على القرص بينما كنت تعمل عليه.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	الحفظ فوقه سيستبدل النسخة التي كتبها برنامج آخر. احفظ نسخة إذا كنت تحتاج إلى الاثنين معًا.
+	“{name}” was moved or renamed to “{found}”.	تم نقل «{name}» أو تغيير اسمه إلى «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» لم يعد موجودًا في «{path}»؛ فقد نُقل إلى مجلد آخر أو حُذف.

@@ -26,6 +26,11 @@ impl Stamp {
         Self { len: bytes.len() as u64, hash: hash(bytes) }
     }
 
+    /// The length the stamp covers.
+    pub fn len(self) -> u64 {
+        self.len
+    }
+
     /// Read `path` and stamp it. `None` when it cannot be read (missing, a directory, a
     /// permission error): an unreadable file is not evidence of a conflict.
     pub fn of_path(path: &Path) -> Option<Self> {

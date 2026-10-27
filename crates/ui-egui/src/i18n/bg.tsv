@@ -2190,3 +2190,5 @@ key	Space	Интервал
 	Save As…	Запази като…
 	“{name}” changed on disk while you were working on it.	„{name}“ се промени на диска, докато работеше по него.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Записът върху него ще замени версията, която друга програма е записала. Запази копие, ако ти трябват и двете.
+	“{name}” was moved or renamed to “{found}”.	„{name}“ бе преместен или преименуван на „{found}“.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ вече не е в „{path}“; преместен е в друга папка или е изтрит.

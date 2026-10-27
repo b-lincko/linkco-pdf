@@ -2235,3 +2235,5 @@ key	Space	Spazio
 	Save As…	Salva con nome…
 	“{name}” changed on disk while you were working on it.	«{name}» è cambiato su disco mentre ci lavoravi.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Salvando sopra sostituirai la versione scritta da un altro programma. Salva una copia se ti servono entrambe.
+	“{name}” was moved or renamed to “{found}”.	«{name}» è stato spostato o rinominato in «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» non è più in «{path}»; è stato spostato in un'altra cartella o eliminato.

@@ -2228,3 +2228,5 @@ key	Space	Leertaste
 	Save As…	Speichern unter…
 	“{name}” changed on disk while you were working on it.	„{name}“ wurde auf dem Datenträger geändert, während Sie daran gearbeitet haben.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Beim Darüberspeichern würde die von einem anderen Programm geschriebene Fassung ersetzt. Speichern Sie eine Kopie, wenn Sie beide brauchen.
+	“{name}” was moved or renamed to “{found}”.	„{name}“ wurde verschoben oder umbenannt in „{found}“.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ befindet sich nicht mehr unter „{path}“; die Datei wurde in einen anderen Ordner verschoben oder gelöscht.

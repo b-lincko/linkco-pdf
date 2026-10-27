@@ -2228,3 +2228,5 @@ key	Space	Espace
 	Save As…	Enregistrer sous…
 	“{name}” changed on disk while you were working on it.	« {name} » a changé sur le disque pendant que vous y travailliez.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Enregistrer par-dessus remplacerait la version écrite par un autre programme. Enregistrez une copie si vous avez besoin des deux.
+	“{name}” was moved or renamed to “{found}”.	« {name} » a été déplacé ou renommé en « {found} ».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	« {name} » n’est plus dans « {path} » ; il a été déplacé vers un autre dossier ou supprimé.

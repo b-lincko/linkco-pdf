@@ -124,3 +124,75 @@ fn cancelling_keeps_the_other_version_and_the_next_save_asks_again() {
     assert_eq!(std::fs::read(&path).unwrap(), other);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// An open document's file can be moved, renamed or deleted behind the app's back. The poll says
+/// so once per new situation, without writing, moving or reopening anything, and saving still
+/// works on the document rather than silently on the wrong file.
+#[test]
+fn a_renamed_or_deleted_file_is_reported_once_while_the_document_stays_open() {
+    let dir = store("watch");
+    let path = dir.join("work.pdf");
+    let moved = dir.join("moved.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1);
+    h.state_mut().toast = None;
+    assert!(h.state_mut().check_disk_now().is_empty(), "an untouched file raises nothing");
+    assert!(h.state().toast.is_none(), "and nothing is said about it");
+
+    // Another program renames it inside the same folder.
+    std::fs::rename(&path, &moved).unwrap();
+    let states = h.state_mut().check_disk_now();
+    assert_eq!(states.len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("work.pdf") && toast.contains("moved.pdf"), "the notice names both: {toast}");
+    assert_eq!(h.state().views.len(), 1, "the document stays open");
+    assert!(!path.exists(), "nothing was re-created");
+
+    // The same situation is not repeated on the next poll.
+    h.state_mut().toast = None;
+    assert_eq!(h.state_mut().check_disk_now().len(), 1, "the state is still known");
+    assert!(h.state().toast.is_none(), "but it is not said twice");
+
+    // Then the moved file is deleted: the document now has no file at all.
+    std::fs::remove_file(&moved).unwrap();
+    let states = h.state_mut().check_disk_now();
+    assert_eq!(states.len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("no longer at"), "the notice says the file is gone: {toast}");
+
+    // Saving still saves the document, and it goes back to the path the document has.
+    assert!(h.state_mut().apply_edit(Edit::DeletePages { pages: vec![0] }));
+    assert!(h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    assert!(path.exists(), "the save wrote the path the document belongs to");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A file another program rewrote is reported while the document sits idle, not only when the
+/// user tries to save it.
+#[test]
+fn an_idle_document_reports_that_its_file_changed_on_disk() {
+    let dir = store("watch-changed");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    h.state_mut().toast = None;
+    assert!(h.state_mut().check_disk_now().is_empty());
+
+    let mut other = fixture(2);
+    other.extend_from_slice(b"\n% written elsewhere\n");
+    std::fs::write(&path, &other).unwrap();
+    let states = h.state_mut().check_disk_now();
+    assert_eq!(states.len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("changed on disk"), "{toast}");
+    // The file is untouched by the notice, and the save prompt still guards the write.
+    assert_eq!(std::fs::read(&path).unwrap(), other);
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace), "the save is still held back");
+    std::fs::remove_dir_all(dir).unwrap();
+}

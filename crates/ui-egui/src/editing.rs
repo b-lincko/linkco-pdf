@@ -506,7 +506,7 @@ impl PdfCraftApp {
         let overwriting = previous.as_deref().is_some_and(|p| crate::same_file(p, dest));
         if overwriting
             && !self.overwrite_agreed
-            && let Some(then) = self.disk_stamps.get(&id).copied()
+            && let Some(then) = self.disk_watch.get(&id).map(|w| w.stamp())
             && crate::conflict::changed(then, crate::conflict::Stamp::of_path(std::path::Path::new(dest)))
         {
             self.save_conflict = Some(crate::SaveConflict { id, dest: dest.to_string(), name: name.clone() });
@@ -519,11 +519,13 @@ impl PdfCraftApp {
         }
         match self.session.mark_saved(id, bytes, Some(dest.to_string())) {
             Ok(()) => {
-                // From now on, conflicts compare against what this save wrote.
-                match crate::conflict::Stamp::of_path(std::path::Path::new(dest)) {
-                    Some(stamp) => self.disk_stamps.insert(id, stamp),
-                    None => self.disk_stamps.remove(&id),
+                // From now on, conflicts and the poll compare against what this save wrote.
+                match crate::disk_watch::Watch::of_path(std::path::Path::new(dest)) {
+                    Some(watch) => self.disk_watch.insert(id, watch),
+                    None => self.disk_watch.remove(&id),
                 };
+                self.disk_alerts.remove(&id);
+                self.disk_verified.remove(&id);
                 self.save_conflict = None;
                 self.forget_recovery(id);
                 if let Some(doc) = self.session.get(id)

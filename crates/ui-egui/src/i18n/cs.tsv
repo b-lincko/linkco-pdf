@@ -205,3 +205,5 @@ key	Space	Mezerník
 	Save As…	Uložit jako…
 	“{name}” changed on disk while you were working on it.	„{name}“ se změnil na disku, zatímco jste na něm pracovali.
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Uložením přes něj nahradíte verzi, kterou zapsal jiný program. Potřebujete-li obě, uložte kopii.
+	“{name}” was moved or renamed to “{found}”.	„{name}“ byl přesunut nebo přejmenován na „{found}“.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ už není v „{path}“; byl přesunut do jiné složky nebo smazán.

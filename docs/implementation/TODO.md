@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B011 · **Active stage:** basic
+**Active component:** B012 · **Active stage:** basic
 
-## Basic (342 records)
+## Basic (343 records)
 
-complete: 11, in_progress: 1, pending: 330
+ci_pending: 1, complete: 11, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -29,6 +29,7 @@ complete: 11, in_progress: 1, pending: 330
 | B009 | [x] Bound recovery metadata reads | P0 | complete | REC-R01 |
 | B010 | [x] Refuse to overwrite a file another program changed on disk | P0 | complete | REC-R05 |
 | B011 | [x] Create the recovery folder private to its user | P0 | complete | REC-S08 |
+| B012 | [ ] Notice a file renamed, moved or deleted while it is open | P0 | ci_pending | REC-R05 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -881,3 +882,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40331330634
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40331330320
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40331330428
+
+### B012: Notice a file renamed, moved or deleted while it is open
+
+- Status: **ci_pending**; parent(s): REC-R05.
+- Acceptance: An open document whose file is renamed or moved inside its folder, deleted, or rewritten by another program says so while the user is working, once per new situation, without writing, moving or reopening anything; an untouched file raises nothing, and saving keeps working on the document afterwards.
+- Audit: Traced what the app remembered about a file: only a content stamp, taken from the bytes it had just read or written, so after a rename there was nothing to recognise the file by and no way to tell a rename from a deletion. The record now also holds the file's identity (device and inode on Unix) and its modification time. The poll is ordered cheapest first: one metadata call; if the size and time still match and this is not the deep pass, nothing is read; otherwise the contents are compared, which is the same comparison the save uses, so a replacement holding identical bytes is not reported and one holding different bytes is a conflict whether or not the name is the same. Identity is consulted only when the path holds no regular file, and only inside the document's own folder, so a file moved elsewhere is reported as gone instead of chased. Nothing is reported while a dialog or prompt is open, and state is compared with the last reported one so an idle window does not fill with toasts. Re-audit found that size plus modification time alone can hide a same-length rewrite inside one timestamp tick, so the deep pass compares contents every 60 seconds as well as on every explicit check, which then forced the distinction between the cheap and deep paths into the tests. The web build has no path-based save, so its tick is a no-op.
+- Verification Limit: Full local workspace gates remain blocked: this checkout cannot resolve the craft-libs git dependency or the crates.io packages offline, so the full-app regressions run in remote CI only. Identity needs Unix metadata; elsewhere a rename is reported as a missing file. The poll is a check between two filesystem operations, not a lock, and it reads the document file (never the whole disk) at most every three seconds for metadata and every sixty seconds for contents. Merge or reload choices, automation saves and notification while the app is closed remain open in REC-R05.
+- Ci: pending
+- Notes: The second bounded part of REC-R05 (external-file change and save-conflict detection), which stays open for merge/reload choices and automation saves. B010 made a save refuse to overwrite a changed file, but only when the user saved: a file renamed or deleted in the meantime stayed invisible. This adds a 3-second poll of the open documents' files with a 60-second content confirmation, plus 16 translated notices.
+- Local evidence: Nine standalone tests pass: an untouched file is fine and is not read again, a different length and a same-length rewrite are both changes, identical bytes rewritten are not a change, a deleted file is gone, a renamed file is found by identity, a replacement is reported by its contents, and a missing folder is not a conflict.
+- Local evidence: The module and its dependency compile together as a standalone test binary with clippy warnings denied.
+- Local evidence: cargo fmt --all --check passes.
+- Local evidence: The two full-app regressions (rename then deletion reported once each while the document stays open and still saves; an idle document reporting an external write) execute in remote CI only.

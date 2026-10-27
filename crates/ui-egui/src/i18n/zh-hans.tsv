@@ -2192,3 +2192,5 @@ key	Space	空格
 	Save As…	另存为…
 	“{name}” changed on disk while you were working on it.	您处理“{name}”期间，该文件在磁盘上已被更改。
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	覆盖保存将替换另一个程序写入的版本。如果两个版本都需要，请另存一份。
+	“{name}” was moved or renamed to “{found}”.	“{name}”已被移动或重命名为“{found}”。
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}”已不在“{path}”；它被移到其他文件夹或被删除。

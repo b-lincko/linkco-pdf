@@ -151,6 +151,16 @@ Local evidence: six standalone helper tests pass (new folder, loosened folder ti
 
 Not claimed: this is not a sandbox — replacing the folder or its parent between two filesystem operations is outside the component. Thumbnails, saved settings, printed output, local history, the portable data folder and the automation side are untouched, so REC-S08 stays open.
 
+## Batch component: B012 — noticing a file renamed, moved or deleted while it is open
+
+Parent: **REC-R05, external-file change and save-conflict detection** (second bounded part; R05 stays open). B010 stopped a save from overwriting a file another program changed, but only when the user saved. A file renamed or deleted while the document sat open stayed invisible, and the app remembered only a content stamp, so there was no way to tell a rename from a deletion.
+
+`crates/ui-egui/src/disk_watch.rs` now remembers the file's identity (device and inode) and modification time beside the content stamp, and polls the open documents' files every three seconds, comparing contents once a minute and on every explicit check. It reports three situations once each: another program wrote the file (“…changed on disk…”), the file was moved or renamed inside its folder (“…was moved or renamed to…”), and the file is gone (“…is no longer at…; it was moved to another folder or deleted.”). Nothing is written, moved or reopened, nothing is said while a dialog is open, and an unchanged file is not even re-read.
+
+Local evidence: nine standalone tests pass (untouched, different length, same-length rewrite, identical rewrite, deleted, renamed by identity, replaced file, missing folder) and the module clears clippy with warnings denied plus formatting. Two full-app regressions — rename then delete reported once each while the document stays open and still saves, and an idle document reporting an external write — run in CI only. **CI is pending.**
+
+Not claimed: identity needs Unix metadata, so elsewhere a rename is reported as a missing file; the poll reads only the document's own file and its folder, never the disk; this is a check between two filesystem operations, not a lock. Merge/reload choices, automation saves and notification while the app is closed stay open in REC-R05.
+
 ## Regeneration and verification
 
 ```sh
