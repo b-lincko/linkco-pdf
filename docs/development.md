@@ -27,6 +27,20 @@ By default PdfCraft's own crates (`pdfcraft*`) log at `info` and everything else
 covers every target starting with it (`pdfcraft*=debug`). The logger is
 `apps/pdfcraft/src/logging.rs`. It never records the control-channel token or document passwords.
 
+## OCR models cannot be downloaded (2026-10-27)
+
+`cargo xtask models` fetches the two `.rten` models from
+`https://ocrs-models.s3-accelerate.amazonaws.com/`, and that now answers **HTTP 403**:
+upstream deprecated the `.rten` variants and "temporarily made them unavailable at their original
+URLs" as a brownout ([robertknight/ocrs#282](https://github.com/robertknight/ocrs/issues/282),
+2026-10-27), advising consumers to host their own copies and to use the ONNX models instead.
+
+Until the project decides how to source them, `cargo xtask models` fails, and so does release
+packaging — `packaging/windows/package.ps1` and `packaging/freebsd/package.sh` both stop there, which
+shows up as a red FreeBSD and Windows ARM64 workflow while the rest of CI is green. The hashes in
+`ATTRIBUTION.toml` still describe the `.rten` files, so a replacement source has to be checked
+against them, or the models changed deliberately with their attribution and licences.
+
 ## GPU surface limits
 
 The desktop renderer enables the selected adapter's supported 2D texture extent, while keeping

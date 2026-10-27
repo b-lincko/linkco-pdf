@@ -975,3 +975,8 @@ pending: 65, scope_review: 23
 - Local evidence: 19 new unit tests pass: the real checkout is covered, and a fixture tree proves that an unlisted networking file, a place that lost its code, a place that lost one of its tokens, a new HTTP client, a removed one, a startup update check, an update check not installed as the source, an unknown kind, an empty restraint, a duplicate entry and an unexplained dependency each fail the check, while a comment-only mention and a dev-dependency do not.
 - Local evidence: The whole docs test suite CI runs passes locally: 29 tests.
 - Local evidence: cargo fmt --all --check passes (no Rust changed).
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858485
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858529
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858497
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858783
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858661
