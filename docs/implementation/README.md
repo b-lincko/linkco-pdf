@@ -179,7 +179,7 @@ Parent: **REC-S08, secure temporary files, thumbnails and local history** (bound
 
 The settings file is written by the framework at exit, so its mode cannot be chosen at creation; the next launch tightens it. That one-launch gap is the documented trade-off — the folder itself is private from the first launch.
 
-Local evidence: six standalone tests pass (fresh folder, existing `0644` file tightened with contents unchanged, `0755` log folder tightened, symlink left alone, missing file, unwritable folder) and formatting passes. The portable-mode assertion that its data folder is `0700` runs with the existing portable tests in CI. **CI is pending.**
+Local evidence: six standalone tests pass (fresh folder, existing `0644` file tightened with contents unchanged, `0755` log folder tightened, symlink left alone, missing file, unwritable folder) and formatting passes. The portable-mode assertion that its data folder is `0700` runs with the existing portable tests in CI. **CI is pending:** at `2409227` the CI, packaging-lint and preview-handler workflows passed, and the Windows ARM64 and FreeBSD jobs reached the packaging step only to fail in `cargo xtask models` — the upstream OCR model host returns HTTP 403 for `text-detection.rten` (reproduced outside CI the same day), so no MSI, zip or tarball is produced. That breaks packaging for the whole project, not this component.
 
 Not claimed: one launch of exposure for `app.ron` written by the framework; non-Unix platforms keep profile defaults; Unix modes do not stop another process running as the same user. Thumbnails, printed output and the rest of REC-S08 stay open.
 
