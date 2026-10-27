@@ -956,3 +956,8 @@ pending: 65, scope_review: 23
 - Local evidence: Six standalone tests of the exit module pass with warnings denied (one documented code per kind, no shared codes, the envelope fields, a message with quotes/backslashes/newlines/control characters, only the JSON-required escapes, and the display form).
 - Local evidence: cargo fmt --all --check passes.
 - Local evidence: The command-line crate, its new unit tests and the new end-to-end test compile and run in remote CI (the crate depends on the engine and its vendored dependencies, which cannot be built offline here).
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499132125
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499132161
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499184176
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499132083
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40499132082
