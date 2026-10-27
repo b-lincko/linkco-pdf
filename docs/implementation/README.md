@@ -171,6 +171,18 @@ Local evidence: seven standalone decision tests pass (within budget, entry count
 
 Not claimed: the budget is fixed rather than a preference, and only the recovery folder is pruned — thumbnails, the portable data folder and other local history stay in REC-S08. This does not make the snapshot/metadata pair transactional, so REC-R01 stays open.
 
+## Batch component: B014 — the settings folder and its record of recent documents
+
+Parent: **REC-S08, secure temporary files, thumbnails and local history** (bounded; S08 stays open). `app.ron` holds the preferences *and* the recent-document list — file names and full paths of what this person had open — and the log files in `logs/` name documents too. The settings folder came from the framework and the portable data folder from `create_dir_all`, both with the process umask, so `0755`/`0644` let another local account read that history. B011 had covered only the recovery folder.
+
+`crates/ui-egui/src/settings_privacy.rs` runs once per launch, before anything uses the folder: it creates or re-tightens the folder `0700` (the same helper as the recovery folder), tightens an existing `logs/` the same way, and sets an existing `app.ron` to `0600` through an open handle after confirming the path is a regular file — a link there is left alone. Contents are never rewritten. The portable data folder is now created owner-only from the start. A mode that cannot be set is logged and never stops the app.
+
+The settings file is written by the framework at exit, so its mode cannot be chosen at creation; the next launch tightens it. That one-launch gap is the documented trade-off — the folder itself is private from the first launch.
+
+Local evidence: six standalone tests pass (fresh folder, existing `0644` file tightened with contents unchanged, `0755` log folder tightened, symlink left alone, missing file, unwritable folder) and formatting passes. The portable-mode assertion that its data folder is `0700` runs with the existing portable tests in CI. **CI is pending.**
+
+Not claimed: one launch of exposure for `app.ron` written by the framework; non-Unix platforms keep profile defaults; Unix modes do not stop another process running as the same user. Thumbnails, printed output and the rest of REC-S08 stay open.
+
 ## Regeneration and verification
 
 ```sh

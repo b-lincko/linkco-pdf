@@ -176,6 +176,14 @@ fn main() -> eframe::Result {
     }
     let integrated = cfg!(target_os = "macos");
     migrate_legacy_folders();
+    // `app.ron` records the documents this person had open and the logs name them; both are
+    // theirs alone (REC-S08). Best effort: a mode that cannot be set must not stop the app.
+    if let Some(dir) = settings_dir() {
+        match pdfcraft_ui_egui::protect_settings(&dir) {
+            Ok(()) => log::debug!("settings folder protected: {}", dir.display()),
+            Err(e) => log::warn!("settings folder {}: {e}", dir.display()),
+        }
+    }
     // The log file lives in the settings folder; opened after the arguments (so `--version` leaves
     // no file behind) and after the legacy folder migration (which a fresh folder would block).
     // Records logged until now are written to it first.

@@ -84,8 +84,11 @@ pub fn find_marker(exe_dir: &Path) -> Option<PathBuf> {
 }
 
 /// Create `dir` and prove a file can be written in it (a folder can exist yet be read-only).
+/// It is created owner-only where the platform has modes: it holds the settings, recent
+/// documents, log files and crash-recovery snapshots of a portable copy, which may sit on a
+/// medium other people can reach.
 fn ensure_writable(dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
+    pdfcraft_platform::private_dir::create_private_dir(dir)?;
     let probe = dir.join(".write-test");
     std::fs::write(&probe, b"")?;
     // A leftover probe is harmless; don't fail portable mode over it.
@@ -124,6 +127,11 @@ mod tests {
             let dir = p.dir.unwrap();
             assert_eq!(dir, exe.join(DATA_DIR));
             assert!(dir.is_dir(), "the data folder is created");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700, "{marker}: the data folder is private to its user");
+            }
             assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "the write probe is removed");
             let _ = std::fs::remove_dir_all(&exe);
         }

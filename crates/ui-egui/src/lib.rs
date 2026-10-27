@@ -126,6 +126,7 @@ pub mod portable;
 mod protect;
 mod recovery;
 mod recovery_budget;
+mod settings_privacy;
 #[cfg(not(target_arch = "wasm32"))]
 mod system_fonts;
 pub mod theme;
@@ -142,6 +143,7 @@ pub use editing::{CloseRequest, SaveTarget};
 pub use files::{ExtractDraft, FilePurpose, FileRequest, RotateDraft, SplitDraft, SplitMode, SplitPlan};
 pub use recovery::{AUTOSAVE_SECS, RecoveryMeta, RecoveryStore};
 pub use recovery_budget::Limits as RecoveryLimits;
+pub use settings_privacy::{LOGS_DIR as SETTINGS_LOGS_DIR, SETTINGS_FILE, protect as protect_settings};
 use theme::{ThemeKind, ThemePreference};
 
 /// Top-level workspace modes (Acrobat's mode bar).

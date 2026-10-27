@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B013 · **Active stage:** basic
+**Active component:** B014 · **Active stage:** basic
 
-## Basic (344 records)
+## Basic (345 records)
 
-complete: 13, in_progress: 1, pending: 330
+ci_pending: 1, complete: 13, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -31,6 +31,7 @@ complete: 13, in_progress: 1, pending: 330
 | B011 | [x] Create the recovery folder private to its user | P0 | complete | REC-S08 |
 | B012 | [x] Notice a file renamed, moved or deleted while it is open | P0 | complete | REC-R05 |
 | B013 | [x] Keep the recovery folder within a disk budget | P0 | complete | REC-R01; REC-S08 |
+| B014 | [ ] Make the settings folder and its record of recent documents private | P0 | ci_pending | REC-S08 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -919,3 +920,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872868
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872891
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40467872916
+
+### B014: Make the settings folder and its record of recent documents private
+
+- Status: **ci_pending**; parent(s): REC-S08.
+- Acceptance: The settings folder is created owner-only on Unix, a settings file (app.ron) or log folder an earlier launch left readable is tightened to owner-only at the next launch without rewriting it, a link at the settings path is left alone rather than followed, a missing settings file is not an error, and the portable data folder is created owner-only from the start. Other platforms keep their per-user profile defaults, and a mode that cannot be set never stops the app.
+- Audit: Started from every file the app keeps that names a document: app.ron (recent files and preferences), logs, recovery snapshots, new digital IDs. Recovery was handled in B011; the settings folder and the logs were not, and portable mode created its whole data folder with create_dir_all. The settings file is written by eframe at exit, so its mode cannot be chosen at creation: the mode is therefore tightened at the next launch, which is stated as the trade-off rather than hidden, and the folder itself is created owner-only now, so a first-time user's reload, logs and settings are never exposed. The mode is changed through an open handle after confirming by symlink_metadata that the path is a regular file, so a link planted there is neither followed nor changed and a swap between check and change cannot redirect it. Contents are never rewritten, and a failure is logged rather than fatal: an app that cannot set a mode must still open documents. Portable mode's own write probe still runs after the folder is created, so a read-only medium still turns portable mode off. Re-audit: the log subfolder is tightened only when it exists (the logger creates it later), the Windows and macOS builds compile the same module with a no-op, and nothing user-facing is added, so no translation changes.
+- Verification Limit: Full local workspace gates remain blocked: this checkout cannot resolve the craft-libs git dependency or the crates.io packages offline, so the app-shell wiring and the portable assertion run in remote CI only. The settings file is tightened one launch after it is written, not at creation, because the framework owns that write. Non-Unix platforms keep profile defaults, and Unix modes do not protect against another process running as the same user. Thumbnails, printed output and the rest of REC-S08 stay open.
+- Ci: pending
+- Notes: Bounded part of REC-S08 (secure temporary files, thumbnails and local history), which stays open. The audit found that the settings folder was created by the framework and the portable folder by create_dir_all, both with the process umask: app.ron holds the recent-document list with full paths and the log files name documents, so 0755/0644 let another local account read what this person had open. B011 covered only the recovery folder.
+- Local evidence: Six standalone tests of the settings module pass (fresh folder 0700, an existing 0644 settings file tightened to 0600 with its contents unchanged, a 0755 log folder tightened, a symlink left alone with its target's mode unchanged, a missing settings file not an error, and an unwritable folder not stopping protection).
+- Local evidence: The module compiles as a standalone test binary together with the platform folder helper with warnings denied.
+- Local evidence: cargo fmt --all --check passes.
+- Local evidence: The portable-mode assertion (the data folder is 0700) runs with the existing portable tests in remote CI.
