@@ -933,6 +933,11 @@ pending: 65, scope_review: 23
 - Local evidence: The module compiles as a standalone test binary together with the platform folder helper with warnings denied.
 - Local evidence: cargo fmt --all --check passes.
 - Local evidence: The portable-mode assertion (the data folder is 0700) runs with the existing portable tests in remote CI.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40479225078
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40479224982
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40479225262
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40479225181
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40479224958
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40472751178
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40472751157
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40472751141
