@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B012 · **Active stage:** basic
+**Active component:** B013 · **Active stage:** basic
 
-## Basic (343 records)
+## Basic (344 records)
 
-ci_pending: 1, complete: 11, in_progress: 1, pending: 330
+ci_pending: 2, complete: 11, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -30,6 +30,7 @@ ci_pending: 1, complete: 11, in_progress: 1, pending: 330
 | B010 | [x] Refuse to overwrite a file another program changed on disk | P0 | complete | REC-R05 |
 | B011 | [x] Create the recovery folder private to its user | P0 | complete | REC-S08 |
 | B012 | [ ] Notice a file renamed, moved or deleted while it is open | P0 | ci_pending | REC-R05 |
+| B013 | [ ] Keep the recovery folder within a disk budget | P0 | ci_pending | REC-R01; REC-S08 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -895,3 +896,16 @@ pending: 65, scope_review: 23
 - Local evidence: The module and its dependency compile together as a standalone test binary with clippy warnings denied.
 - Local evidence: cargo fmt --all --check passes.
 - Local evidence: The two full-app regressions (rename then deletion reported once each while the document stays open and still saves; an idle document reporting an external write) execute in remote CI only.
+
+### B013: Keep the recovery folder within a disk budget
+
+- Status: **ci_pending**; parent(s): REC-R01, REC-S08.
+- Acceptance: The recovery folder stays within fixed entry and byte budgets by deleting the least recently saved snapshots and their metadata; the snapshot just written and the newest snapshot are never deleted, so the folder is never emptied and a snapshot larger than the whole budget is still kept; a folder within budget is untouched and the same folder always produces the same decision.
+- Audit: Traced every way an entry is created and removed: write replaces a pair atomically, remove deletes a validated pair, clear empties the folder, and list cleans leftovers. Nothing bounded growth, and the folder's total size was never read. Pruning therefore reads only the metadata files (bounded to 64 KiB each by B009), pairs each with its snapshot's size, and asks the pure budget module what to delete, so the decision is testable without a filesystem. Metadata is deleted before its snapshot, so an interrupted prune leaves a snapshot without metadata, which the next listing cleans, rather than an entry promising bytes that are gone. Pruning runs only after the metadata write succeeded and its own failure is ignored: losing the new snapshot over housekeeping would be worse than an over-budget folder. Ordering is by recorded save time with ties broken by key, so listing order cannot change the outcome. Selection never deletes the entry just written or the newest entry, and never empties the folder: a single snapshot over budget is the user's only copy of unsaved work, and is removed by the next save or clean quit anyway. Re-audit: the zero-budget and overflowing-size cases exposed a rule that could delete every entry, so the newest is now always kept and a test pins it; a same-timestamp folder is pinned to a key order so the decision is deterministic.
+- Verification Limit: Full local workspace gates remain blocked: this checkout cannot resolve the craft-libs git dependency or the crates.io packages offline, so the store regression runs in remote CI only. The budget is fixed rather than configurable in Preferences; only the recovery folder is pruned, not thumbnails, the portable data folder or local history elsewhere in REC-S08. Nothing here makes the PDF/metadata pair transactional or claims power-loss durability, so REC-R01 stays open.
+- Ci: pending
+- Notes: Bounded part of REC-R01 (save-integrity and crash recovery) and REC-S08 (local history hygiene), both of which stay open. The audit found that snapshots were only removed when the user saved, discarded or quit cleanly, so a crash plus weeks of not opening the app, or a long session with many large documents, left snapshots nothing would ever look at again, with no ceiling on the folder at all. Recovery now prunes after each successful metadata write.
+- Local evidence: Seven standalone tests of the budget module pass: within budget, entry count, byte count, the just-written entry, a never-emptied folder, deterministic ordering and saturating sizes.
+- Local evidence: The budget module compiles as a standalone test binary with warnings denied.
+- Local evidence: cargo fmt --all --check passes.
+- Local evidence: The store regression (two-entry/2,500-byte budget: the oldest is evicted with its metadata, the fourth snapshot larger than the budget is kept alone) executes in remote CI only.

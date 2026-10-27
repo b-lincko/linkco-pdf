@@ -161,6 +161,16 @@ Local evidence: nine standalone tests pass (untouched, different length, same-le
 
 Not claimed: identity needs Unix metadata, so elsewhere a rename is reported as a missing file; the poll reads only the document's own file and its folder, never the disk; this is a check between two filesystem operations, not a lock. Merge/reload choices, automation saves and notification while the app is closed stay open in REC-R05.
 
+## Batch component: B013 — the recovery folder stays within a disk budget
+
+Parent: **REC-R01** (save integrity and crash recovery) and **REC-S08** (local history hygiene), both still open. Snapshots were only deleted when the user saved, discarded or quit cleanly, and nothing measured the folder, so a crash followed by weeks of not opening the app, or a long session with many large scans, left snapshots nothing would ever read again.
+
+`crates/ui-egui/src/recovery_budget.rs` is the decision, with no filesystem in it: stay within 200 entries and 512 MiB, deleting the least recently saved first, ties broken by key. The store asks it after every successful metadata write, reading each metadata file (already bounded to 64 KiB by B009) and its snapshot's size. The snapshot just written and the newest snapshot are never deleted and the folder is never emptied — a single snapshot larger than the whole budget may be the user's only copy of unsaved work, and the next save or clean quit removes it. Metadata goes before its snapshot, so an interrupted prune leaves a leftover the next listing cleans rather than an entry promising missing bytes. Housekeeping failures are ignored: an over-budget folder is better than a lost snapshot.
+
+Local evidence: seven standalone decision tests pass (within budget, entry count, byte count, the just-written entry, never emptied, deterministic ordering, saturating sizes) and formatting passes. The store regression (a two-entry/2,500-byte budget evicting the oldest pair, then keeping a single over-budget snapshot) runs in CI only. **CI is pending.**
+
+Not claimed: the budget is fixed rather than a preference, and only the recovery folder is pruned — thumbnails, the portable data folder and other local history stay in REC-S08. This does not make the snapshot/metadata pair transactional, so REC-R01 stays open.
+
 ## Regeneration and verification
 
 ```sh

@@ -64,11 +64,19 @@ pub struct RecoveryMeta {
 #[derive(Clone, Debug)]
 pub struct RecoveryStore {
     dir: PathBuf,
+    /// How much the folder may hold before the oldest snapshots are deleted ([`crate::recovery_budget`]).
+    limits: crate::recovery_budget::Limits,
 }
 
 impl RecoveryStore {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self { dir: dir.into(), limits: crate::recovery_budget::Limits::DEFAULT }
+    }
+
+    /// The same store with a different budget (tests use tiny ones).
+    pub fn with_limits(mut self, limits: crate::recovery_budget::Limits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// `Recovery` in the portable data folder in portable mode ([`crate::portable`]), otherwise
@@ -132,7 +140,42 @@ impl RecoveryStore {
         pdfcraft_platform::private_dir::create_private_dir(&self.dir)?;
         crate::editing::write_atomically(&pdf.to_string_lossy(), bytes)?;
         let json = serde_json::to_vec_pretty(meta).map_err(std::io::Error::other)?;
-        crate::editing::write_atomically(&metadata.to_string_lossy(), &json)
+        let written = crate::editing::write_atomically(&metadata.to_string_lossy(), &json);
+        // The snapshot is on disk either way; deleting older ones afterwards can only fail on an
+        // unusual filesystem, and that must not cost the user this snapshot.
+        if written.is_ok() {
+            self.prune(Some(&meta.key));
+        }
+        written
+    }
+
+    /// Delete the least recently saved entries until the folder fits its budget. The entry `keep`
+    /// (the one just written) and the newest entry are never deleted, so a folder never loses its
+    /// last snapshot; the folder is never emptied. Returns how many entries were removed.
+    pub fn prune(&self, keep: Option<&str>) -> usize {
+        let mut entries = Vec::new();
+        let Ok(dir) = std::fs::read_dir(&self.dir) else { return 0 };
+        for entry in dir.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            // Only complete, well-formed entries take part: a leftover is cleaned by `list`.
+            let Some(meta) = read_metadata(&path) else { continue };
+            let Ok((pdf, _)) = self.entry_paths(&meta.key) else { continue };
+            let Ok(bytes) = std::fs::metadata(&pdf).map(|m| m.len()) else { continue };
+            entries.push(crate::recovery_budget::Entry { key: meta.key, bytes, saved_at: meta.saved_at });
+        }
+        let evicted = crate::recovery_budget::to_evict(&entries, self.limits, keep);
+        for key in &evicted {
+            if let Ok((pdf, metadata)) = self.entry_paths(key) {
+                // Metadata first: a snapshot without metadata is not offered, and is cleaned by
+                // the next listing; the reverse would leave an entry claiming missing bytes.
+                let _ = std::fs::remove_file(&metadata);
+                let _ = std::fs::remove_file(&pdf);
+            }
+        }
+        evicted.len()
     }
 
     /// Remove a pair; invalid keys are ignored without filesystem access.

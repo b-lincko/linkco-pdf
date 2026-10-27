@@ -601,3 +601,43 @@ fn a_linked_recovery_folder_is_refused_instead_of_written_through() {
     std::fs::remove_dir_all(&elsewhere).unwrap();
     std::fs::remove_dir_all(root.dir()).unwrap();
 }
+
+/// The recovery folder cannot grow without limit: past its budget the least recently saved
+/// snapshots are deleted with their metadata, the snapshot just written always stays, and the
+/// folder is never emptied.
+#[test]
+fn the_recovery_folder_stays_within_its_budget() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-recovery-budget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    // Two entries of 1,000 bytes and at most 2,500 bytes in total: the third save must push the
+    // oldest out, and the fourth (larger than the whole budget) must push the rest out.
+    let s = RecoveryStore::new(&dir).with_limits(pdfcraft_ui_egui::RecoveryLimits { max_entries: 2, max_bytes: 2_500 });
+    let meta = |key: &str, saved_at: u64| pdfcraft_ui_egui::RecoveryMeta {
+        key: key.into(),
+        name: format!("{key}.pdf"),
+        path: None,
+        saved_at,
+        encrypted: false,
+    };
+    let snapshot = vec![0x41u8; 1_000];
+    s.write(&meta("one", 1), &snapshot).unwrap();
+    s.write(&meta("two", 2), &snapshot).unwrap();
+    let keys: Vec<_> = s.list().into_iter().map(|m| m.key).collect();
+    assert_eq!(keys.len(), 2, "both fit: {keys:?}");
+
+    s.write(&meta("three", 3), &snapshot).unwrap();
+    let keys: Vec<_> = s.list().into_iter().map(|m| m.key).collect();
+    assert_eq!(keys.len(), 2, "the budget is kept: {keys:?}");
+    assert!(keys.contains(&"three".to_string()), "the snapshot just written stays: {keys:?}");
+    assert!(!keys.contains(&"one".to_string()), "the oldest went first: {keys:?}");
+    // The evicted entry left no half behind.
+    assert!(!dir.join("one.pdf").exists());
+    assert!(!dir.join("one.json").exists());
+
+    // A single snapshot larger than the whole budget is still kept: it may be the only copy.
+    let huge = vec![0x42u8; 4_000];
+    s.write(&meta("huge", 4), &huge).unwrap();
+    let keys: Vec<_> = s.list().into_iter().map(|m| m.key).collect();
+    assert_eq!(keys, vec!["huge".to_string()], "the newest stays even over budget: {keys:?}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
