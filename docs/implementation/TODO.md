@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B016 · **Active stage:** basic
+**Active component:** B017 · **Active stage:** basic
 
-## Basic (347 records)
+## Basic (348 records)
 
-ci_pending: 3, complete: 13, in_progress: 1, pending: 330
+ci_pending: 4, complete: 13, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -34,6 +34,7 @@ ci_pending: 3, complete: 13, in_progress: 1, pending: 330
 | B014 | [ ] Make the settings folder and its record of recent documents private | P0 | ci_pending | REC-S08 |
 | B015 | [ ] Stable exit codes and machine-readable failures for the command line | P0 | ci_pending | REC-B02 |
 | B016 | [ ] Account for every network path, and fail the build when the list drifts | P0 | ci_pending | REC-S09; REC-S03 |
+| B017 | [ ] Fetch the OCR models from a source that can be pinned, and pin what it serves | P0 | ci_pending | REC-T03; REC-T06 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -980,3 +981,17 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858497
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858783
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40518858661
+
+### B017: Fetch the OCR models from a source that can be pinned, and pin what it serves
+
+- Status: **ci_pending**; parent(s): REC-T03, REC-T06.
+- Acceptance: Release packaging gets the two OCR models again, from a source whose bytes a maintainer can check without trusting whatever a bucket serves that day: the SHA-256 pinned in ATTRIBUTION.toml comes from the publisher's own record of the file, a mismatch stops the download, the engine loads the format the files are in, an installation that still has the previous format keeps working, and every place that names the model files (packaging scripts, workflow greps, the MSI test) names the current one.
+- Audit: Started from the failing step: `cargo xtask models` asks for `text-detection.rten` and the host answers 403. Upstream's announcement (issue #282) deprecates the `.rten` variants, says they were 'temporarily made unavailable at their original URLs' as a brownout, and points consumers at the ONNX models; the ocrs 0.13.1 release's own download script fetches `text-detection.onnx` and `text-recognition.onnx` from the same bucket. The decision (the user's) is to migrate. Two things then had to be true at once, and only one could be had from the bucket: the files must exist, and their SHA-256 must be known before they ship. The bucket's contents cannot be hashed from this workspace at all, so pinning a number guessed from it would have been a coin toss dressed up as supply-chain verification. The publisher's model card on Hugging Face carries the same models with git-lfs pointers, whose `oid sha256` is the SHA-256 of the file: that is a hash a maintainer can re-read at review time, and the two files were pinned from there (detection c15df092…, recognition 3774cdfe…). Consequences the audit found and fixed in the same change: `ocrs` and `rten` were built with the `.rten` format only, so the ONNX files would not have loaded (both features are now on, and the `.rten` support is kept so an installation that still has the old files keeps working, which is also what the new model lookup does: current format first, previous format second, and one file of a pair is not a pair); the FreeBSD and release workflows grepped the packages for `models/*.rten`, and `packaging/windows/test-msi.ps1` counted `.rten` rows in the MSI's file table, so both would have failed a correct package; and `Cargo.lock` gains `rten-onnx` (checksum read from the crates.io index, no other new package). The download check now reports the hash the server actually served, so the next time a host changes its bytes the log says what to pin instead of only that the pin is wrong, and `cargo xtask models --print-hashes` fetches to a temporary folder and prints size and SHA-256 without touching the project, which is the deliberate way to re-pin. Re-audit: the manifest is valid TOML with 64-hex hashes and https URLs, the model files keep their canonical local names while the card's own file names stay in the source line, the licence and its hash are unchanged, `ATTRIBUTION.md` was regenerated from the manifest rather than hand-written, and no test, deadline or budget was relaxed.
+- Verification Limit: The workspace cannot be built here (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs git dependency needs the network), so nothing in this change was compiled, linked or run locally: the Rust edits, the Cargo.lock edit and the feature selection are verified by CI or not at all. The pinned hashes are the publisher's own LFS content hashes for the files on the model card; that the bucket serves the same bytes could not be checked from here, and if it does not the download stops with a mismatch instead of shipping different models. Model behaviour is not re-baselined: the ONNX files are the models the `.rten` files were converted from, but this change does not claim identical OCR output. Where packages are published, how a package is signed and the rest of REC-T03 and REC-T06 stay open.
+- Ci: pending
+- Notes: Bounded part of REC-T03 (portable and offline-install packages) and REC-T06 (dependency and provenance policy), both of which stay open: this fixes how the OCR models are fetched and pinned, not how they are chosen or where packages are published. It exists because upstream deprecated the `.rten` model files on 2026-10-27 (robertknight/ocrs#282) and the host that served them answers HTTP 403, which had stopped release packaging for every commit; the user chose to migrate to the ONNX models rather than drop OCR or host the old files.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: ATTRIBUTION.toml parses, and both model entries carry 64-hex sha256 and https URLs (checked with Python's tomllib against the same rules xtask validates).
+- Local evidence: ATTRIBUTION.md's two model rows are regenerated from the manifest in the generator's own column order and escaping.
+- Local evidence: The docs suite that CI runs passes locally (29 tests).
+- Local evidence: No packaging script, workflow step or ATTRIBUTION entry still names a `.rten` file except the deliberate previous-format fallback.

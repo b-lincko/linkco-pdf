@@ -215,6 +215,21 @@ The check fails when a file gains network code without an entry, when a listed f
 
 Local evidence: the checker passes on this checkout, its 19 unit tests pass (including the fixture trees that prove each failure mode fires), and the whole docs suite CI runs passes locally (29 tests). At `bc2678b` the main CI workflow (which now runs those tests in its docs step), packaging lint and the preview handler passed, and the Windows ARM64 and FreeBSD jobs passed their builds and tests; both packaging jobs then stopped in `cargo xtask models`, on an external block now identified: upstream deprecated the `.rten` model files and made them unavailable at their original URLs today (robertknight/ocrs issue #282), so release packaging fails for every commit until this project decides how to source its OCR models. **CI is pending.** Not claimed: a runtime sandbox, a privacy dashboard or an offline switch, the browser's own behaviour, or anything the operating system does.
 
+## B017 — fetch the OCR models from a source that can be pinned
+
+Parents: **REC-T03** and **REC-T06** (both bounded; how packages are published and how they are signed stay open). Release packaging had stopped for every commit: `cargo xtask models` asked the ocrs bucket for `text-detection.rten` and got HTTP 403, because upstream deprecated the `.rten` files and made them unavailable at their original URLs as a brownout ([robertknight/ocrs#282](https://github.com/robertknight/ocrs/issues/282), 2026-10-27). This project now fetches the ONNX models, which is what upstream's own download script does and what the ocrs and rten crates load through their `onnx` features.
+
+The important part is where the hashes come from. A download that is verified against a number nobody can re-check is decoration, and the bucket's bytes cannot be hashed from this workspace at all. The models are published on the author's model card on Hugging Face with git-lfs pointers, and an LFS `oid sha256` *is* the SHA-256 of the file, so the two hashes in `ATTRIBUTION.toml` are read from a record a reviewer can open:
+
+| File here | Card's file | SHA-256 |
+|---|---|---|
+| `text-detection.onnx` | `text-detection-ssfbcj81.onnx` | `c15df092060abe9417929b04eaf552b98946e15144036b3c83b09a3bf4d5d5a7` |
+| `text-recognition.onnx` | `text-rec-checkpoint-s52qdbqt.onnx` | `3774cdfe8ba082a17c181d5ab0698f3ff2fd0def07cd2b9134faec9b1a191919` |
+
+What else the audit caught: `ocrs` and `rten` were built with the previous format only, so the new files would not have loaded (both formats are now enabled, and an installation that still has the `.rten` files keeps working — current format first, previous format second); the FreeBSD and release workflows grepped the packages for `models/*.rten`, and `packaging/windows/test-msi.ps1` counted `.rten` rows in the MSI's file table, so a correct package would have failed its own checks; and the download error now reports the hash the server served (`expected …, got …`) instead of only saying the pin is wrong, with `cargo xtask models --print-hashes` to fetch, print size and SHA-256 to a temporary folder, and leave the manifest alone for the deliberate edit.
+
+Local evidence: formatting passes, the manifest is valid TOML whose model entries carry 64-hex hashes and https URLs, `ATTRIBUTION.md` is regenerated from it in the generator's own format, and the docs suite CI runs passes (29 tests). **CI is pending**, and it is the only place any of the Rust runs: `rten` 0.26 needs rustc 1.94, this workspace has 1.88, and the craft-libs dependency needs the network. Not claimed: that the bucket serves the same bytes as the card (a mismatch stops the build rather than shipping different models), identical OCR output, or anything about how packages are published and signed.
+
 ## Regeneration and verification
 
 ```sh
