@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B019 · **Active stage:** basic
+**Active component:** B020 · **Active stage:** basic
 
-## Basic (350 records)
+## Basic (351 records)
 
-complete: 19, in_progress: 1, pending: 330
+ci_pending: 1, complete: 19, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -37,6 +37,7 @@ complete: 19, in_progress: 1, pending: 330
 | B017 | [x] Fetch the OCR models from a source that can be pinned, and pin what it serves | P0 | complete | REC-T03; REC-T06 |
 | B018 | [x] Keep same-named form fields apart when documents are combined | P0 | complete | REC-P04 |
 | B019 | [x] Take the page's own copy of itself when it is redacted | P0 | complete | REC-S01 |
+| B020 | [ ] Say the same thing about what works everywhere a user reads it | P0 | ci_pending | REC-R12 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1037,3 +1038,17 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40682881592
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40682881581
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40682881590
+
+### B020: Say the same thing about what works everywhere a user reads it
+
+- Status: **ci_pending**; parent(s): REC-R12.
+- Acceptance: The README's recommended-tool table and the interface's own tool catalogue name the same tools, in the same order, under the catalogue's labels; every command the README prints is in the command registry; every tool group the catalogue does not call Ready is listed with the catalogue's own count of working tools and its own milestone; a tool the interface calls planned is not a command that already runs nor a feature the parity inventory records as shipped; and CI fails when any of these drift apart.
+- Audit: Started from the recommendation's acceptance line — "README UI tools and release notes agree on supported operations and partial implementations" — and from the ledger's warning that this was a proposal with no exact parity mapping, so the first job was to bound it. The audit read the four surfaces and compared them mechanically: `README.md` (Recommended Tools), `crates/engine/src/catalog.rs` (23 groups, 145 items, each with an `Availability`), `crates/engine/src/commands.rs` (181 registered commands) and `crates/ui-egui/src/home.rs` (the `RECOMMENDED` cards), with `parity/acrobat-features.toml` (833 records) as the fifth, independent opinion on what shipped. Four disagreements came out, listed in the notes. Five decisions came out of fixing them. (1) The README table is now machine-checkable: each row names its tool group as a code span and exactly one command, so the check can bind a row to a group and a command to the registry, and prose stays prose. (2) The check parses the real catalogue rather than a copy, and raises `LookupError` when the parse stops matching the file (a renamed struct, a missing file), because a checker that quietly reads zero groups passes forever. (3) The group-level `Planned` convention — "this group completes in Mx; items marked Ready work today" — was already implemented (`panels.rs` prints exactly that banner) and was documented rather than changed; what was wrong was two items inside a Ready group claiming to be planned. (4) The new README section "What is not finished yet" is a table of counts, so a user can see that Edit a PDF is 13 of 14 tools rather than read a claim of completeness; its numbers come from the catalogue and the check compares all three cells. (5) The catalogue-versus-registry rule lives in Rust next to the existing `every_ready_catalogue_item_is_a_registered_command`, and the catalogue-versus-parity rule lives in Python because that inventory is TOML. Re-audit: every rule has a fixture test that breaks exactly that rule in a throwaway copy of the real five files (21 drift cases plus the gate), so a rule that stops firing fails the suite; the rules were then run against the clean tree, which passes; and the boundaries were re-checked by hand — the README's remaining prose about capabilities (the Features list) still matches the catalogue's Ready items, and nothing here claims Acrobat parity, which `parity/acrobat-features.toml` scores separately.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs dependency needs the network), so the three Rust changes — two catalogue items moving from Planned to Ready, the Home card array gaining `redact`, and the new converse test — were not compiled or run here; they are verified by CI or not at all. The Python side was run. Not claimed: generated or checked release notes; per-item readiness in the README; a machine-readable capability manifest; any change to how the interface reports a planned group (only the two stale items were corrected); or Acrobat parity for any Ready tool. One stale artefact remains and is recorded rather than fixed: `docs/images/linkco-home-dashboard.png` still shows the eight-card dashboard with hand-written blurbs and a v0.3.0 footer, so it predates both the current card rendering and the ninth card; rendering a new one needs a build and a display, neither of which this checkout has.
+- Ci: pending
+- Notes: Bounded part of REC-R12 (stable capability and limitation disclosure), which stays open. What this closes is the contradiction inside the repository: three places tell a user what the build can do — the README's Recommended Tools table, the tool catalogue the interface draws, and the Home cards — and nothing compared them. The audit found four disagreements: the README named `organize`, `edit`, `export`, `fill_sign` and `protect` in a column headed Primary Commands, but those are catalogue group ids, not commands; one row named `file.reduce_size`, a command that has never existed (the group is `compress`, the commands are `optimize.reduce` and `optimize.advanced`); redaction, five Ready tools and a flagship of the product, was on neither the README table nor the Home dashboard; and the two annotation items `Cloud` and `Stamp` were marked `Planned("M5")` while their commands were registered, reachable from the interface (the cloud tool in `crates/ui-egui/src/comments.rs`, the stamp palette) and recorded as shipped in `parity/acrobat-features.toml` with UI tests — working tools telling users they were coming in a milestone. All four are fixed, and the agreement is now checked rather than intended: `docs/implementation/check_disclosure.py` (run by the docs step in CI, 22 unit tests) reads the real files and fails on drift, and `crates/engine/src/commands.rs` holds the catalogue-versus-registry promise in both directions. Still open in REC-R12: release notes are per-release history and are not generated or checked; the README discloses readiness per tool group, not per tool; there is no machine-readable capability manifest for a support desk or a partner to read.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: python3 docs/implementation/check_disclosure.py --check passes on this checkout, and --summary lists all 23 tool groups.
+- Local evidence: python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes: 51 tests, 22 of them new (one gate on the real files, 21 drift cases).
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes after regeneration.
+- Local evidence: Each README row's claim was checked by hand against the items of its group in catalog.rs.

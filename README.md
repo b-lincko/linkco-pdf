@@ -38,19 +38,35 @@ All document rendering and editing operations execute locally on your workstatio
 
 ## Recommended Tools
 
-The Home dashboard provides one-click access to the core tools implemented in the workspace (`crates/ui-egui/src/home.rs`):
+The Home dashboard shows one card per recommended tool, in this order. The second column is the tool group each card opens (its id in `crates/engine/src/catalog.rs`); the third says what works today; the last is one command that the command palette and the automation API accept right now.
 
-| Tool | Description | Primary Commands |
+| Tool | Tool group | What works today | Command |
+| :--- | :--- | :--- | :--- |
+| **Organize pages** | `organize` | Rotate, insert, delete, extract, replace, split, crop, duplicate, reverse, renumber and reorder pages in the thumbnail grid | `page.organize` |
+| **Edit a PDF** | `edit` | Edit text and images, add text, images, headers and footers, watermarks, backgrounds, links and Bates numbers | `edit.edit_text` |
+| **Combine files** | `combine` | Merge several files, with a thumbnail grid for rotating, removing and reordering their pages first | `page.combine` |
+| **Compress a PDF** | `compress` | Reduce the file size, or use the advanced optimiser | `optimize.reduce` |
+| **Export a PDF** | `export` | Export to Word (`.docx`), an image (`.png`), the embedded images, HTML, RTF (`.rtf`) and text (`.txt`) | `export.docx` |
+| **Scan & OCR** | `scan` | Recognise text in a scan, one file or a batch, and add an invisible searchable text layer | `ocr.recognize` |
+| **Fill & Sign** | `fill_sign` | Place text, checkmarks, crosses, dots, lines, dates, initials and signatures on a page | `sign.fill.text` |
+| **Protect a PDF** | `protect` | Password encryption, permissions, hidden-information removal, security properties, and removing security | `protect.password` |
+| **Redact a PDF** | `redact` | Mark content and areas, redact whole pages or lists of words and phrases, and sanitise the document | `redact.mark` |
+| **Open file** | — | Open one or more PDFs from disk; this is the Open card rather than a tool group | `file.open` |
+
+`RELEASE_NOTES.md` describes each release; this table is the standing statement of what the build does today. `docs/implementation/check_disclosure.py` fails the build when this table, the tool catalogue, the command registry and the Home cards stop agreeing.
+
+## What is not finished yet
+
+Availability is stated in the app as well as here: a tool group whose entry still needs work carries the milestone it completes in, and a tool inside it that does not work yet is marked **Planned** (with its milestone) or **needs an AI provider you configure**, and does nothing when clicked. This table lists every such group and how much of it works today.
+
+| Tool | Works today | Completes in |
 | :--- | :--- | :--- |
-| **Organize pages** | Page grid · Rotate · Delete | Opens the interactive page-organization grid (`organize`) |
-| **Edit a PDF** | Edit text & images · Add text | Activates direct PDF content editing (`edit`) |
-| **Combine files** | Merge PDFs · Reorder · Insert | Opens the Combine Files workspace (`page.combine`) |
-| **Compress a PDF** | Reduce file size · Optimize PDF | Deduplicates streams, subsets fonts, and optimizes file size (`file.reduce_size`) |
-| **Export a PDF** | Word · Image · HTML · Text | Exports the active document to `.docx`, `.png`, `.html`, `.rtf`, or `.txt` (`export`) |
-| **Scan & OCR** | Recognize text · Searchable PDF | Runs optical character recognition to generate a searchable text layer (`ocr.recognize`) |
-| **Fill & Sign** | Fill form fields · Sign document | Places text, checkmarks, dates, initials, and signatures on pages (`fill_sign`) |
-| **Protect a PDF** | Password security · Sanitize | Applies password encryption, permissions, or document sanitization (`protect`) |
-| **Open file** | Browse local filesystem | Opens one or more PDF documents from disk (`file.open`) |
+| **Edit a PDF** (`edit`) | 13 of 14 tools | M7 |
+| **Protect a PDF** (`protect`) | 4 of 5 tools | M8 |
+| **Use print production** (`print_production`) | 1 of 6 tools | M11 |
+| **Add search index** (`search_index`) | 0 of 1 tools | M12 |
+| **Use JavaScript** (`javascript`) | 0 of 3 tools | M6 |
+| **AI assistant** (`ai`) | 0 of 3 tools | needs a provider you configure |
 
 ---
 

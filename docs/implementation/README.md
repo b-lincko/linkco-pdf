@@ -258,6 +258,21 @@ Both are optional caches: readers regenerate thumbnails, and nothing needs anoth
 
 Local evidence: formatting passes, the parity file parses and its cited tests exist, the docs suite passes (29 tests). The evidence is three tests: one in the redaction crate (both keys gone, the marker bytes inside their objects absent from the file written by `write_incremental`, which only holds because a redaction asks for a full rewrite, while the untouched page's markers survive), one through the automation tools (open → mark by `find` → apply → save → the saved bytes have no thumbnail marker), and one for the per-page split of the counts. **Verified at `2880f76`** by all five workflows at 2880f76: CI (ubuntu and Windows build, clippy with warnings denied, the whole workspace test suite including the three new tests, wasm32 check, dependency licences and the docs step), packaging lint, the Windows preview handler, the Windows ARM64 job (native tests, unsigned MSI, install and run) and the FreeBSD build-and-test job, on the first attempt, with no test or budget changed to get there. Not claimed: XFA packets, document `/Info` and XMP, attachments, or a report that states what a share copy does and does not cover.
 
+## B020 — the README, the catalogue and the Home cards say the same thing
+
+Parent: **REC-R12** (bounded; release-note generation, per-item readiness in the README and a machine-readable capability manifest stay open). Three surfaces tell a user what this build can do: the README's Recommended Tools table, the tool catalogue the interface draws (`crates/engine/src/catalog.rs`) and the Home cards (`crates/ui-egui/src/home.rs`, `RECOMMENDED`). Nothing compared them, and the audit found four disagreements:
+
+| Where | What it said | Why it was wrong |
+|---|---|---|
+| README, "Primary Commands" column | `organize`, `edit`, `export`, `fill_sign`, `protect` | these are catalogue **group ids**, not commands; the column mixed ids (`page.combine`) and commands (`file.open`) |
+| README, Compress a PDF | `file.reduce_size` | no such command has ever existed — the group is `compress`, the commands are `optimize.reduce` and `optimize.advanced` |
+| Home dashboard and README | no redaction card or row | redaction is five Ready tools and a flagship of the product |
+| Catalogue, Add comments | `Cloud` and `Stamp` marked `Planned("M5")` | both commands are registered, both are reachable in the interface, and `parity/acrobat-features.toml` records both as shipped with UI tests — working tools telling users they were coming in a milestone |
+
+The README's table now names its tool group and one command per row, so it can be checked rather than trusted; a *What is not finished yet* table states, per unfinished group, how many of its tools work today and the milestone it completes in. `docs/implementation/check_disclosure.py` reads the real files and fails when they drift: a Home card that is not a catalogue group, a README row out of order or under another label, a command that is not in the registry, a count or milestone that disagrees with the catalogue, a group that finished but kept its milestone note, or a tool the interface calls planned that the parity inventory records as shipped. `crates/engine/src/commands.rs` gained the converse of its existing test: a catalogue item that is not Ready must not name a registered command.
+
+Local evidence: formatting passes; `check_disclosure.py --check` passes and its 22 unit tests (one gate on this checkout, 21 drift cases in a throwaway copy of the real five files) pass with the rest of the docs suite (51 tests); the ledger validates. The three Rust changes are CI-only: `rten` needs rustc 1.94 and this workspace has 1.88. Not claimed: generated or checked release notes, per-item readiness in the README, a machine-readable capability manifest, or Acrobat parity for any Ready tool. One stale artefact is recorded rather than fixed: the Home screenshot in `docs/images/` still shows the eight-card dashboard with hand-written blurbs and a v0.3.0 footer, so it predates the current card rendering as well as the ninth card, and a replacement needs a build and a display this checkout does not have.
+
 ## Regeneration and verification
 
 ```sh

@@ -418,6 +418,30 @@ mod tests {
         }
     }
 
+    /// The other half of [`every_ready_catalogue_item_is_a_registered_command`]: a command in
+    /// the registry is reachable from the palette and from automation, so the catalogue must not
+    /// announce it as planned. Registering a command early and calling it "Planned" is how a
+    /// working tool ends up hidden behind a milestone note.
+    #[test]
+    fn a_tool_that_is_not_ready_is_not_a_command_that_already_runs() {
+        for g in crate::catalog::TOOL_GROUPS {
+            for s in g.sections {
+                for i in s.items {
+                    if i.availability == crate::catalog::Availability::Ready {
+                        continue;
+                    }
+                    assert!(
+                        command(i.command).is_none(),
+                        "catalogue item {} ({}) is not Ready, but {} is a registered command",
+                        i.label,
+                        i.command,
+                        i.command
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn shortcut_labels_follow_platform_conventions() {
         let s = command("file.save_as").unwrap().shortcut.unwrap();
