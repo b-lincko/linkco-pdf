@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (349 records)
 
-ci_pending: 1, complete: 17, in_progress: 1, pending: 330
+complete: 18, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -35,7 +35,7 @@ ci_pending: 1, complete: 17, in_progress: 1, pending: 330
 | B015 | [x] Stable exit codes and machine-readable failures for the command line | P0 | complete | REC-B02 |
 | B016 | [x] Account for every network path, and fail the build when the list drifts | P0 | complete | REC-S09; REC-S03 |
 | B017 | [x] Fetch the OCR models from a source that can be pinned, and pin what it serves | P0 | complete | REC-T03; REC-T06 |
-| B018 | [ ] Keep same-named form fields apart when documents are combined | P0 | ci_pending | REC-P04 |
+| B018 | [x] Keep same-named form fields apart when documents are combined | P0 | complete | REC-P04 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1003,13 +1003,18 @@ pending: 65, scope_review: 23
 
 ### B018: Keep same-named form fields apart when documents are combined
 
-- Status: **ci_pending**; parent(s): REC-P04.
+- Status: **complete**; parent(s): REC-P04.
 - Acceptance: Combining documents never leaves two top-level fields with the same fully-qualified name: a field whose name the merged form already uses is renamed deterministically ("name", then "name (2)", "name (3)"…, skipping suffixes the form already holds), each field keeps its own value and its own widgets, a name that does not collide is left exactly as it was (so extract, split, page moves and a single-file combine do not rewrite anything), and a name in UTF-16 or PDFDocEncoding is compared as text and written back as a text string.
 - Audit: Started by reading register_fields, the one place a combined document's /AcroForm /Fields is built: it appended every copied top-level field and never looked at the names already in the list. ISO 32000-2 §12.7.3.2 makes that a defect rather than a taste question — a field's fully-qualified name is its /T below its ancestors', and two fields with the same fully-qualified name are the same field — so combining two files that each have a field called `name` produced a document in which both widgets share one value, and whichever edit came last won. The fix renames rather than merges, because merging would silently drop one file's answer; the suffix scheme is the one this file already uses for duplicate attachment names (" (2)"), so the two conflicts behave alike. Three details came out of the audit. Only fields actually being added are renamed (the existing-ref guard runs first), so a page move inside one document, an extraction, a split and a single-file combine keep every name byte-identical — the fidelity the old behaviour had. Names are compared as decoded text, not raw bytes, so a UTF-16BE `/T` and a PDFDocEncoding spelling of the same name are recognised as the same name; the renamed value keeps the original's hex/literal form and is written with PdfString::text, so a non-ASCII name becomes a proper text string instead of ASCII bytes glued onto a UTF-16 name. And the search skips suffixes the form already uses (a file that already has `name (2)` keeps it), with a saturating counter so the loop cannot wrap; it terminates because each candidate is distinct and the taken list is finite. Unnamed fields (a widget that is its own field with no /T) are left alone, since readers do not merge those by name. Re-audit: the automation catalogue's doc_combine description now states the rule, because the renamed names are what a script reads back; the parity record moves from planned to partial with the four new tests cited; and nothing was changed in /V, /Kids or widget parenting, so values and appearances travel exactly as before.
 - Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs dependency needs the network), so neither the new tests nor clippy have been run here: the Rust changes are verified by CI or not at all. Not claimed: choosing the new field name or merging two fields interactively, showing the rename in the interface, renaming inside a single document (there is no conflict there), or any change to field values, widgets or appearance.
-- Ci: pending
+- Ci: passed
 - Notes: Bounded part of REC-P04 (merge form-name conflict resolution), which stays open: the conflict is resolved automatically and deterministically, but the user cannot choose the new name, merge the two fields or see the rename in the interface. The data-loss path was real: two fields with one fully-qualified name are one field to every reader.
 - Local evidence: cargo fmt --all -- --check passes.
 - Local evidence: parity/acrobat-features.toml still parses, and each cited evidence entry names a test function that exists in the file it points at.
 - Local evidence: The docs suite CI runs passes locally (29 tests).
 - Local evidence: Four new unit tests in crates/organize: two files with the same field name, three files with a pre-existing "name (2)" in the mix, a single-document extract/split-duplicate/single-file combine that must not rename, and a non-ASCII name that must stay a text string.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257449
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257492
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257413
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257397
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257504
