@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B018"
+active_component = "B019"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -316,3 +316,21 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/40655257449"
 ci_notes = "Verified at f0b9575 by all five workflows: CI (ubuntu and Windows build, clippy with warnings denied, the whole workspace test suite including the four new tests, wasm32 check, dependency licences and the docs step), packaging lint, the Windows preview handler, the Windows ARM64 job (native tests, unsigned MSI, install and run) and the FreeBSD build-and-test job. The first attempt at 8f38c3d was red for a real reason and was fixed rather than weakened: the Linux and Windows clippy jobs failed to compile the test target (E0614 — Object::as_ref returns a reference, so it must not be dereferenced), and did so in the new test, not in the shipped code. No test, assertion or budget was changed to get past it; the fix is f0b9575."
 verification_commit = "f0b9575f4acaf62f0b05e3fd2dd475c087c93712"
 implementation_commit = "f0b9575f4acaf62f0b05e3fd2dd475c087c93712"
+
+[components.B019]
+title = "Take the page's own copy of itself when it is redacted"
+stage = "basic"
+parent_tasks = ["REC-S01"]
+status = "ci_pending"
+acceptance = "Every page a redaction touches loses the page-level data that still describes it as it was before — its thumbnail image (/Thumb) and the producing application's private data (/PieceInfo) — while a page no mark touched keeps both; the counts are reported; and the saved file, which an applied redaction forces to be a full rewrite, contains neither."
+notes = "Bounded part of REC-S01 (verified redaction and a sanitized share copy), which stays open: the content under the marks, the tags that described it and the next save were already handled, and this closes the copy of the page that sat beside the content, reachable by no mark. The audit asked what else in a document is a picture or a description of a page as it was, and found two things redaction ignored: /Thumb, an image every reader shows as the page's thumbnail (so a hover or a file manager revealed what the black box covered), and /PieceInfo, the producing application's private data, which can hold its own description of the page. Both are optional caches no reader needs, so a redacted page loses them and pages without marks keep theirs. Still open in REC-S01: XFA packets, document /Info and XMP (a redacted phrase can also live in the title), attachments a user did not ask to remove, and a share-copy report that lists what was and was not covered."
+code = ["crates/redact/src/lib.rs", "crates/redact/src/tests.rs", "crates/automation/tests/automation.rs", "parity/acrobat-features.toml"]
+audit = "Started from the module's own promise — content under the marks is removed 'for good' — and asked what a reader could still show after a redaction. The glyph, image, vector, annotation, field, tag and old-revision paths were already handled (each has a test, and applying a redaction calls require_full_save so a write_incremental becomes a full rewrite). Two page-level objects were not: /Thumb is an image of the page as it was, and /PieceInfo is the producing application's private data, which may contain its own copy of the page description; both are attached to the page dictionary, both are copied into the saved file by the full rewrite while the key is present, and neither can be reached by a mark. They are now removed from every page the operation touched, and counted in the report (thumbnails, private_data). Three decisions came out of the audit. The removal is per redacted page rather than document-wide, because a page nobody marked still has a correct thumbnail and its own private data — tested with a two-page document where only the first page is marked. It is unconditional: a thumbnail is exactly the picture the redaction exists to destroy, so leaving it to a separate optimisation would be a footgun (readers regenerate thumbnails; the file loses a cache). And it happens after the annotation pass on the same page object, so a page whose annotations were rewritten cannot keep a stale copy. Re-audit: the counts are per page and saturate nothing; both keys are optional in ISO 32000-2 (§12.5.3 /Thumb, §14.5 /PieceInfo) so a missing one is not an error and no shape is assumed; the key names are matched on the page dictionary only, so an /XObject named Thumb in resources is untouched; and the parity record for applying redactions now states it, with the two new tests cited."
+local_evidence = [
+    "cargo fmt --all -- --check passes",
+    "parity/acrobat-features.toml parses, and each cited evidence entry names a test function that exists in the file it points at",
+    "The docs suite CI runs passes locally (29 tests)",
+    "Three new tests: a redacted page loses both keys and the markers inside their objects while a page without marks keeps its own; the same through the automation tools (open, mark by find, apply, save), reading the saved bytes; and the per-page split of the counts",
+]
+verification_limit = "The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs dependency needs the network), so none of the Rust — production or test — was compiled or run here; it is verified by CI or not at all. Not claimed: XFA packets, document /Info and XMP metadata, or attachments, which a redaction does not remove and a user can clear with Sanitize document; a share-copy report that states what was covered; and any change to the appearance of the redacted page."
+ci = "pending"

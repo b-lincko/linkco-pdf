@@ -35,6 +35,40 @@ fn fixture(n: usize) -> Vec<u8> {
     out
 }
 
+/// A one-page PDF reading "Page 1" whose page carries a thumbnail (`/Thumb`) with a marker in it:
+/// a picture of the page as it was, which a redaction must not leave behind.
+fn fixture_with_thumbnail() -> Vec<u8> {
+    let body = "BT /F1 24 Tf 20 150 Td (Page 1) Tj ET";
+    let thumb = "\u{0}OLDTHUMB1\u{ff}";
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R /Thumb 6 0 R /Resources << /Font << /F1 3 0 R >> >> >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()).into_bytes(),
+        format!(
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n{thumb}\nendstream",
+            thumb.len()
+        )
+        .into_bytes(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
 /// A fresh directory with `a.pdf` (3 pages) and `b.pdf` (2 pages).
 fn workdir(test: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("pdfcraft-automation-{test}-{}", std::process::id()));
@@ -2202,6 +2236,22 @@ fn redacting_through_tools() {
     assert!(matches!(a.call("redact_apply", &json!({ "doc": doc })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc, "find": "nowhere to be found" })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc })), Err(ToolError::InvalidArgs(_))));
+}
+
+#[test]
+fn redaction_takes_the_page_thumbnail_with_it() {
+    // A page thumbnail is a picture of the page from before: leaving it would let anyone read
+    // what the redaction covered. The tools go through the same path as the interface.
+    let dir = workdir("redact-thumbnail");
+    std::fs::write(dir.join("thumb.pdf"), fixture_with_thumbnail()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "thumb.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "redact_mark", json!({ "doc": doc, "find": "Page 1" }));
+    ok(&mut a, "redact_apply", json!({ "doc": doc }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "thumb-out.pdf" }));
+    let bytes = std::fs::read(dir.join("thumb-out.pdf")).unwrap();
+    assert!(!bytes.windows(9).any(|w| w == b"OLDTHUMB1"), "a picture of the page before the redaction");
+    assert!(!page_text(&mut a, doc)[0].contains("Page 1"));
 }
 
 #[test]

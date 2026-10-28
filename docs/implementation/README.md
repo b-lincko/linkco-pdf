@@ -245,6 +245,19 @@ What the audit pinned down: only fields actually being *added* are renamed, so a
 
 Local evidence: formatting passes, the parity file parses and its cited tests exist, and the docs suite CI runs passes (29 tests). CI is the only place the Rust runs — `rten` 0.26 needs rustc 1.94, this workspace has 1.88 — and it caught one real mistake before it could pass for verification: at `8f38c3d` the Linux and Windows clippy jobs could not compile the test target (E0614: `Object::as_ref` returns a reference, so it must not be dereferenced), in the new test rather than in the shipped code, and the fix is `f0b9575`. **Verified at `f0b9575`** by all five workflows at f0b9575: CI (ubuntu and Windows, clippy with warnings denied, the whole workspace test suite with the four new tests, wasm32, dependency licences, docs), packaging lint, the preview handler, the Windows ARM64 job and the FreeBSD build-and-test job. Not claimed: choosing the new name or merging two fields interactively, showing the rename in the interface, renaming inside a single document (no conflict exists there), or any change to values, widgets or appearance.
 
+## B019 — a redacted page keeps no copy of itself
+
+Parent: **REC-S01** (bounded; XFA packets, document metadata, attachments and a share-copy report stay open). The redaction module already removes the glyphs, images, vectors, annotations, fields and tag text under a mark, and forces the next save to be a full rewrite so the revision that still holds the content leaves the file. The audit asked what a reader could still *show* afterwards, and found two things sitting on the page dictionary that no mark can reach:
+
+| Page attribute | What it is | Why it had to go |
+|---|---|---|
+| `/Thumb` | an image of the page | a picture of the page **from before** — a hover or a file manager showed what the black box covered |
+| `/PieceInfo` | the producing application's private data | can hold that application's own copy of the page description |
+
+Both are optional caches: readers regenerate thumbnails, and nothing needs another program's private data. A page the operation touches now loses both, the report counts them (`thumbnails`, `private_data`), and a page nobody marked keeps its own — a per-page rule, tested with a two-page document where only the first page is marked.
+
+Local evidence: formatting passes, the parity file parses and its cited tests exist, the docs suite passes (29 tests). The evidence is three tests: one in the redaction crate (both keys gone, the marker bytes inside their objects absent from the file written by `write_incremental`, which only holds because a redaction asks for a full rewrite, while the untouched page's markers survive), one through the automation tools (open → mark by `find` → apply → save → the saved bytes have no thumbnail marker), and one for the per-page split of the counts. **CI is pending**, and it is the only place the Rust runs. Not claimed: XFA packets, document `/Info` and XMP, attachments, or a report that states what a share copy does and does not cover.
+
 ## Regeneration and verification
 
 ```sh

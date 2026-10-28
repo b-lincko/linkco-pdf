@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B018 · **Active stage:** basic
+**Active component:** B019 · **Active stage:** basic
 
-## Basic (349 records)
+## Basic (350 records)
 
-complete: 18, in_progress: 1, pending: 330
+ci_pending: 1, complete: 18, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -36,6 +36,7 @@ complete: 18, in_progress: 1, pending: 330
 | B016 | [x] Account for every network path, and fail the build when the list drifts | P0 | complete | REC-S09; REC-S03 |
 | B017 | [x] Fetch the OCR models from a source that can be pinned, and pin what it serves | P0 | complete | REC-T03; REC-T06 |
 | B018 | [x] Keep same-named form fields apart when documents are combined | P0 | complete | REC-P04 |
+| B019 | [ ] Take the page's own copy of itself when it is redacted | P0 | ci_pending | REC-S01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1018,3 +1019,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257413
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257397
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40655257504
+
+### B019: Take the page's own copy of itself when it is redacted
+
+- Status: **ci_pending**; parent(s): REC-S01.
+- Acceptance: Every page a redaction touches loses the page-level data that still describes it as it was before — its thumbnail image (/Thumb) and the producing application's private data (/PieceInfo) — while a page no mark touched keeps both; the counts are reported; and the saved file, which an applied redaction forces to be a full rewrite, contains neither.
+- Audit: Started from the module's own promise — content under the marks is removed 'for good' — and asked what a reader could still show after a redaction. The glyph, image, vector, annotation, field, tag and old-revision paths were already handled (each has a test, and applying a redaction calls require_full_save so a write_incremental becomes a full rewrite). Two page-level objects were not: /Thumb is an image of the page as it was, and /PieceInfo is the producing application's private data, which may contain its own copy of the page description; both are attached to the page dictionary, both are copied into the saved file by the full rewrite while the key is present, and neither can be reached by a mark. They are now removed from every page the operation touched, and counted in the report (thumbnails, private_data). Three decisions came out of the audit. The removal is per redacted page rather than document-wide, because a page nobody marked still has a correct thumbnail and its own private data — tested with a two-page document where only the first page is marked. It is unconditional: a thumbnail is exactly the picture the redaction exists to destroy, so leaving it to a separate optimisation would be a footgun (readers regenerate thumbnails; the file loses a cache). And it happens after the annotation pass on the same page object, so a page whose annotations were rewritten cannot keep a stale copy. Re-audit: the counts are per page and saturate nothing; both keys are optional in ISO 32000-2 (§12.5.3 /Thumb, §14.5 /PieceInfo) so a missing one is not an error and no shape is assumed; the key names are matched on the page dictionary only, so an /XObject named Thumb in resources is untouched; and the parity record for applying redactions now states it, with the two new tests cited.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs dependency needs the network), so none of the Rust — production or test — was compiled or run here; it is verified by CI or not at all. Not claimed: XFA packets, document /Info and XMP metadata, or attachments, which a redaction does not remove and a user can clear with Sanitize document; a share-copy report that states what was covered; and any change to the appearance of the redacted page.
+- Ci: pending
+- Notes: Bounded part of REC-S01 (verified redaction and a sanitized share copy), which stays open: the content under the marks, the tags that described it and the next save were already handled, and this closes the copy of the page that sat beside the content, reachable by no mark. The audit asked what else in a document is a picture or a description of a page as it was, and found two things redaction ignored: /Thumb, an image every reader shows as the page's thumbnail (so a hover or a file manager revealed what the black box covered), and /PieceInfo, the producing application's private data, which can hold its own description of the page. Both are optional caches no reader needs, so a redacted page loses them and pages without marks keep theirs. Still open in REC-S01: XFA packets, document /Info and XMP (a redacted phrase can also live in the title), attachments a user did not ask to remove, and a share-copy report that lists what was and was not covered.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: parity/acrobat-features.toml parses, and each cited evidence entry names a test function that exists in the file it points at.
+- Local evidence: The docs suite CI runs passes locally (29 tests).
+- Local evidence: Three new tests: a redacted page loses both keys and the markers inside their objects while a page without marks keeps its own; the same through the automation tools (open, mark by find, apply, save), reading the saved bytes; and the per-page split of the counts.

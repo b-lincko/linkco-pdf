@@ -5631,8 +5631,14 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.apply"]
 tools = ["redact_apply"]
-evidence = ["crates/ui-egui/tests/redact.rs::marking_applying_and_clearing", "crates/engine/src/tests.rs::redaction_marks_apply_for_good_and_undo", "crates/automation/tests/automation.rs::redacting_through_tools"]
-notes = "confirmation; one undo step; next save is a full rewrite"
+evidence = [
+    "crates/ui-egui/tests/redact.rs::marking_applying_and_clearing",
+    "crates/engine/src/tests.rs::redaction_marks_apply_for_good_and_undo",
+    "crates/automation/tests/automation.rs::redacting_through_tools",
+    "crates/redact/src/tests.rs::a_redacted_page_keeps_no_picture_or_private_copy_of_itself",
+    "crates/automation/tests/automation.rs::redaction_takes_the_page_thumbnail_with_it",
+]
+notes = "confirmation; one undo step; next save is a full rewrite, so the revision that still holds the content leaves the file; a redacted page also loses its thumbnail (a picture of the page before) and its /PieceInfo (the producing application's private data)"
 
 [[feature]]
 id = "protect.redact-glyph-removal"
