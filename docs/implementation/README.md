@@ -230,6 +230,21 @@ What else the audit caught: `ocrs` and `rten` were built with the previous forma
 
 Local evidence: formatting passes, the manifest is valid TOML whose model entries carry 64-hex hashes and https URLs, `ATTRIBUTION.md` is regenerated from it in the generator's own format, and the docs suite CI runs passes (29 tests). **Verified at `fc552b0`** by all five workflows at fc552b0: CI (ubuntu and Windows build, clippy with warnings denied, the whole workspace test suite, wasm32 check, dependency licences and the docs step), packaging lint, the Windows preview handler, the Windows ARM64 job (native tests, the unsigned MSI build, and the install-and-run check on ARM64) and the FreeBSD build-and-test job: the `ocrs`/`rten` feature change compiles, the new model-lookup test passes, clippy is clean, and both packaging jobs downloaded the ONNX files, matched the pinned SHA-256s and produced their packages — which is the evidence that the hashes describe what the hosts actually serve. CI was also the only place any of the Rust could run: `rten` 0.26 needs rustc 1.94, this workspace has 1.88, and the craft-libs dependency needs the network. Not claimed: that the bucket serves the same bytes as the card (a mismatch stops the build rather than shipping different models), identical OCR output, or anything about how packages are published and signed.
 
+## B018 — same-named form fields stay apart when documents are combined
+
+Parent: **REC-P04** (bounded; choosing the name yourself, or merging the fields, is not there). Combining two files that each carry a field called `name` produced a merged document with two fields of that name — and ISO 32000-2 §12.7.3.2 says two fields with the same fully-qualified name *are one field*, so both widgets showed one value and whichever edit came last won. `register_fields` in `crates/organize/src/import.rs` was the only place the merged `/AcroForm /Fields` gets built, and it appended every copied top-level field without looking at the names already in the list.
+
+The fix renames instead of merging (merging would silently drop one file's answer), using the suffix scheme this file already applies to duplicate attachment names:
+
+| File | Field | In the combined document |
+|---|---|---|
+| a.pdf | `name` = Ada | `name` = Ada |
+| b.pdf | `name` = Bob | `name (2)` = Bob |
+
+What the audit pinned down: only fields actually being *added* are renamed, so a page move inside one document, an extraction, a split and a single-file combine keep every name byte-identical; names are compared as decoded text, so a UTF-16BE `/T` and a PDFDocEncoding spelling of the same name collide correctly, and the renamed value is written with `PdfString::text`, keeping the original's hex/literal form; the search skips suffixes the form already holds, so a file that already has `name (2)` keeps it; unnamed fields are left alone, because readers do not merge those by name. The automation catalogue's `doc_combine` description says what happens, since the names are what a script reads back, and the parity record `organize.field-name-conflicts` moves from planned to partial with the four new tests cited.
+
+Local evidence: formatting passes, the parity file parses and its cited tests exist, and the docs suite CI runs passes (29 tests). **CI is pending**, and it is the only place the Rust runs: `rten` 0.26 needs rustc 1.94, this workspace has 1.88. Not claimed: choosing the new name or merging two fields interactively, showing the rename in the interface, renaming inside a single document (no conflict exists there), or any change to values, widgets or appearance.
+
 ## Regeneration and verification
 
 ```sh

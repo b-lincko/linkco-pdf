@@ -512,6 +512,102 @@ fn form_fields_come_along_and_are_registered() {
     assert_eq!(field.reference(b"P"), Some(pages(&out).unwrap()[0].obj));
 }
 
+/// A one-page document whose page carries one text field, named `name` and holding `value`.
+fn doc_with_field(name: &str, value: &str) -> Document {
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [7 0 R] >> >>".into(), // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(), // 2
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>".into(), // 3
+        body(name),                                                                 // 4
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),            // 5
+        "<< /Type /Annot /Subtype /Widget /Rect [20 20 200 50] /P 3 0 R /Parent 7 0 R >>".into(), // 6
+        format!("<< /FT /Tx /T ({name}) /V ({value}) /Kids [6 0 R] >>"),            // 7
+    ];
+    open(build(&b, "/Root 1 0 R"))
+}
+
+/// The destination's top-level form fields, as dictionaries.
+fn form_fields(doc: &Document) -> Vec<Dict> {
+    let cat = catalog(doc);
+    let form = doc.resolve(cat.get(b"AcroForm").expect("/AcroForm"));
+    let list = form.as_dict().and_then(|f| f.get(b"Fields")).map(|f| doc.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
+    list.iter().map(|f| doc.resolve(f).as_dict().cloned().expect("a field dictionary")).collect()
+}
+
+fn field_names(doc: &Document) -> Vec<String> {
+    form_fields(doc).iter().map(|f| f.get(b"T").and_then(|t| t.as_string()).map(|s| s.to_text()).unwrap_or_default()).collect()
+}
+
+fn field_values(doc: &Document) -> Vec<String> {
+    form_fields(doc).iter().map(|f| f.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).unwrap_or_default()).collect()
+}
+
+#[test]
+fn fields_with_the_same_name_stay_apart_when_documents_are_combined() {
+    // Two fields with the same fully-qualified name are one field to a reader, so a plain merge
+    // gave both widgets one value (the last one read). Each keeps its own name and its own value.
+    let (a, b) = (doc_with_field("name", "Ada"), doc_with_field("name", "Bob"));
+    let out = full_roundtrip(&combine(&[("a", &a), ("b", &b)]).unwrap());
+    assert_eq!(field_names(&out), ["name", "name (2)"]);
+    assert_eq!(field_values(&out), ["Ada", "Bob"]);
+    // Each widget still hangs off its own field, which lists it and nothing else, on its own page.
+    let ps = pages(&out).unwrap();
+    let widgets: Vec<(ObjRef, ObjRef)> = ps
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let w = annots(&out, i).into_iter().next().expect("a widget per page");
+            (w.reference(b"Parent").expect("a parent field"), ps[i].obj)
+        })
+        .collect();
+    assert_ne!(widgets[0].0, widgets[1].0, "two fields, not one");
+    for (field, page) in widgets {
+        let kids = out
+            .get(field)
+            .as_dict()
+            .and_then(|d| d.get(b"Kids").cloned())
+            .map(|k| out.resolve(&k))
+            .and_then(|k| k.as_array().cloned())
+            .unwrap_or_default();
+        assert_eq!(kids.len(), 1, "one widget each");
+        let widget = *kids[0].as_ref().expect("a widget reference");
+        assert_eq!(out.get(widget).as_dict().unwrap().reference(b"P"), Some(page), "the widget stays on its own page");
+    }
+}
+
+#[test]
+fn a_combined_name_skips_the_suffixes_the_form_already_uses() {
+    // "name (2)" is itself a name: the third file must not land on it.
+    let (a, b, c) = (doc_with_field("name", "1"), doc_with_field("name", "2"), doc_with_field("name", "3"));
+    let out = full_roundtrip(&combine(&[("a", &a), ("b", &b), ("c", &c)]).unwrap());
+    assert_eq!(field_names(&out), ["name", "name (2)", "name (3)"]);
+    assert_eq!(field_values(&out), ["1", "2", "3"]);
+    let taken = doc_with_field("name (2)", "x");
+    let other = doc_with_field("name", "y");
+    let out = full_roundtrip(&combine(&[("t", &taken), ("o", &other)]).unwrap());
+    assert_eq!(field_names(&out), ["name (2)", "name"], "free names are left alone");
+}
+
+#[test]
+fn one_document_keeps_every_field_name_as_it_was() {
+    // Extract, split and page moves copy a document into a new one: nothing collides, so nothing
+    // may be renamed (a merge must not quietly rewrite a name either).
+    let src = doc_with_field("name", "Ada");
+    assert_eq!(field_names(&full_roundtrip(&extract_pages(&src, &[0]).unwrap())), ["name"]);
+    assert_eq!(field_names(&full_roundtrip(&combine(&[("only", &src)]).unwrap())), ["name"]);
+    let duplicated = full_roundtrip(&extract_pages(&src, &[0, 0]).unwrap());
+    assert_eq!(field_names(&duplicated), ["name"], "one field shown twice stays one field");
+}
+
+#[test]
+fn a_non_ascii_field_name_is_renamed_without_losing_its_encoding() {
+    let (a, b) = (doc_with_field("Nom é", "un"), doc_with_field("Nom é", "deux"));
+    let out = full_roundtrip(&combine(&[("a", &a), ("b", &b)]).unwrap());
+    assert_eq!(field_names(&out), ["Nom é", "Nom é (2)"]);
+    let stored = form_fields(&out)[1].get(b"T").and_then(|t| t.as_string()).cloned().expect("a name");
+    assert!(stored.bytes.starts_with(&[0xFE, 0xFF]), "the renamed name is a text string: {:?}", stored.bytes);
+}
+
 #[test]
 fn popup_cycles_copy_once_and_structure_links_are_removed() {
     let out = full_roundtrip(&extract_pages(&doc_a(), &[2]).unwrap());
