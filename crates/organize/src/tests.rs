@@ -570,7 +570,7 @@ fn fields_with_the_same_name_stay_apart_when_documents_are_combined() {
             .and_then(|k| k.as_array().cloned())
             .unwrap_or_default();
         assert_eq!(kids.len(), 1, "one widget each");
-        let widget = *kids[0].as_ref().expect("a widget reference");
+        let widget = kids[0].as_ref().expect("a widget reference");
         assert_eq!(out.get(widget).as_dict().unwrap().reference(b"P"), Some(page), "the widget stays on its own page");
     }
 }
