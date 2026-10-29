@@ -3921,8 +3921,8 @@ mod tests {
         let info = thumbnail_info(1);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         let req = RenderRequest { scale: 1.0, tag: 1000, ..Default::default() };
-        let refused = || pdfcraft_render::RenderedPage {
-            request: req,
+        let refused = |request: RenderRequest| pdfcraft_render::RenderedPage {
+            request,
             width: 0,
             height: 0,
             rgba: pdfcraft_render::Pixels::default(),
@@ -3936,7 +3936,7 @@ mod tests {
             v.prepare_render_queue(&info, 1.0, at)
         };
         v.last_queue = vec![req];
-        v.receive_result(&ctx, refused());
+        v.receive_result(&ctx, refused(req));
         assert_eq!(v.page_attempts(0), Some(1));
         assert_eq!(v.page_errors(), vec![(0, "the renderer refused it")]);
         assert!(v.waiting_since.is_empty(), "the slow-render hint cannot contradict the card");
@@ -3949,12 +3949,12 @@ mod tests {
         // the demand is asked at are what tell the retries apart.
         assert_eq!(demand(&mut v, 1.0), vec![req]);
         v.last_queue = vec![req];
-        v.receive_result(&ctx, refused());
+        v.receive_result(&ctx, refused(req));
         assert_eq!(v.page_attempts(0), Some(2));
         assert!(demand(&mut v, 3.9).is_empty());
         assert_eq!(demand(&mut v, 4.0), vec![req]);
         v.last_queue = vec![req];
-        v.receive_result(&ctx, refused());
+        v.receive_result(&ctx, refused(req));
         assert_eq!(v.page_attempts(0), Some(3));
         assert!(demand(&mut v, 100_000.0).is_empty(), "the automatic attempts are spent");
 
@@ -3964,7 +3964,7 @@ mod tests {
         assert_eq!(v.prepare_render_queue(&info, 2.0, 100_000.0), vec![zoomed]);
         assert_eq!(v.page_attempts(0), None, "a new demand clears the failure");
         v.last_queue = vec![zoomed];
-        v.receive_result(&ctx, refused());
+        v.receive_result(&ctx, refused(zoomed));
         assert_eq!(v.page_attempts(0), Some(1));
         v.last_queue = vec![zoomed];
         v.receive_result(&ctx, solid_result(zoomed, 10, 10));
