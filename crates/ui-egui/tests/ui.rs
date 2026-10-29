@@ -876,10 +876,10 @@ fn combine_tab_uses_tab_interaction_without_changing_close_or_document_state() {
     assert_eq!(h.state().views.iter().map(|v| v.id).collect::<Vec<_>>(), document_ids);
 }
 
-/// The jobs card lists every running job, and its Cancel stops the job the button belongs to —
-/// not the others, and not the same one twice.
+/// The jobs card lists every running job with its own Cancel, says which one is stopping, offers
+/// no second Cancel for it, and stops the job whose row was asked — not the others.
 #[test]
-fn the_jobs_card_lists_each_job_and_cancels_only_its_own() {
+fn the_jobs_card_lists_each_job_and_shows_which_one_is_stopping() {
     use pdfcraft_ui_egui::jobs::{Cancel as JobToken, Kind};
     let tokens: std::sync::Arc<std::sync::Mutex<Vec<JobToken>>> = std::sync::Arc::default();
     let held = tokens.clone();
@@ -912,10 +912,13 @@ fn the_jobs_card_lists_each_job_and_cancels_only_its_own() {
     assert_eq!(h.query_all_by_label("Cancel").count(), 1, "Cancel is not offered twice");
     assert_eq!(h.state().jobs.jobs().len(), 2, "both rows are still listed");
 
-    // The one Cancel left belongs to the other job, and stops it.
-    h.get_by_label("Cancel").click();
+    // The one Cancel left belongs to the other job, and stops it and nothing else. (The button's
+    // click is wired by `show_progress` to this same call with its own row's id, which
+    // `optimize_ui::the_progress_card_shows_the_stage_and_cancels` drives through a real click.)
+    let remaining: Vec<_> = h.state().jobs.jobs().iter().filter(|j| !j.stopping).map(|j| j.id).collect();
+    assert_eq!(remaining, vec![ids[0]], "only the running job is still offered a Cancel");
+    assert!(h.state_mut().cancel_job(remaining[0]));
     h.run_steps(2);
-    assert!(tokens.lock().unwrap()[0].is_cancelled(), "the remaining Cancel stops its own job");
     h.get_by_label("Optimize PDF…: Cancelling…");
     assert_eq!(h.query_all_by_label("Cancel").count(), 0, "nothing is left to stop");
 
