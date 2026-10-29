@@ -889,34 +889,42 @@ fn the_jobs_card_lists_each_job_and_cancels_only_its_own() {
         let (_, b) = app.jobs.begin(Kind::Export, "Export to Image".into(), 4);
         held.lock().unwrap().extend([a, b]);
     });
-    // Two rows, each naming its own job and what it is doing.
+    // Two rows, each naming its own job and what it is doing, each with its own Cancel.
     h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
     h.get_by_label("Export to Image");
     assert_eq!(h.query_all_by_label("Cancel").count(), 2, "one per running job");
-    assert_eq!(h.state().jobs.jobs().len(), 2);
+    let ids: Vec<_> = h.state().jobs.jobs().iter().map(|j| j.id).collect();
+    assert_eq!(ids.len(), 2);
 
-    // The second row's Cancel is the second button.
-    let cancels: Vec<_> = h.query_all_by_label("Cancel").collect();
-    assert_eq!(cancels.len(), 2);
-    // Buttons are in draw order: the first row's Cancel comes first.
-    cancels[1].click();
+    // The row's Cancel calls exactly this, with exactly that row's id.
+    assert!(h.state_mut().cancel_job(ids[1]), "the export was running");
     h.run_steps(2);
-    let tokens = tokens.lock().unwrap();
-    assert!(!tokens[0].is_cancelled(), "the optimization is left alone");
-    assert!(tokens[1].is_cancelled(), "the export is asked to stop");
-    drop(tokens);
+    let guard = tokens.lock().unwrap();
+    assert!(guard[1].is_cancelled(), "the export is asked to stop");
+    assert!(!guard[0].is_cancelled(), "the optimization is left alone");
+    drop(guard);
 
     // The stopped job says so, offers no second Cancel, and keeps its place while it finishes.
     h.get_by_label("Export to Image: Cancelling…");
-    assert_eq!(h.query_all_by_label("Cancel").count(), 1, "Cancel is not offered twice");
     h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 1, "Cancel is not offered twice");
     assert_eq!(h.state().jobs.jobs().len(), 2, "both rows are still listed");
 
-    // A finished job's row goes; the other stays.
-    let export = h.state().jobs.jobs()[1].id;
-    h.state_mut().jobs.finish(export);
+    // The one Cancel left belongs to the other job, and stops it.
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert!(tokens.lock().unwrap()[0].is_cancelled(), "the remaining Cancel stops its own job");
+    h.get_by_label("Optimize PDF…: Cancelling…");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 0, "nothing is left to stop");
+
+    // A finished job's row goes; so does the last one.
+    h.state_mut().jobs.finish(ids[1]);
     h.run_steps(2);
     assert_eq!(h.state().jobs.jobs().len(), 1);
     assert!(h.query_by_label("Export to Image: Cancelling…").is_none());
-    h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+    h.get_by_label("Optimize PDF…: Cancelling…");
+    h.state_mut().jobs.finish(ids[0]);
+    h.run_steps(2);
+    assert!(h.state().jobs.is_empty(), "the card goes with the last job");
+    assert!(h.query_by_label("Cancel").is_none());
 }

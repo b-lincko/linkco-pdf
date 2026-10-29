@@ -155,8 +155,10 @@ fn run(
         }
     };
     // A stop is answered between pages and images, like every other batch (see crate::jobs).
-    // The wrapper below appends " to {dir}", so this reads as one sentence.
+    // The wrapper below appends " to {dir}", so this reads as one sentence. The count is stored
+    // first: what was written before the stop is what the card must say.
     let stopped = |done: usize| {
+        set(done, None);
         crate::i18n::fmt(tl!("Export stopped after {done} of {total} files"), &[("done", &done.to_string()), ("total", &total.to_string())])
     };
     if kind == ExportKind::AllImages {

@@ -213,8 +213,3 @@ key	Space	Mezerník
 	The version on disk is too large to compare here.	Verze na disku je pro porovnání zde příliš velká.
 	“{name}” could not be opened to compare it.	Soubor „{name}“ se nepodařilo otevřít k porovnání.
 	{name} (on disk)	{name} (na disku)
-	Recognize Text in Files	Rozpoznat text v souborech
-	 (stopped after {done} of {total})	 (zastaveno po {done} z {total})
-	file {d} of {t}	Soubor {d} z {t}
-	Export stopped after {done} of {total} files	Export zastaven po {done} z {total} souborů
-	and {n} more	a další {n}
