@@ -3912,6 +3912,63 @@ mod tests {
         assert!(!failure.due(f64::NEG_INFINITY));
     }
 
+    /// A refusal with a passing cause (a retired worker, a brief allocation failure) must not keep
+    /// the page blank until the file is reopened, and a page that is genuinely broken must not be
+    /// asked for again every frame either: two retries, then it waits for the demand to change.
+    #[test]
+    fn a_refused_page_is_retried_twice_then_waits_for_a_new_demand() {
+        let ctx = egui::Context::default();
+        let info = thumbnail_info(1);
+        let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
+        let req = RenderRequest { scale: 1.0, tag: 1000, ..Default::default() };
+        let refused = || pdfcraft_render::RenderedPage {
+            request: req,
+            width: 0,
+            height: 0,
+            rgba: pdfcraft_render::Pixels::default(),
+            text: None,
+            error: Some("the renderer refused it".into()),
+            warnings: Vec::new(),
+            millis: 0,
+        };
+        let demand = |v: &mut DocView, at: f64| {
+            v.frame_queue = vec![req];
+            v.prepare_render_queue(&info, 1.0, at)
+        };
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, refused());
+        assert_eq!(v.page_attempts(0), Some(1));
+        assert_eq!(v.page_errors(), vec![(0, "the renderer refused it")]);
+        assert!(v.waiting_since.is_empty(), "the slow-render hint cannot contradict the card");
+        // Sixty frames of demand inside the first second ask for nothing: no render storm.
+        for _ in 0..60 {
+            assert!(demand(&mut v, 0.0).is_empty());
+        }
+        // The first retry is due after 1 s, the second after another 4 s, and then none is.
+        assert_eq!(demand(&mut v, 1.0), vec![req]);
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, refused());
+        assert_eq!(v.page_attempts(0), Some(2));
+        assert!(demand(&mut v, 4.9).is_empty());
+        assert_eq!(demand(&mut v, 5.0), vec![req]);
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, refused());
+        assert_eq!(v.page_attempts(0), Some(3));
+        assert!(demand(&mut v, 100_000.0).is_empty(), "the automatic attempts are spent");
+
+        // A different demand is a fresh attempt, and a render that comes back drops the card.
+        let zoomed = RenderRequest { scale: 2.0, tag: 2000, ..Default::default() };
+        v.frame_queue = vec![zoomed];
+        assert_eq!(v.prepare_render_queue(&info, 2.0, 100_000.0), vec![zoomed]);
+        assert_eq!(v.page_attempts(0), None, "a new demand clears the failure");
+        v.last_queue = vec![zoomed];
+        v.receive_result(&ctx, refused());
+        assert_eq!(v.page_attempts(0), Some(1));
+        v.last_queue = vec![zoomed];
+        v.receive_result(&ctx, solid_result(zoomed, 10, 10));
+        assert!(v.page_errors().is_empty(), "a page that came back is not a failed page");
+    }
+
     #[test]
     fn zoom_anchor_scroll_stays_within_the_content() {
         let (content, viewport) = (vec2(1000.0, 2000.0), vec2(800.0, 600.0));

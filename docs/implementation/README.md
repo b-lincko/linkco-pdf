@@ -305,6 +305,8 @@ A failure is now a record — the reason, the demand that failed, the number of 
 
 The export half of the acceptance was checked too: the atomic writer already keeps the target intact, and a new automation test exports into a path that is a file, checks the open documents are unchanged, then exports into a real folder.
 
+The state machine is tested directly, not through a synthetic file: hayro substitutes A4 for a degenerate page box, so a refusal cannot be produced from a PDF the interface would accept. A `DocView` test therefore drives real `RenderRequest`s and results: sixty frames of demand inside the first second ask for nothing, the two retries are admitted and counted, a spent failure is not admitted even at t = 100 000 s, a new demand is a fresh attempt, and a render that comes back removes the card.
+
 Local evidence: formatting passes, the ledger validates, the docs suite passes (51 tests) and the new string is translated in all sixteen interface languages. The Rust is CI-only: `rten` needs rustc 1.94 and this workspace has 1.88. Not claimed: a job centre that lists and cancels work, rollback beyond the atomic save, a diagnostics bundle, or a guarantee that a transient failure is always recovered — the retries are bounded on purpose, and the page then says so.
 
 ## Regeneration and verification

@@ -794,7 +794,7 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::missing_page_and_garbage_input_fail_gracefully", "crates/render/src/raster.rs::scale_is_clamped_for_huge_pages", "crates/render/src/raster.rs::watchdog_skips_a_stuck_page_and_keeps_rendering", "crates/ui-egui/src/canvas.rs::tests::a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change", "crates/ui-egui/tests/viewer.rs::a_page_that_cannot_be_drawn_is_retried_and_leaves_the_others_alone", "crates/automation/tests/automation.rs::a_failed_export_leaves_the_document_open_and_usable"]
+evidence = ["crates/render/src/raster.rs::missing_page_and_garbage_input_fail_gracefully", "crates/render/src/raster.rs::scale_is_clamped_for_huge_pages", "crates/render/src/raster.rs::watchdog_skips_a_stuck_page_and_keeps_rendering", "crates/ui-egui/src/canvas.rs::tests::a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change", "crates/ui-egui/src/canvas.rs::tests::a_refused_page_is_retried_twice_then_waits_for_a_new_demand", "crates/automation/tests/automation.rs::a_failed_export_leaves_the_document_open_and_usable"]
 notes = "a page the renderer refuses says why on the page and is retried twice (after 1 s and 4 s) before it waits for the view to change; an edit, a rotation or a zoom tries again, and the page reports how often it was tried; only that page is reported, and neighbours, thumbnails, print previews and other documents keep drawing. A failed export reports why and leaves the document open and unchanged; a page that comes back through a retry shows itself again instead of keeping its card"
 
 [[feature]]
