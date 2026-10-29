@@ -2160,3 +2160,8 @@ key	Space	Пробел
 	The version on disk is too large to compare here.	Версия на диске слишком велика для сравнения здесь.
 	“{name}” could not be opened to compare it.	Не удалось открыть «{name}» для сравнения.
 	{name} (on disk)	{name} (на диске)
+	Recognize Text in Files	Распознать текст в файлах
+	 (stopped after {done} of {total})	 (остановлено после {done} из {total})
+	file {d} of {t}	Файл {d} из {t}
+	Export stopped after {done} of {total} files	Экспорт остановлен после {done} из {total} файлов
+	and {n} more	и ещё {n}

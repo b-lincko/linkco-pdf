@@ -2236,3 +2236,8 @@ key	Space	Leertaste
 	The version on disk is too large to compare here.	Die Fassung auf dem Datenträger ist zu groß, um sie hier zu vergleichen.
 	“{name}” could not be opened to compare it.	„{name}“ konnte zum Vergleich nicht geöffnet werden.
 	{name} (on disk)	{name} (auf dem Datenträger)
+	Recognize Text in Files	Text in Dateien erkennen
+	 (stopped after {done} of {total})	 (angehalten nach {done} von {total})
+	file {d} of {t}	Datei {d} von {t}
+	Export stopped after {done} of {total} files	Export nach {done} von {total} Dateien angehalten
+	and {n} more	und {n} weitere

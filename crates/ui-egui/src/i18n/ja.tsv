@@ -2236,3 +2236,8 @@ key	Space	スペース
 	The version on disk is too large to compare here.	ディスク上の版は大きすぎるため、ここでは比較できません。
 	“{name}” could not be opened to compare it.	「{name}」を比較のために開けませんでした。
 	{name} (on disk)	{name} (ディスク上)
+	Recognize Text in Files	ファイル内のテキストを認識
+	 (stopped after {done} of {total})	 ({total} 件中 {done} 件で停止)
+	file {d} of {t}	ファイル {d} / {t}
+	Export stopped after {done} of {total} files	書き出しを {total} ファイル中 {done} ファイルで中止しました
+	and {n} more	他 {n} 件

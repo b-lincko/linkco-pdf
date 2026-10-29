@@ -2256,3 +2256,8 @@ key	Space	مسافة
 	The version on disk is too large to compare here.	النسخة الموجودة على القرص كبيرة جدًا للمقارنة هنا.
 	“{name}” could not be opened to compare it.	تعذّر فتح «{name}» للمقارنة معه.
 	{name} (on disk)	{name} (على القرص)
+	Recognize Text in Files	التعرف على النص في الملفات
+	 (stopped after {done} of {total})	 (توقف بعد {done} من {total})
+	file {d} of {t}	الملف {d} من {t}
+	Export stopped after {done} of {total} files	توقف التصدير بعد {done} من {total} ملفًا
+	and {n} more	و{n} أخرى

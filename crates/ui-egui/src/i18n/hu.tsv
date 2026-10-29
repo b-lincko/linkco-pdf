@@ -2234,3 +2234,8 @@ key	Space	Szóköz
 	The version on disk is too large to compare here.	A lemezen lévő változat túl nagy az itteni összehasonlításhoz.
 	“{name}” could not be opened to compare it.	A(z) „{name}” nem nyitható meg az összehasonlításhoz.
 	{name} (on disk)	{name} (a lemezen)
+	Recognize Text in Files	Szövegfelismerés fájlokban
+	 (stopped after {done} of {total})	 (leállítva {done} / {total} után)
+	file {d} of {t}	{d}. fájl / {t}
+	Export stopped after {done} of {total} files	Az exportálás {done} / {total} fájl után leállt
+	and {n} more	és további {n}

@@ -2152,3 +2152,8 @@ key	Space	Espacio
 	The version on disk is too large to compare here.	La versión del disco es demasiado grande para compararla aquí.
 	“{name}” could not be opened to compare it.	No se pudo abrir «{name}» para compararlo.
 	{name} (on disk)	{name} (en el disco)
+	Recognize Text in Files	Reconocer texto en archivos
+	 (stopped after {done} of {total})	 (detenido tras {done} de {total})
+	file {d} of {t}	Archivo {d} de {t}
+	Export stopped after {done} of {total} files	Exportación detenida tras {done} de {total} archivos
+	and {n} more	y {n} más

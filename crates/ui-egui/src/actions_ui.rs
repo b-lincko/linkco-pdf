@@ -20,6 +20,13 @@ pub struct Wizard {
     pub add: usize,
 }
 
+/// A run over files: its progress and its row in the job centre.
+#[derive(Clone)]
+pub struct ActionRun {
+    pub progress: Arc<Mutex<RunProgress>>,
+    pub job: crate::jobs::JobId,
+}
+
 /// Progress of a run: files done, total, and the summary once finished.
 #[derive(Default)]
 pub struct RunProgress {
@@ -92,34 +99,46 @@ impl PdfCraftApp {
             self.notify_tr("An action is already running");
             return;
         }
+        let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Action, action.name.clone(), files.len());
         let progress = Arc::new(Mutex::new(RunProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();
         // The summary is written on the worker thread: draw it in the UI's language.
         let lang = crate::i18n::current();
         let work = move || {
             crate::i18n::set_current(lang);
-            let (mut ok, mut failed) = (0, Vec::new());
-            for (i, (name, bytes)) in files.into_iter().enumerate() {
-                if let Ok(mut s) = p.lock() {
-                    s.done = i;
-                }
-                let r = pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| {}).and_then(|r| {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    write_result(&dir, &name, &r.bytes).map_err(|e| e.to_string())?;
-                    #[cfg(target_arch = "wasm32")]
-                    crate::editing::download(&name, &r.bytes)?;
-                    Ok(())
-                });
-                match r {
-                    Ok(()) => ok += 1,
-                    Err(e) => failed.push(format!("{name}: {}", e)),
-                }
-            }
-            let done =
-                if ok == 1 { crate::i18n::fmt(tl!("1 file done"), &[]) } else { crate::i18n::fmt(tl!("{n} files done"), &[("n", &ok.to_string())]) };
+            let total = files.len();
+            let outcome = crate::jobs::run_batch(
+                &cancel,
+                files,
+                |done| {
+                    if let Ok(mut s) = p.lock() {
+                        s.done = done;
+                    }
+                },
+                |(name, bytes)| {
+                    pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| {}).and_then(|r| {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        write_result(&dir, &name, &r.bytes).map_err(|e| e.to_string())?;
+                        #[cfg(target_arch = "wasm32")]
+                        crate::editing::download(&name, &r.bytes)?;
+                        Ok(())
+                    })
+                },
+            );
+            let done = if outcome.done == 1 {
+                crate::i18n::fmt(tl!("1 file done"), &[])
+            } else {
+                crate::i18n::fmt(tl!("{n} files done"), &[("n", &outcome.done.to_string())])
+            };
             let mut msg = format!("{}: {done}", action.name);
-            if !failed.is_empty() {
-                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &failed.join("; "))]));
+            if outcome.cancelled {
+                msg.push_str(&crate::i18n::fmt(
+                    tl!(" (stopped after {done} of {total})"),
+                    &[("done", &outcome.done.to_string()), ("total", &total.to_string())],
+                ));
+            }
+            if !outcome.failed.is_empty() {
+                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &outcome.failed.join("; "))]));
             }
             if let Ok(mut s) = p.lock() {
                 s.done = s.total;
@@ -134,32 +153,32 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.action_run = Some(progress);
+        self.action_run = Some(ActionRun { progress, job });
         self.poll_action();
     }
 
     /// Show the running action's progress, and its summary when done.
     pub(crate) fn poll_action(&mut self) {
-        let Some(p) = self.action_run.clone() else { return };
-        let state = p.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
+        let Some(run) = self.action_run.clone() else { return };
+        let state = run.progress.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
         match state {
             Some(Ok(m)) => {
                 self.action_run = None;
+                self.jobs.finish(run.job);
                 self.notify(m);
             }
             Some(Err((done, total))) => {
-                let m = crate::i18n::fmt(
-                    tl!("Running action… file {d} of {t}"),
-                    &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())],
-                );
-                if self.toast.as_ref().is_none_or(|t| t.0 != m) {
-                    self.notify(m);
-                }
+                let stage =
+                    crate::i18n::fmt(tl!("file {d} of {t}"), &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())]);
+                self.jobs.stage(run.job, stage, if total == 0 { 0.0 } else { done as f32 / total as f32 });
                 if let Some(ctx) = &self.ctx {
                     ctx.request_repaint_after(std::time::Duration::from_millis(200));
                 }
             }
-            None => self.action_run = None,
+            None => {
+                self.action_run = None;
+                self.jobs.finish(run.job);
+            }
         }
     }
 

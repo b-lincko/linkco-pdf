@@ -2166,3 +2166,8 @@ key	Space	స్పేస్
 	The version on disk is too large to compare here.	డిస్క్‌లోని వెర్షన్ ఇక్కడ పోల్చడానికి చాలా పెద్దది.
 	“{name}” could not be opened to compare it.	పోల్చడానికి “{name}” తెరవలేకపోయాం.
 	{name} (on disk)	{name} (డిస్క్‌లో)
+	Recognize Text in Files	ఫైళ్లలో టెక్స్ట్‌ను గుర్తించు
+	 (stopped after {done} of {total})	 ({total}లో {done} వద్ద ఆగింది)
+	file {d} of {t}	ఫైల్ {d} / {t}
+	Export stopped after {done} of {total} files	ఎగుమతి {total} ఫైళ్లలో {done} వద్ద ఆగిపోయింది
+	and {n} more	మరో {n}

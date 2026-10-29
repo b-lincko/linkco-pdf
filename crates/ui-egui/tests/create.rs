@@ -88,7 +88,7 @@ fn reduce(name: &'static str, bytes: Vec<u8>, out: &std::path::Path) -> egui_kit
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     h.run_steps(2);
-    assert!(h.state().optimize_run.is_none() && h.state().progress_notice.is_none(), "the run finished");
+    assert!(h.state().optimize_run.is_none() && h.state().jobs.is_empty(), "the run finished and its card went with it");
     h
 }
 
@@ -197,7 +197,7 @@ fn the_pdf_optimizer_dialog_saves_an_optimized_copy() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     h.run_steps(2);
-    assert!(h.state().progress_notice.is_none(), "the progress card is gone");
+    assert!(h.state().jobs.is_empty(), "the card went with the job");
     assert!(std::fs::read(&out).unwrap().starts_with(b"%PDF-"));
     assert_eq!(h.state().dialog, None);
 }

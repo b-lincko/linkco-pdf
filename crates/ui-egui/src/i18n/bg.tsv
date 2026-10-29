@@ -2198,3 +2198,8 @@ key	Space	Интервал
 	The version on disk is too large to compare here.	Версията на диска е твърде голяма, за да се сравни тук.
 	“{name}” could not be opened to compare it.	„{name}“ не можа да бъде отворен за сравнение.
 	{name} (on disk)	{name} (на диска)
+	Recognize Text in Files	Разпознаване на текст във файлове
+	 (stopped after {done} of {total})	 (спряно след {done} от {total})
+	file {d} of {t}	Файл {d} от {t}
+	Export stopped after {done} of {total} files	Експортирането спря след {done} от {total} файла
+	and {n} more	и още {n}

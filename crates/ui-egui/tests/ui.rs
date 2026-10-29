@@ -875,3 +875,48 @@ fn combine_tab_uses_tab_interaction_without_changing_close_or_document_state() {
     assert!(h.query_by_role_and_label(Role::Tab, "Combine files").is_none());
     assert_eq!(h.state().views.iter().map(|v| v.id).collect::<Vec<_>>(), document_ids);
 }
+
+/// The jobs card lists every running job, and its Cancel stops the job the button belongs to —
+/// not the others, and not the same one twice.
+#[test]
+fn the_jobs_card_lists_each_job_and_cancels_only_its_own() {
+    use pdfcraft_ui_egui::jobs::{Cancel as JobToken, Kind};
+    let tokens: std::sync::Arc<std::sync::Mutex<Vec<JobToken>>> = std::sync::Arc::default();
+    let held = tokens.clone();
+    let mut h = harness(move |app| {
+        let (optimize, a) = app.jobs.begin(Kind::Optimize, "Optimize PDF…".into(), 10);
+        app.jobs.stage(optimize, "Optimizing… image 4 of 10", 0.275);
+        let (_, b) = app.jobs.begin(Kind::Export, "Export to Image".into(), 4);
+        held.lock().unwrap().extend([a, b]);
+    });
+    // Two rows, each naming its own job and what it is doing.
+    h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+    h.get_by_label("Export to Image");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 2, "one per running job");
+    assert_eq!(h.state().jobs.jobs().len(), 2);
+
+    // The second row's Cancel is the second button.
+    let cancels: Vec<_> = h.query_all_by_label("Cancel").collect();
+    assert_eq!(cancels.len(), 2);
+    // Buttons are in draw order: the first row's Cancel comes first.
+    cancels[1].click();
+    h.run_steps(2);
+    let tokens = tokens.lock().unwrap();
+    assert!(!tokens[0].is_cancelled(), "the optimization is left alone");
+    assert!(tokens[1].is_cancelled(), "the export is asked to stop");
+    drop(tokens);
+
+    // The stopped job says so, offers no second Cancel, and keeps its place while it finishes.
+    h.get_by_label("Export to Image: Cancelling…");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 1, "Cancel is not offered twice");
+    h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+    assert_eq!(h.state().jobs.jobs().len(), 2, "both rows are still listed");
+
+    // A finished job's row goes; the other stays.
+    let export = h.state().jobs.jobs()[1].id;
+    h.state_mut().jobs.finish(export);
+    h.run_steps(2);
+    assert_eq!(h.state().jobs.jobs().len(), 1);
+    assert!(h.query_by_label("Export to Image: Cancelling…").is_none());
+    h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+}

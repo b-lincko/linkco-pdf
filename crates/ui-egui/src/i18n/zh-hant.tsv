@@ -2122,3 +2122,8 @@ key	Space	空格
 	The version on disk is too large to compare here.	磁碟上的版本太大，無法在此比較。
 	“{name}” could not be opened to compare it.	無法開啟「{name}」進行比較。
 	{name} (on disk)	{name}（磁碟上）
+	Recognize Text in Files	辨識檔案中的文字
+	 (stopped after {done} of {total})	 （已停止，完成 {done}/{total}）
+	file {d} of {t}	第 {d} 個檔案，共 {t} 個
+	Export stopped after {done} of {total} files	匯出已在 {done}/{total} 個檔案後停止
+	and {n} more	另有 {n} 項

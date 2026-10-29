@@ -1459,3 +1459,48 @@ fn read_mode_retains_existing_rail_click_to_close_policy() {
     assert_eq!(h.state().right, None);
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Read);
 }
+
+/// Every background job is on the control channel, and `ui.jobs` stops one of them the same way
+/// the card's Cancel button does.
+#[test]
+fn jobs_are_listed_and_stopped_one_at_a_time() {
+    let (mut h, c) = harness();
+    // Two jobs as the workers register them (an optimization and an export).
+    let (optimize, optimize_stop) = h.state_mut().jobs.begin(pdfcraft_ui_egui::jobs::Kind::Optimize, "Optimize PDF…".into(), 10);
+    let (export, export_stop) = h.state_mut().jobs.begin(pdfcraft_ui_egui::jobs::Kind::Export, "Export to Image".into(), 4);
+    h.state_mut().jobs.stage(optimize, "Optimizing… image 4 of 10", 0.3);
+    h.run_steps(2);
+
+    // The state carries the same list the card draws.
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let jobs = state["jobs"].as_array().expect("jobs is a list").clone();
+    assert_eq!(jobs.len(), 2, "{state}");
+    assert_eq!(jobs[0]["kind"], "optimize");
+    assert_eq!(jobs[0]["label"], "Optimize PDF…");
+    assert_eq!(jobs[0]["stage"], "Optimizing… image 4 of 10");
+    assert_eq!(jobs[0]["done"], 0);
+    assert_eq!(jobs[0]["total"], 10);
+    assert_eq!(jobs[1]["kind"], "export");
+    assert_eq!(jobs[1]["stopping"], false);
+
+    // An agent reads the same list with ui.jobs.
+    let listed = ok(&mut h, &c, "ui.jobs", json!({}));
+    assert_eq!(listed.as_array().map(Vec::len), Some(2), "{listed}");
+
+    // Stopping one leaves the other running, and says only that the request was taken.
+    let stopped = ok(&mut h, &c, "ui.jobs", json!({"cancel": export.0 }));
+    assert_eq!(stopped[1]["stopping"], true, "{stopped}");
+    assert_eq!(stopped[0]["stopping"], false, "{stopped}");
+    assert!(export_stop.is_cancelled(), "the export's worker is asked to stop");
+    assert!(!optimize_stop.is_cancelled(), "the optimization's worker is not");
+
+    // Asking again is harmless; a job that is gone is an error, not a silent nothing.
+    assert!(ok(&mut h, &c, "ui.jobs", json!({"cancel": export.0}))[1]["stopping"].as_bool().unwrap());
+    let err = call(&mut h, &c, "ui.jobs", json!({"cancel": 9999})).expect_err("no such job");
+    assert!(err.contains("no running job 9999"), "{err}");
+    let err = call(&mut h, &c, "ui.jobs", json!({"cancel": "one"})).expect_err("not an id");
+    assert!(err.contains("cancel must be a job id"), "{err}");
+    let err = call(&mut h, &c, "ui.jobs", json!({"cancel": optimize.0, "id": 3})).expect_err("stray parameter");
+    assert!(err.contains("unknown parameter"), "{err}");
+    assert!(!optimize_stop.is_cancelled(), "a refused request stops nothing");
+}

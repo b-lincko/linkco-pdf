@@ -45,6 +45,7 @@ mod conflict;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod disk_watch;
 pub mod docking;
+pub mod jobs;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
 mod comment_props;
@@ -539,14 +540,14 @@ pub struct PdfCraftApp {
     /// Scan & OCR: the Recognize Text choices, the running job, and (tests) run it inline.
     pub ocr_draft: ocr_ui::OcrDraft,
     pub ocr_run: Option<ocr_ui::OcrRun>,
-    pub ocr_batch: Option<std::sync::Arc<std::sync::Mutex<ocr_ui::BatchProgress>>>,
+    pub ocr_batch: Option<ocr_ui::OcrBatchRun>,
     /// Background jobs (OCR, actions, listing pinned folders) run inline instead (tests).
     pub run_inline: bool,
     /// Action Wizard: the user's actions, the dialog state, the running action and (tests) the
     /// files to use instead of a picker.
     pub custom_actions: Vec<pdfcraft_engine::actions::Action>,
     pub wizard: actions_ui::Wizard,
-    pub action_run: Option<std::sync::Arc<std::sync::Mutex<actions_ui::RunProgress>>>,
+    pub action_run: Option<actions_ui::ActionRun>,
     pub action_files_override: Option<Vec<String>>,
     /// Standards ▸ PDF/A: level and last result.
     pub pdfa: standards_ui::PdfaState,
@@ -589,8 +590,9 @@ pub struct PdfCraftApp {
     pub optimize_draft: OptimizeDraft,
     /// The running optimization (Optimize PDF ▸ Advanced optimization).
     pub optimize_run: Option<optimize_ui::OptimizeRun>,
-    /// A background job's progress card (see [`widgets::progress_notice`]).
-    pub progress_notice: Option<widgets::ProgressNotice>,
+    /// The background jobs that are running, drawn by the card at the bottom of the window
+    /// (see [`widgets::jobs_card`]) and reported on the control channel.
+    pub jobs: jobs::Jobs,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
     /// Files dropped on the page grid, waiting for the pointer to say which gap they go to.
@@ -643,6 +645,8 @@ pub struct PdfCraftApp {
     pub export_draft: export_ui::ExportDraft,
     /// A running export's progress.
     export_status: Option<export_ui::ExportStatus>,
+    /// The card row of the export in flight, retired when the worker reports.
+    export_job: Option<jobs::JobId>,
     /// The saved Fill & Sign signature and initials (drawn or typed).
     pub signature: Option<fill_sign::SavedSig>,
     pub initials: Option<fill_sign::SavedSig>,
@@ -864,7 +868,7 @@ impl PdfCraftApp {
             stamp_draft: Default::default(),
             optimize_draft: OptimizeDraft::default(),
             optimize_run: None,
-            progress_notice: None,
+            jobs: jobs::Jobs::default(),
             page_clipboard: None,
             grid_drop: None,
             last_snapshot: None,
@@ -894,6 +898,7 @@ impl PdfCraftApp {
             marks_draft: Default::default(),
             export_draft: Default::default(),
             export_status: None,
+            export_job: None,
             signature: None,
             initials: None,
             signature_draft: Default::default(),
@@ -1409,11 +1414,17 @@ impl PdfCraftApp {
         }
     }
 
-    /// Draw the running job's progress card and pass a Cancel click on to the job.
+    /// Draw the running jobs and pass a Cancel click on to the job it belongs to.
     fn show_progress(&mut self, ctx: &egui::Context) {
-        if widgets::progress_notice(self, ctx) {
-            self.cancel_optimize();
+        if let Some(id) = widgets::jobs_card(self, ctx) {
+            self.cancel_job(id);
         }
+    }
+
+    /// Ask one running job to stop. Its worker finishes the item in hand and reports back; the
+    /// card says it is stopping until then.
+    pub fn cancel_job(&mut self, id: jobs::JobId) -> bool {
+        self.jobs.cancel(id)
     }
 
     fn sync_theme(&mut self, ctx: &egui::Context) {

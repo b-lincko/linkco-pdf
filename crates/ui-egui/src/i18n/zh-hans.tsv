@@ -2200,3 +2200,8 @@ key	Space	空格
 	The version on disk is too large to compare here.	磁盘上的版本太大，无法在此比较。
 	“{name}” could not be opened to compare it.	无法打开“{name}”进行比较。
 	{name} (on disk)	{name}（磁盘上）
+	Recognize Text in Files	识别文件中的文本
+	 (stopped after {done} of {total})	 （已停止，完成 {done}/{total}）
+	file {d} of {t}	第 {d} 个文件，共 {t} 个
+	Export stopped after {done} of {total} files	导出已在 {done}/{total} 个文件后停止
+	and {n} more	另有 {n} 项

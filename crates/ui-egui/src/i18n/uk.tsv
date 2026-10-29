@@ -2257,3 +2257,8 @@ key	Space	Пробіл
 	The version on disk is too large to compare here.	Версія на диску завелика для порівняння тут.
 	“{name}” could not be opened to compare it.	Не вдалося відкрити «{name}» для порівняння.
 	{name} (on disk)	{name} (на диску)
+	Recognize Text in Files	Розпізнати текст у файлах
+	 (stopped after {done} of {total})	 (зупинено після {done} із {total})
+	file {d} of {t}	Файл {d} із {t}
+	Export stopped after {done} of {total} files	Експорт зупинено після {done} із {total} файлів
+	and {n} more	і ще {n}

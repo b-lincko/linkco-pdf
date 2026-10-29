@@ -2231,3 +2231,8 @@ key	Space	Spacja
 	The version on disk is too large to compare here.	Wersja na dysku jest zbyt duża, aby porównać ją tutaj.
 	“{name}” could not be opened to compare it.	Nie można otworzyć „{name}” do porównania.
 	{name} (on disk)	{name} (na dysku)
+	Recognize Text in Files	Rozpoznaj tekst w plikach
+	 (stopped after {done} of {total})	 (zatrzymano po {done} z {total})
+	file {d} of {t}	Plik {d} z {t}
+	Export stopped after {done} of {total} files	Eksport zatrzymany po {done} z {total} plików
+	and {n} more	i jeszcze {n}

@@ -122,6 +122,15 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: E
     (apply, cancel)
 }
 
+/// The export's name in the card: the title the dialog already uses, so no new string is needed.
+fn export_job_name(kind: ExportKind) -> String {
+    match kind {
+        ExportKind::Image => tl!("Export to Image").to_string(),
+        ExportKind::Text => tl!("Export to Text").to_string(),
+        ExportKind::AllImages => tl!("Export All Images").to_string(),
+    }
+}
+
 /// Write the files (`name`, bytes) produced for `pages`, reporting progress.
 #[allow(clippy::too_many_arguments)]
 fn run(
@@ -135,6 +144,7 @@ fn run(
     mut sink: impl FnMut(&str, Vec<u8>) -> Result<(), String>,
     status: &ExportStatus,
     lang: crate::i18n::Lang,
+    cancel: &crate::jobs::Cancel,
 ) -> String {
     // May run on a worker thread: messages are drawn in the UI's language.
     crate::i18n::set_current(lang);
@@ -144,6 +154,11 @@ fn run(
             *s = Some((done, total, msg));
         }
     };
+    // A stop is answered between pages and images, like every other batch (see crate::jobs).
+    // The wrapper below appends " to {dir}", so this reads as one sentence.
+    let stopped = |done: usize| {
+        crate::i18n::fmt(tl!("Export stopped after {done} of {total} files"), &[("done", &done.to_string()), ("total", &total.to_string())])
+    };
     if kind == ExportKind::AllImages {
         set(0, None);
         let out = match pdfcraft_engine::export::extract_images(&src, &pages, min_side) {
@@ -151,6 +166,10 @@ fn run(
             Err(e) => return crate::i18n::fmt(tl!("Export stopped: {e}"), &[("e", &e.to_string())]),
         };
         for (k, img) in out.images.iter().enumerate() {
+            if cancel.is_cancelled() {
+                return stopped(k);
+            }
+            set(k, None);
             if let Err(e) = sink(&pdfcraft_engine::export::image_file_name(&stem, img, k + 1), img.data.clone()) {
                 return crate::i18n::fmt(tl!("Export stopped: {e}"), &[("e", &e.to_string())]);
             }
@@ -175,6 +194,9 @@ fn run(
         ExportKind::AllImages => String::new(),
         ExportKind::Image => {
             for (k, p) in pages.iter().enumerate() {
+                if cancel.is_cancelled() {
+                    return stopped(k);
+                }
                 set(k, None);
                 let result = ex.image(*p, dpi, format).and_then(|img| sink(&format!("{stem}_page_{}.{}", p + 1, format.extension()), img));
                 if let Err(e) = result {
@@ -232,14 +254,18 @@ impl PdfCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let start = move |app: &mut Self, dir: std::path::PathBuf, inline: bool| {
+                // Registered here, not before: until the folder is chosen there is nothing to stop.
+                let (job, cancel) = app.jobs.begin(crate::jobs::Kind::Export, export_job_name(kind), pages.len());
+                app.export_job = Some(job);
                 let st = status.clone();
                 let shown = dir.display().to_string();
                 let lang = crate::i18n::current();
+                let stop = cancel.clone();
                 let work = move || {
                     let sink = |name: &str, bytes: Vec<u8>| {
                         crate::editing::write_atomically(&dir.join(name).to_string_lossy(), &bytes).map_err(|e| format!("{name}: {e}"))
                     };
-                    let msg = run(src, kind, dpi, format, min_side, pages, stem, sink, &st, lang);
+                    let msg = run(src, kind, dpi, format, min_side, pages, stem, sink, &st, lang, &stop);
                     if let Ok(mut s) = st.lock() {
                         let (done, total) = s.as_ref().map_or((0, 0), |(d, t, _)| (*d, *t));
                         let done_msg = crate::i18n::fmt(tl!("{msg} to {dir}"), &[("msg", &msg), ("dir", &shown)]);
@@ -263,6 +289,8 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Export, export_job_name(kind), pages.len());
+            self.export_job = Some(job);
             let msg = run(
                 src,
                 kind,
@@ -274,6 +302,7 @@ impl PdfCraftApp {
                 |name, bytes| crate::editing::download(name, &bytes),
                 &status,
                 crate::i18n::current(),
+                &cancel,
             );
             if let Ok(mut s) = status.lock() {
                 *s = Some((0, 0, Some(msg)));
@@ -286,19 +315,109 @@ impl PdfCraftApp {
     pub(crate) fn poll_export(&mut self) {
         let Some(st) = self.export_status.clone() else { return };
         let snapshot = st.lock().ok().and_then(|s| s.clone());
+        let job = self.export_job;
         match snapshot {
             Some((_, _, Some(msg))) => {
                 self.export_status = None;
+                self.export_job = None;
+                if let Some(job) = job {
+                    self.jobs.finish(job);
+                }
                 self.notify(msg);
             }
-            Some((done, total, None)) if total > 1 => {
-                let m = crate::i18n::fmt(tl!("Exporting… {d} of {t}"), &[("d", &done.to_string()), ("t", &total.to_string())]);
-                self.notify(m);
+            Some((done, total, None)) => {
+                if let Some(job) = job {
+                    let stage = crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &done.to_string()), ("n", &total.max(1).to_string())]);
+                    self.jobs.stage(job, stage, if total == 0 { 0.0 } else { done as f32 / total as f32 });
+                }
             }
-            _ => {}
+            _ => {
+                self.export_status = None;
+                self.export_job = None;
+                if let Some(job) = job {
+                    self.jobs.finish(job);
+                }
+            }
         }
         if let Some(ctx) = &self.ctx {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two empty pages: enough for the export to name and draw, and nothing that needs a font.
+    const FIXTURE: &[u8] = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 100] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n4 0 obj << /Type /Page /Parent 2 0 R >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
+
+    fn source() -> ExportSource {
+        ExportSource {
+            bytes: std::sync::Arc::new(FIXTURE.to_vec()),
+            config: pdfcraft_render::RenderConfig::default(),
+            pages: 2,
+            sizes: vec![(200.0, 100.0), (200.0, 100.0)],
+        }
+    }
+
+    /// The export answers a stop between pages: the page in hand is written whole, the next one
+    /// is not started, and the message says how far it got (in the sentence the toast wraps).
+    #[test]
+    fn a_stop_between_pages_keeps_the_page_in_hand_and_starts_no_other() {
+        let stop = crate::jobs::Cancel::new();
+        let mut written = Vec::new();
+        let mut sink_stop = stop.clone();
+        let status: ExportStatus = std::sync::Arc::new(std::sync::Mutex::new(Some((0, 2, None))));
+        let msg = run(
+            source(),
+            ExportKind::Image,
+            72.0,
+            ImageFormat::Png,
+            0,
+            vec![0, 1],
+            "doc".into(),
+            |name, bytes| {
+                assert!(bytes.starts_with(b"\x89PNG"), "{name} is not a page image");
+                written.push(name.to_string());
+                // The reader presses Cancel while the first page is being written.
+                sink_stop.cancel();
+                Ok(())
+            },
+            &status,
+            crate::i18n::current(),
+            &stop,
+        );
+        assert_eq!(written, vec!["doc_page_1.png"], "no page starts after the stop");
+        assert_eq!(msg, "Export stopped after 1 of 2 files");
+        let (done, total, _) = status.lock().unwrap().clone().unwrap();
+        assert_eq!((done, total), (1, 2), "the card is told how far it got");
+    }
+
+    /// A stop that arrives before the first page writes nothing at all.
+    #[test]
+    fn a_stop_before_the_first_page_writes_nothing() {
+        let stop = crate::jobs::Cancel::new();
+        stop.cancel();
+        let status: ExportStatus = std::sync::Arc::new(std::sync::Mutex::new(Some((0, 2, None))));
+        let mut written = 0;
+        let msg = run(
+            source(),
+            ExportKind::Image,
+            72.0,
+            ImageFormat::Png,
+            0,
+            vec![0, 1],
+            "doc".into(),
+            |_, _| {
+                written += 1;
+                Ok(())
+            },
+            &status,
+            crate::i18n::current(),
+            &stop,
+        );
+        assert_eq!(written, 0);
+        assert_eq!(msg, "Export stopped after 0 of 2 files");
     }
 }
