@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B020 · **Active stage:** basic
+**Active component:** B021 · **Active stage:** basic
 
-## Basic (351 records)
+## Basic (352 records)
 
-complete: 20, in_progress: 1, pending: 330
+ci_pending: 1, complete: 20, in_progress: 1, pending: 330
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -38,6 +38,7 @@ complete: 20, in_progress: 1, pending: 330
 | B018 | [x] Keep same-named form fields apart when documents are combined | P0 | complete | REC-P04 |
 | B019 | [x] Take the page's own copy of itself when it is redacted | P0 | complete | REC-S01 |
 | B020 | [x] Say the same thing about what works everywhere a user reads it | P0 | complete | REC-R12 |
+| B021 | [ ] Copy what is on screen at the resolution it is shown at | P0 | ci_pending | REC-R02 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1057,3 +1058,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40702890816
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40702890916
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40702890720
+
+### B021: Copy what is on screen at the resolution it is shown at
+
+- Status: **ci_pending**; parent(s): REC-R02.
+- Acceptance: A snapshot of a region is rendered at exactly the scale the page is drawn on screen (zoom × 96/72 × pixels per point), so the copied image holds one pixel per screen pixel and is never resampled; a selection too large for the renderer's tile limit (4096 pixels a side) is copied whole at a lower scale instead of being cropped; and the size the editor reports is the size of the image it copied.
+- Audit: Started from a report that the pixels of a snapshot are blurry, and asked which surfaces raster a page and at what scale. Six did: the canvas (`canvas::render_scale`: zoom × PT × pixels per point), the print preview (`print_ui`, page-on-sheet scale × pane scale × pixels per point), the accessibility dialog's figure picture (380 × pixels per point over the figure's width), image export and the command line (dpi / 72), the automation `page_render` (dpi / 72) and the snapshot. Five of the six were device-exact; the snapshot was the exception, and its own comment said 'at the current zoom', which is what the code did rather than what the user sees. The arithmetic is a 4/3 shortfall at every zoom and every screen scale. Three decisions came out of the audit. (1) The scale is now the canvas's, written once as `snapshot_scale` and compared against `canvas::PT` in a test, so the two cannot drift apart again. (2) The renderer draws a tile of at most 4096 pixels a side and silently clamps anything larger, which would have cropped a big selection down to its top-left corner; the scale is now reduced to fit that tile, so the whole selection is copied. (3) The arbitrary 8-pixels-per-point ceiling is gone: it made a deeply zoomed-in snapshot softer than the screen, and the tile limit is the real constraint. Re-audit: the size the editor reports comes from the renderer's own output width and height, so a lowered scale is reported honestly; the start corner still floors to a whole pixel so the copy does not drift by a fraction; a degenerate zoom or rectangle returns a finite scale or an error rather than NaN (three unit tests); and the UI test now measures the copy against the area's size on screen instead of only checking that something was copied. The other five surfaces were re-read and left alone.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs dependency needs the network), so neither the change nor its tests were compiled or run here; they are verified by CI or not at all. Not claimed: any change to the rendering of the page on screen (it was already device-exact), to colour management, or to the clipboard's own colour handling; a fidelity benchmark against a reference renderer; or a regenerated README screenshot — `docs/images/capture.sh` now captures at 2× without the resampling `--width` used to apply, but the committed images were made by an older build and replacing them needs a machine that can run the renderer.
+- Ci: pending
+- Notes: Bounded part of REC-R02 (independent rendering-fidelity benchmark), which stays open. The defect was in one line: `Edit ▸ Take a Snapshot` rendered the selection at `zoom × pixels per point`, while the canvas draws the page at `zoom × 96/72 × pixels per point` (`canvas::render_scale`). Every snapshot therefore held three quarters of the pixels the same area showed on screen — a copy that is soft the moment anything scales it back up to the size it came from, however sharp the page looked. Two smaller faults were in the same function: the scale was capped at 8 pixels per point, so a snapshot taken deeply zoomed in was coarser than the screen, and the area was only bounded by a 64-megapixel error rather than by the 4096-pixel tile the renderer actually draws, so a selection over that (about 34 × 34 inches at 120 dpi) was refused instead of copied. The snapshot now uses the canvas's own device scale, comes down only as far as one renderer tile requires, and copies a large selection whole at the lower resolution. Still open in REC-R02: a fidelity benchmark against a reference renderer, colour-management checks, and the tests that would show a rendering regression rather than a copying one.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: The three new unit tests in crates/ui-egui/src/zoom_snap.rs assert the scale equals canvas::render_scale for five zoom/screen-scale pairs, that a 2000 × 1500 point selection is fitted to one 4096-pixel tile, and that a degenerate zoom never yields a zero, NaN or infinite scale.
+- Local evidence: crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot now asserts the copied image is as wide and as tall as the same area on screen (within a pixel and a half), which is the assertion that fails against the old formula.
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes (51 tests).

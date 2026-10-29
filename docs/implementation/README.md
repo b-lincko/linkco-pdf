@@ -273,6 +273,22 @@ The README's table now names its tool group and one command per row, so it can b
 
 Local evidence: formatting passes; `check_disclosure.py --check` passes and its 22 unit tests (one gate on this checkout, 21 drift cases in a throwaway copy of the real five files) pass with the rest of the docs suite (51 tests); the ledger validates. **Verified at `ac23a38`** by all five workflows at ac23a38: CI (ubuntu and Windows build, clippy with warnings denied, the whole workspace test suite including the new converse catalogue-versus-registry test, wasm32 check, dependency licences and the docs step with the 22 new disclosure tests), packaging lint, the Windows preview handler, the Windows ARM64 job (native tests, unsigned MSI, install and run) and the FreeBSD build-and-test job, on the first attempt. Not claimed: generated or checked release notes, per-item readiness in the README, a machine-readable capability manifest, or Acrobat parity for any Ready tool. One stale artefact is recorded rather than fixed: the Home screenshot in `docs/images/` still shows the eight-card dashboard with hand-written blurbs and a v0.3.0 footer, so it predates the current card rendering as well as the ninth card, and a replacement needs a build and a display this checkout does not have.
 
+## B021 — a snapshot holds the pixels it shows
+
+Parent: **REC-R02** (bounded; a fidelity benchmark and colour management stay open). A report that the pixels of a snapshot are blurry turned out to be a one-line arithmetic bug with a large effect. `Edit ▸ Take a Snapshot` rendered the selection at `zoom × pixels per point`; the canvas draws the page at `zoom × 96/72 × pixels per point` (`canvas::render_scale`). Every snapshot therefore held **three quarters** of the pixels the same area showed on screen, so it was soft as soon as anything scaled it back up — the page on screen could be perfectly sharp while the copy of it was not.
+
+| Surface | Scale it rasterises at | Device-exact? |
+|---|---|---|
+| Canvas (page view) | `zoom × 96/72 × pixels per point` | yes |
+| Print preview | page-on-sheet × pane × pixels per point | yes |
+| Accessibility figure picture | `380 × pixels per point` over the figure's width | yes |
+| Export ▸ Image, command line, `page_render` | dpi / 72 | yes |
+| **Snapshot** | `zoom × pixels per point`, capped at 8 | **no — 3/4 of the screen** |
+
+Two smaller faults were in the same function. The 8-pixels-per-point ceiling made a snapshot taken deeply zoomed in coarser than the screen. And the area was bounded only by a 64-megapixel error, while the renderer clamps a tile to 4096 pixels a side — so a selection above that (about 34 × 34 inches at 120 dpi) would have been cropped to its top-left corner, or refused. The snapshot now uses the canvas's own device scale, comes down only as far as one renderer tile requires, and copies a large selection whole at the lower resolution; the size it reports is the renderer's own output size, so a lowered scale is reported honestly.
+
+Local evidence: formatting passes, the ledger validates and the docs suite passes (51 tests); the change is covered by three unit tests in `zoom_snap.rs` and by `marquee_zoom_and_snapshot`, which now measures the copy against the area's size on screen instead of only checking that something was copied. The Rust is CI-only: `rten` needs rustc 1.94 and this workspace has 1.88. Not claimed: any change to how the page renders on screen (it was already device-exact), colour management, or a regenerated README screenshot — `docs/images/capture.sh` captures at 2× without the resampling `--width` applied, but the committed images were made by an older build.
+
 ## Regeneration and verification
 
 ```sh

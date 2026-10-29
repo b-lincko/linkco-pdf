@@ -67,6 +67,14 @@ limit, or the OpenGL renderer. Also look for the `drawing it at … and scaling 
 means PdfCraft hit the surface-size safety fallback and rendered below the physical window size, so
 softness is expected.
 
+## Screenshots for the README
+
+`docs/images/capture.sh` regenerates both README screenshots with `examples/shot.rs`, at twice the
+size they are displayed at and without downscaling: a screenshot holds only the pixels that were
+captured, so an image that was scaled on the way out is soft however sharp the app was. Do not pass
+`--width` — it resamples. (A snapshot taken inside the app, `Edit ▸ Take a Snapshot`, is rendered at
+the same scale the page is drawn at, so it too holds one image pixel per screen pixel.)
+
 ## Renderer fallback
 
 PdfCraft draws with wgpu, and starts again with eframe's own OpenGL renderer (glow) when wgpu fails

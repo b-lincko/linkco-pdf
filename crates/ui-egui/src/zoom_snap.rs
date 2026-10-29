@@ -1,11 +1,24 @@
 //! View ▸ Zoom ▸ Marquee Zoom (drag a rectangle to fill the window with it; click to zoom in)
 //! and Edit ▸ Take a Snapshot (drag a rectangle to copy that area as an image).
+//!
+//! A snapshot is rendered at the same scale the page is drawn on screen
+//! ([`crate::canvas::render_scale`]: zoom × 96/72 × pixels per point), so the copy has one image
+//! pixel for every screen pixel and nothing is resampled. Rendering it any smaller — which it did:
+//! zoom × pixels per point, missing the 96/72 factor — makes a copy that looks soft however sharp
+//! the page is on screen.
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Stroke};
 use pdfcraft_render::{RenderConfig, RenderRequest, RequestKind, Tile};
 
 use crate::canvas::{DocView, PageXform};
 use crate::{PdfCraftApp, QuickTool};
+
+/// The renderer draws one tile of at most this many device pixels a side (it clamps a larger
+/// request), so a snapshot of a bigger area is copied at a lower scale rather than cropped.
+const TILE_SIDE: f32 = 4096.0;
+/// A snapshot is never smaller than this many device pixels per point (36 dpi), so one taken
+/// while zoomed right out is still an image of the page rather than a few dozen pixels.
+const MIN_SCALE: f32 = 0.5;
 
 /// A finished gesture: (page, the rectangle on screen, the same in page view points
 /// [x0, y0, x1, y1]); a plain click has an empty rectangle.
@@ -110,22 +123,23 @@ impl PdfCraftApp {
         Ok(())
     }
 
-    /// Render `view_rect` (page view points) of `page` at the current zoom and copy it to the
-    /// clipboard (and keep it in `last_snapshot`).
+    /// Render `view_rect` (page view points) of `page` at the scale it is drawn on screen and copy
+    /// it to the clipboard (and keep it in `last_snapshot`).
     pub fn snapshot(&mut self, index: usize, page: usize, view_rect: [f32; 4]) -> Result<(u32, u32), String> {
         let view = &self.views[index];
         let doc = self.session.get(view.id).ok_or("no document")?;
         let ppp = self.ctx.as_ref().map_or(2.0, |c| c.pixels_per_point());
-        let scale = (view.zoom * ppp).clamp(0.5, 8.0);
+        let (w_pt, h_pt) = (view_rect[2] - view_rect[0], view_rect[3] - view_rect[1]);
+        if !(w_pt.is_finite() && h_pt.is_finite() && view_rect.iter().all(|v| v.is_finite())) || w_pt < 1.0 || h_pt < 1.0 {
+            return Err("the selected area is too small to copy".into());
+        }
+        let scale = snapshot_scale(view.zoom, ppp, w_pt, h_pt);
         let tile = Tile {
             x: (view_rect[0] * scale).floor().max(0.0) as u32,
             y: (view_rect[1] * scale).floor().max(0.0) as u32,
-            w: ((view_rect[2] - view_rect[0]) * scale).ceil().max(1.0) as u32,
-            h: ((view_rect[3] - view_rect[1]) * scale).ceil().max(1.0) as u32,
+            w: ((w_pt * scale).ceil().max(1.0) as u32).min(TILE_SIDE as u32),
+            h: ((h_pt * scale).ceil().max(1.0) as u32).min(TILE_SIDE as u32),
         };
-        if (tile.w as u64) * (tile.h as u64) > 64_000_000 {
-            return Err("the area is too large at this zoom".into());
-        }
         let config = RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..RenderConfig::default() };
         let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
         let out = r.render(RenderRequest { page, kind: RequestKind::Pixels, tile: Some(tile), scale, tag: 0 });
@@ -141,6 +155,25 @@ impl PdfCraftApp {
         self.last_snapshot = Some((w, h, out.rgba));
         Ok((w, h))
     }
+}
+
+/// The scale a snapshot of a `w`×`h` point area renders at, in device pixels per point.
+///
+/// Exactly the scale the page is drawn on screen, so that the copy is one image pixel per screen
+/// pixel: [`crate::canvas::render_scale`] is `zoom * PT * pixels_per_point`, and a copy rendered at
+/// `zoom * pixels_per_point` (what this used to do) held 3/4 of the pixels of the same area on
+/// screen and was stretched back up wherever it was pasted — the soft snapshot.
+///
+/// It is lowered only for an area that would not fit one renderer tile ([`TILE_SIDE`] a side),
+/// so a very large selection is copied whole at a lower resolution rather than cropped.
+fn snapshot_scale(zoom: f32, ppp: f32, w: f32, h: f32) -> f32 {
+    let screen = zoom * crate::canvas::PT * ppp;
+    if !screen.is_finite() || screen <= 0.0 {
+        return MIN_SCALE;
+    }
+    // A non-finite or empty side cannot happen (the caller checks), but never divide by it.
+    let longest = if w.is_finite() && h.is_finite() { w.max(h).max(1.0) } else { return screen.max(MIN_SCALE) };
+    screen.max(MIN_SCALE).min(TILE_SIDE / longest)
 }
 
 /// The normalised bounds [u0, v0, u1, v1] of the pixels that aren't (near) white, if any.
@@ -165,6 +198,37 @@ pub(crate) fn ink_bounds(w: usize, h: usize, rgba: &[u8]) -> Option<[f32; 4]> {
 
 #[cfg(test)]
 mod tests {
+    /// One image pixel per screen pixel: the copy must not be resampled, which is what made
+    /// snapshots look soft while the page on screen was sharp.
+    #[test]
+    fn a_snapshot_is_rendered_at_the_scale_the_page_is_drawn_at() {
+        for (zoom, ppp) in [(1.0, 1.0), (1.0, 2.0), (0.5, 1.0), (2.0, 1.5), (4.0, 3.0)] {
+            let want = zoom * crate::canvas::PT * ppp;
+            assert!((super::snapshot_scale(zoom, ppp, 120.0, 80.0) - want).abs() < 1e-6, "zoom {zoom}, {ppp} px/point: want {want}");
+        }
+        // The old formula (zoom × pixels per point) was 96/72 short: a third fewer pixels.
+        assert!((super::snapshot_scale(1.0, 1.0, 120.0, 80.0) / 1.0 - 4.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_large_area_is_copied_at_a_lower_scale_rather_than_cropped() {
+        // 2000 × 1500 points at 8 device pixels per point would be 16000 × 12000: the renderer
+        // draws at most 4096 pixels a side, so the scale comes down until both sides fit.
+        let scale = super::snapshot_scale(6.0, 1.0, 2000.0, 1500.0);
+        assert!((2000.0 * scale - super::TILE_SIDE).abs() < 1.0, "{}", 2000.0 * scale);
+        assert!(1500.0 * scale <= super::TILE_SIDE + 1.0);
+    }
+
+    #[test]
+    fn a_snapshot_never_goes_below_half_a_pixel_per_point() {
+        assert_eq!(super::snapshot_scale(0.08, 1.0, 600.0, 800.0), super::MIN_SCALE);
+        // A degenerate zoom cannot produce a zero, NaN or infinite scale.
+        for zoom in [0.0, -3.0, f32::NAN, f32::INFINITY] {
+            let scale = super::snapshot_scale(zoom, 2.0, 600.0, 800.0);
+            assert!(scale.is_finite() && scale >= super::MIN_SCALE, "zoom {zoom}: {scale}");
+        }
+    }
+
     #[test]
     fn ink_bounds_finds_the_marked_area() {
         let (w, h) = (10, 20);

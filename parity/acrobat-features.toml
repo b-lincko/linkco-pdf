@@ -1538,8 +1538,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["edit.snapshot"]
 tools = ["page_render"]
-evidence = ["crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot"]
-notes = "copies the area at the current zoom to the clipboard as an image"
+evidence = ["crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot", "crates/ui-egui/src/zoom_snap.rs::tests::a_snapshot_is_rendered_at_the_scale_the_page_is_drawn_at", "crates/ui-egui/src/zoom_snap.rs::tests::a_large_area_is_copied_at_a_lower_scale_rather_than_cropped", "crates/ui-egui/src/zoom_snap.rs::tests::a_snapshot_never_goes_below_half_a_pixel_per_point"]
+notes = "copies the area at the scale the page is drawn on screen, so the image holds one pixel per screen pixel and is never resampled (it used to hold three quarters, which made every copy soft); a selection larger than the renderer's 4096-pixel tile is copied whole at a lower scale rather than cropped"
 
 [[feature]]
 id = "view.rulers"

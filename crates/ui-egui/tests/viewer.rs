@@ -359,6 +359,15 @@ fn marquee_zoom_and_snapshot() {
     let (w, hgt, px) = h.state().last_snapshot.clone().expect("a snapshot");
     assert!(w > 50 && hgt > 10, "{w} × {hgt}");
     assert!(px.as_chunks::<4>().0.iter().any(|p| p[0] < 100), "the text is in it");
+    // The copy holds exactly the pixels the same area shows on screen: a copy rendered a
+    // little smaller (zoom × pixels per point instead of zoom × 96/72 × pixels per point) was
+    // stretched wherever it was pasted, which is what made snapshots look soft.
+    let ppp = h.ctx.pixels_per_point();
+    let (want_w, want_h) = (r.width() * 165.0 / 200.0 * ppp, r.height() * 35.0 / 300.0 * ppp);
+    assert!(
+        (w as f32 - want_w).abs() <= 1.5 && (hgt as f32 - want_h).abs() <= 1.5,
+        "snapshot is {w} × {hgt} pixels for an area of {want_w} × {want_h} screen pixels"
+    );
     // Marquee zoom on a small area zooms in, centred on it.
     let before = h.state().views[i].zoom;
     h.state_mut().set_option("quick", "marquee-zoom").unwrap();
