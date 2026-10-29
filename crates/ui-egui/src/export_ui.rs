@@ -367,7 +367,7 @@ mod tests {
     fn a_stop_between_pages_keeps_the_page_in_hand_and_starts_no_other() {
         let stop = crate::jobs::Cancel::new();
         let mut written = Vec::new();
-        let mut sink_stop = stop.clone();
+        let sink_stop = stop.clone();
         let status: ExportStatus = std::sync::Arc::new(std::sync::Mutex::new(Some((0, 2, None))));
         let msg = run(
             source(),

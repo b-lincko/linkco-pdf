@@ -219,7 +219,7 @@ pub fn run_batch<T, E>(
     mut report: impl FnMut(usize),
     mut each: impl FnMut(T) -> Result<(), E>,
 ) -> BatchOutcome<E> {
-    let mut outcome = BatchOutcome::default();
+    let mut outcome = BatchOutcome { done: 0, failed: Vec::new(), cancelled: false };
     for item in items {
         if cancel.is_cancelled() {
             outcome.cancelled = true;
