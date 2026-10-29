@@ -2252,3 +2252,8 @@ key	Space	Пробіл
 	“{name}” was moved or renamed to “{found}”.	«{name}» переміщено або перейменовано на «{found}».
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» більше немає в «{path}»: файл переміщено до іншої папки або видалено.
 	Tried {n} times. Zoom or rotate the page to try again.	Спроб: {n}. Збільште або оберніть сторінку, щоб повторити.
+	On disk: {n} pages, written {when}.	На диску: {n} сторінок, записано {when}.
+	On disk: written {when}.	На диску: записано {when}.
+	The version on disk is too large to compare here.	Версія на диску завелика для порівняння тут.
+	“{name}” could not be opened to compare it.	Не вдалося відкрити «{name}» для порівняння.
+	{name} (on disk)	{name} (на диску)

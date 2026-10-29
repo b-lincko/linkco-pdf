@@ -2155,3 +2155,8 @@ key	Space	Пробел
 	“{name}” was moved or renamed to “{found}”.	«{name}» перемещён или переименован в «{found}».
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» больше не находится в «{path}»: файл перемещён в другую папку или удалён.
 	Tried {n} times. Zoom or rotate the page to try again.	Попыток: {n}. Измените масштаб или поверните страницу, чтобы повторить.
+	On disk: {n} pages, written {when}.	На диске: {n} страниц, записано {when}.
+	On disk: written {when}.	На диске: записано {when}.
+	The version on disk is too large to compare here.	Версия на диске слишком велика для сравнения здесь.
+	“{name}” could not be opened to compare it.	Не удалось открыть «{name}» для сравнения.
+	{name} (on disk)	{name} (на диске)

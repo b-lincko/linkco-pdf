@@ -41,7 +41,7 @@ mod combine_ui;
 // The web build has no path-based files to compare: the shared types stay compiled (a dropped
 // file still has a name) but the desktop-only checks are allowed to go unused there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-mod conflict;
+pub mod conflict;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod disk_watch;
 pub mod docking;
@@ -725,6 +725,9 @@ pub struct SaveConflict {
     pub dest: String,
     /// The document's title, for the prompt.
     pub name: String,
+    /// What the file holds now, so the prompt can say what a save would replace and offer to
+    /// show the difference. `None` when the file could not be described at all.
+    pub disk: Option<conflict::DiskVersion>,
 }
 
 /// What the operating system says about light and dark, as "draw dark". `None` means nobody
@@ -1186,7 +1189,8 @@ impl PdfCraftApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
     }
 
-    /// Act on the save-conflict prompt: save a copy, overwrite, or write nothing.
+    /// Act on the save-conflict prompt: compare with the file, save a copy, overwrite, or write
+    /// nothing.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn resolve_conflict(&mut self, choice: dialogs::ConflictChoice) {
         let Some(conflict) = self.save_conflict.clone() else { return };
@@ -1199,6 +1203,8 @@ impl PdfCraftApp {
                 let Some(index) = self.views.iter().position(|v| v.id == conflict.id) else { return };
                 self.save_view(index, editing::SaveTarget::As);
             }
+            // Look at the other version first: the save stays deferred and nothing is written.
+            dialogs::ConflictChoice::Compare => self.compare_with_disk(&conflict),
         }
     }
 

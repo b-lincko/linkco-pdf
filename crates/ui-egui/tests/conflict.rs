@@ -125,6 +125,43 @@ fn cancelling_keeps_the_other_version_and_the_next_save_asks_again() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The prompt says what the other version holds, and the reader can look at it before deciding:
+/// comparing opens that version beside the document, shows the differences, and writes nothing.
+#[test]
+fn the_other_version_can_be_compared_before_anything_is_written() {
+    let dir = store("compare");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    open_and_edit(&mut h, &path);
+    // Another program writes a three-page version over the file.
+    std::fs::write(&path, fixture(3)).unwrap();
+    let other = std::fs::read(&path).unwrap();
+
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace), "the save is held back");
+    h.run_steps(2);
+    let conflict = h.state().save_conflict.clone().expect("the prompt is up");
+    assert_eq!(conflict.disk.and_then(|d| d.pages()), Some(3), "the prompt knows the other version's pages");
+    assert_eq!(conflict.disk.map(|d| d.bytes()), Some(other.len() as u64));
+    // The prompt states it in the reader's language.
+    h.get_by_label_contains("On disk:");
+
+    h.get_all_by_label("Compare").last().expect("the Compare button").click();
+    h.run_steps(4);
+    let s = h.state();
+    assert!(s.save_conflict.is_none(), "the prompt closed once it was answered");
+    assert_eq!(std::fs::read(&path).unwrap(), other, "comparing wrote nothing");
+    assert_eq!(s.views.len(), 2, "the other version opened beside this one");
+    let copy = s.views[1].id;
+    let original = s.views[0].id;
+    let state = s.compare.as_ref().expect("the differences are shown");
+    assert_eq!((state.old, state.new), (copy, original), "the file on disk is the older version");
+    assert_eq!(s.right, Some(pdfcraft_ui_egui::RightPanel::Compare));
+    assert!(s.session.get(copy).is_some_and(|d| d.path.is_none()), "the copy has no file of its own to save over");
+    assert!(s.session.get(original).is_some_and(|d| d.dirty), "this document is still unsaved");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// An open document's file can be deleted behind the app's back. The poll says so once, without
 /// writing, moving or reopening anything, and the document stays usable.
 #[test]

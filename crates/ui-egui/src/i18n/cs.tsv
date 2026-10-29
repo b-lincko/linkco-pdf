@@ -208,3 +208,8 @@ key	Space	Mezerník
 	“{name}” was moved or renamed to “{found}”.	„{name}“ byl přesunut nebo přejmenován na „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ už není v „{path}“; byl přesunut do jiné složky nebo smazán.
 	Tried {n} times. Zoom or rotate the page to try again.	Pokusů: {n}. Změňte přiblížení nebo otočte stránku a zkuste to znovu.
+	On disk: {n} pages, written {when}.	Na disku: {n} stran, zapsáno {when}.
+	On disk: written {when}.	Na disku: zapsáno {when}.
+	The version on disk is too large to compare here.	Verze na disku je pro porovnání zde příliš velká.
+	“{name}” could not be opened to compare it.	Soubor „{name}“ se nepodařilo otevřít k porovnání.
+	{name} (on disk)	{name} (na disku)

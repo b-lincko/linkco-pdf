@@ -2231,3 +2231,8 @@ key	Space	Leertaste
 	“{name}” was moved or renamed to “{found}”.	„{name}“ wurde verschoben oder umbenannt in „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ befindet sich nicht mehr unter „{path}“; die Datei wurde in einen anderen Ordner verschoben oder gelöscht.
 	Tried {n} times. Zoom or rotate the page to try again.	{n} Versuche. Zoomen oder drehen Sie die Seite, um es erneut zu versuchen.
+	On disk: {n} pages, written {when}.	Auf dem Datenträger: {n} Seiten, geschrieben {when}.
+	On disk: written {when}.	Auf dem Datenträger: geschrieben {when}.
+	The version on disk is too large to compare here.	Die Fassung auf dem Datenträger ist zu groß, um sie hier zu vergleichen.
+	“{name}” could not be opened to compare it.	„{name}“ konnte zum Vergleich nicht geöffnet werden.
+	{name} (on disk)	{name} (auf dem Datenträger)

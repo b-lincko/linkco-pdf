@@ -471,6 +471,56 @@ impl PdfCraftApp {
         self.overwrite_agreed = false;
     }
 
+    /// Show what the file on disk holds beside the open document, without writing anything.
+    ///
+    /// The version on disk is opened as a separate, pathless document (`work (on disk).pdf`) and
+    /// this document is compared against it as the newer one, so the existing Compare panel lists
+    /// and shades the differences. Being pathless, the copy cannot be saved over the file it came
+    /// from. The deferred save is dropped: the document stays unsaved, and saving again asks the
+    /// same question, by which time the reader knows what it is about.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn compare_with_disk(&mut self, conflict: &crate::SaveConflict) {
+        let path = std::path::Path::new(&conflict.dest);
+        let Some(facts) = crate::conflict::DiskVersion::of_path(path) else {
+            self.notify_fmt("“{name}” could not be opened to compare it.", &[("name", &conflict.name)]);
+            return;
+        };
+        // Two reasons not to open it: too big to load here, or not a document this app can read
+        // (encrypted, damaged). Either way the reader is told, and the prompt stays so the other
+        // choices are still there.
+        if facts.too_large_to_compare() {
+            self.notify(tl!("The version on disk is too large to compare here.").to_string());
+            return;
+        }
+        let Some(bytes) = facts.pages().and_then(|_| facts.read(path)) else {
+            self.notify_fmt("“{name}” could not be opened to compare it.", &[("name", &conflict.name)]);
+            return;
+        };
+        let before = self.views.len();
+        let name = on_disk_name(&conflict.name);
+        if let Err(e) = self.open_bytes(&name, None, bytes) {
+            self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &e)]);
+            return;
+        }
+        // Opening a document whose pages cannot be read asks for a password instead of adding a
+        // tab; that question belongs to the other program's file, not to this decision.
+        if self.views.len() <= before {
+            if self.password_prompt.is_some() {
+                self.submit_password(None);
+            }
+            self.notify_fmt("“{name}” could not be opened to compare it.", &[("name", &conflict.name)]);
+            return;
+        }
+        let copy = self.views[before].id;
+        self.compare_old = Some(copy);
+        // The document whose save was deferred is the newer version being compared.
+        if let Some(index) = self.views.iter().position(|v| v.id == conflict.id) {
+            self.active = Some(index);
+        }
+        self.dismiss_conflict();
+        self.run_compare();
+    }
+
     /// Write document `id` to `dest` and make it the document's file. Returns `true` if written.
     #[cfg(not(target_arch = "wasm32"))]
     fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget) -> bool {
@@ -509,7 +559,10 @@ impl PdfCraftApp {
             && let Some(then) = self.disk_watch.get(&id).map(|w| w.stamp())
             && crate::conflict::changed(then, crate::conflict::Stamp::of_path(std::path::Path::new(dest)))
         {
-            self.save_conflict = Some(crate::SaveConflict { id, dest: dest.to_string(), name: name.clone() });
+            // Describe what would be lost before asking: the other version's pages and when it
+            // was written, both read from the file itself and bounded (conflict::READ_LIMIT).
+            let disk = crate::conflict::DiskVersion::of_path(std::path::Path::new(dest));
+            self.save_conflict = Some(crate::SaveConflict { id, dest: dest.to_string(), name: name.clone(), disk });
             return false;
         }
         self.overwrite_agreed = false;
@@ -846,11 +899,33 @@ fn bookmark_at<'a>(items: &'a [pdfcraft_render::OutlineItem], path: &[usize]) ->
     if rest.is_empty() { Some(item) } else { bookmark_at(&item.children, rest) }
 }
 
+/// The title of the other program's version when it is opened beside the document: same name,
+/// before the extension, so the tab says which file it is and which one is this document.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn on_disk_name(name: &str) -> String {
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => name.split_at(i),
+        _ => (name, ""),
+    };
+    format!("{}{ext}", crate::i18n::fmt(tl!("{name} (on disk)"), &[("name", stem)]))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{write_atomically, write_atomically_syncing, write_atomically_using, write_atomically_with};
+    use super::{on_disk_name, write_atomically, write_atomically_syncing, write_atomically_using, write_atomically_with};
     use pdfcraft_platform::staging::{STAGING_ATTEMPTS, staging_suffixes};
     use std::path::{Path, PathBuf};
+
+    /// The copy opened beside the document says which file it is, and keeps the extension so the
+    /// tab and the open dialog still read it as a PDF.
+    #[test]
+    fn the_other_version_opens_under_a_name_that_names_it() {
+        assert_eq!(on_disk_name("work.pdf"), "work (on disk).pdf");
+        assert_eq!(on_disk_name("Report 2026.PDF"), "Report 2026 (on disk).PDF");
+        assert_eq!(on_disk_name("notes"), "notes (on disk)");
+        // A name that is only an extension is not split into nothing.
+        assert_eq!(on_disk_name(".pdf"), ".pdf (on disk)");
+    }
 
     /// A fresh, empty folder for one staging test.
     fn staging_dir(test: &str) -> PathBuf {

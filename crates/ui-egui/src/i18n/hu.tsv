@@ -2229,3 +2229,8 @@ key	Space	Szóköz
 	“{name}” was moved or renamed to “{found}”.	A(z) „{name}“ át lett helyezve vagy átnevezve erre: „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	A(z) „{name}“ már nincs itt: „{path}“; másik mappába helyezték vagy törölték.
 	Tried {n} times. Zoom or rotate the page to try again.	Próbálkozások: {n}. Nagyítsa vagy forgassa el az oldalt az újrapróbáláshoz.
+	On disk: {n} pages, written {when}.	A lemezen: {n} oldal, írva: {when}.
+	On disk: written {when}.	A lemezen: írva: {when}.
+	The version on disk is too large to compare here.	A lemezen lévő változat túl nagy az itteni összehasonlításhoz.
+	“{name}” could not be opened to compare it.	A(z) „{name}” nem nyitható meg az összehasonlításhoz.
+	{name} (on disk)	{name} (a lemezen)

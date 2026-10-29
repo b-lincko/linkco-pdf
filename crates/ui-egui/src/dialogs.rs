@@ -1415,6 +1415,20 @@ fn conflict_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
             }
         });
         ui.add_space(6.0);
+        // What the other version holds, so the choice is made knowing what it costs.
+        if let Some(disk) = conflict.disk {
+            let line = match (disk.pages(), disk.modified()) {
+                (Some(pages), Some(when)) => Some(crate::i18n::fmt(
+                    tl!("On disk: {n} pages, written {when}."),
+                    &[("n", &pages.to_string()), ("when", &crate::combine_ui::ago(when))],
+                )),
+                (None, Some(when)) => Some(crate::i18n::fmt(tl!("On disk: written {when}."), &[("when", &crate::combine_ui::ago(when))])),
+                _ => None,
+            };
+            if let Some(line) = line {
+                ui.label(egui::RichText::new(line).color(t.text_muted));
+            }
+        }
         ui.label(
             egui::RichText::new(tl!("Saving over it would replace the version another program wrote. Save a copy if you need both."))
                 .color(t.text_muted),
@@ -1427,6 +1441,9 @@ fn conflict_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
             }
             if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
                 choice = Some(ConflictChoice::Cancel);
+            }
+            if widgets::pill_button(ui, tl!("Compare"), false).clicked() {
+                choice = Some(ConflictChoice::Compare);
             }
             if widgets::pill_button(ui, tl!("Save As…"), true).clicked() {
                 choice = Some(ConflictChoice::SaveAs);
@@ -1446,6 +1463,8 @@ fn conflict_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
 pub(crate) enum ConflictChoice {
     /// Keep the file on disk and save this document somewhere else.
     SaveAs,
+    /// Open the version on disk beside this one and show the differences, writing nothing.
+    Compare,
     /// Replace the other program's version.
     Overwrite,
     /// Write nothing and keep the deferred save out of the way.

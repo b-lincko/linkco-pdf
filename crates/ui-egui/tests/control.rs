@@ -688,6 +688,50 @@ fn state_and_view_options() {
     assert!(call(&mut h, &c, "ui.set", json!({ "key": "panel", "value": "nonsense" })).is_err());
 }
 
+/// An agent can see that a file changed on disk and that a save was held back, with what the
+/// other version holds — the same facts the prompt shows a person.
+#[test]
+fn a_file_that_changed_on_disk_is_reported_with_the_held_save() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-control-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+
+    let slot: Arc<Mutex<Option<ControlClient>>> = Arc::default();
+    let s = slot.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        *s.lock().unwrap() = Some(app.attach_control(&cc.egui_ctx));
+        app
+    });
+    h.run_steps(2);
+    let c = slot.lock().unwrap().take().unwrap();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    assert!(h.state_mut().check_disk_now().is_empty(), "an untouched file is quiet");
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"][0]["disk"], Value::Null);
+
+    // Another program replaces the file: the channel says so, and the file is left alone.
+    std::fs::write(&path, fixture(3)).unwrap();
+    assert_eq!(h.state_mut().check_disk_now().len(), 1);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"][0]["disk"]["state"], "changed");
+    assert_eq!(std::fs::read(&path).unwrap(), fixture(3));
+
+    // A save is held back, and the channel reports what the other version holds.
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::DeletePages { pages: vec![0] }));
+    assert!(!h.state_mut().save_active(pdfcraft_ui_egui::SaveTarget::InPlace), "the save is held back");
+    h.run_steps(2);
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let conflict = &state["save_conflict"];
+    assert_eq!(conflict["name"], "work.pdf");
+    assert_eq!(conflict["disk_pages"], 3, "the other version's pages, read from the file: {state}");
+    assert_eq!(conflict["disk_bytes"], fixture(3).len() as u64);
+    assert_eq!(std::fs::read(&path).unwrap(), fixture(3), "nothing was written");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn japanese_controls_and_search_keep_command_ids() {
     let (mut h, c) = harness();

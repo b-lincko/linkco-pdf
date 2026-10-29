@@ -2231,3 +2231,8 @@ key	Space	スペース
 	“{name}” was moved or renamed to “{found}”.	「{name}」は「{found}」に移動または名前変更されました。
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	「{name}」は「{path}」にありません。別のフォルダーに移動されたか、削除されました。
 	Tried {n} times. Zoom or rotate the page to try again.	{n} 回試しました。ページを拡大または回転して、もう一度お試しください。
+	On disk: {n} pages, written {when}.	ディスク上: {n} ページ、{when} に書き込み。
+	On disk: written {when}.	ディスク上: {when} に書き込み。
+	The version on disk is too large to compare here.	ディスク上の版は大きすぎるため、ここでは比較できません。
+	“{name}” could not be opened to compare it.	「{name}」を比較のために開けませんでした。
+	{name} (on disk)	{name} (ディスク上)

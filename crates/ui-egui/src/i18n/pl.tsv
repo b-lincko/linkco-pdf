@@ -2226,3 +2226,8 @@ key	Space	Spacja
 	“{name}” was moved or renamed to “{found}”.	Plik „{name}“ został przeniesiony lub zmieniono jego nazwę na „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	Pliku „{name}“ nie ma już w „{path}“; został przeniesiony do innego folderu lub usunięty.
 	Tried {n} times. Zoom or rotate the page to try again.	Próby: {n}. Powiększ lub obróć stronę, aby spróbować ponownie.
+	On disk: {n} pages, written {when}.	Na dysku: {n} stron, zapisano {when}.
+	On disk: written {when}.	Na dysku: zapisano {when}.
+	The version on disk is too large to compare here.	Wersja na dysku jest zbyt duża, aby porównać ją tutaj.
+	“{name}” could not be opened to compare it.	Nie można otworzyć „{name}” do porównania.
+	{name} (on disk)	{name} (na dysku)

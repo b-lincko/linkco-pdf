@@ -2232,3 +2232,8 @@ key	Space	Espaço
 	“{name}” was moved or renamed to “{found}”.	“{name}” foi movido ou renomeado para “{found}”.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}” não está mais em “{path}”; foi movido para outra pasta ou excluído.
 	Tried {n} times. Zoom or rotate the page to try again.	Tentado {n} vezes. Amplie ou gire a página para tentar novamente.
+	On disk: {n} pages, written {when}.	No disco: {n} páginas, gravado {when}.
+	On disk: written {when}.	No disco: gravado {when}.
+	The version on disk is too large to compare here.	A versão no disco é grande demais para ser comparada aqui.
+	“{name}” could not be opened to compare it.	Não foi possível abrir “{name}” para comparar.
+	{name} (on disk)	{name} (no disco)

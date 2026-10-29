@@ -309,6 +309,24 @@ The state machine is tested directly, not through a synthetic file: hayro substi
 
 Local evidence: formatting passes, the ledger validates, the docs suite passes (51 tests) and the new string is translated in all sixteen interface languages. The Rust is CI-only: `rten` needs rustc 1.94 and this workspace has 1.88. Not claimed: a job centre that lists and cancels work, rollback beyond the atomic save, a diagnostics bundle, or a guarantee that a transient failure is always recovered — the retries are bounded on purpose, and the page then says so.
 
+## B023 — see what the other version changed before replacing it
+
+Parent: **REC-R05** (bounded; the command line still writes without a check). B010 already held back an in-place save when the file's bytes differed from what the app loaded, offering Save As, Cancel or Overwrite, and B012 already noticed a rewritten, renamed or deleted file while the document sat idle. The one choice the recommendation names that was missing is the comparison: the prompt said *that* a file changed, never *what* changed, so a reader chose between losing their work and losing the other program's work without seeing either.
+
+What the prompt adds:
+
+| | |
+|---|---|
+| The facts | "On disk: 3 pages, written 5 min ago." — page count and modification time, read from the file when the conflict is raised |
+| Compare | opens that version beside the document and runs the app's own text and visual compare, shading the differences on this document's pages |
+| Nothing written | comparing drops the deferred save; the document stays unsaved and saving again asks the same question |
+
+Bound on purpose: both the facts and the compare read the file at most up to `conflict::READ_LIMIT` (32 MiB), through a capped read that stops one byte past the limit and through the parser's catch-unwind, so a huge or hostile version is refused with a sentence instead of stalling the window. The copy is opened without a path, so it cannot be saved over the file it came from.
+
+For an agent, the same state is on the control channel: each document reports its `disk` state (`changed`, `renamed` with the new path, or `gone`) and a top-level `save_conflict` reports the held save with the other version's pages and bytes.
+
+Local evidence: formatting passes, the ledger and the docs suite pass (51 tests), all 247 asset hashes match and the five new strings are in all sixteen catalogs. The Rust is CI-only: `rten` needs rustc 1.94 and this workspace has 1.88. Not claimed: the CLI's `edit --out` still writes with `std::fs::write` and checks nothing, the web build has no local path to watch, the rename notice needs Unix metadata, and this is not a verified Acrobat parity claim — the table marks the feature partial for that reason.
+
 ## Regeneration and verification
 
 ```sh

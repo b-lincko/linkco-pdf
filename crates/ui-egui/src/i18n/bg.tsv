@@ -2193,3 +2193,8 @@ key	Space	Интервал
 	“{name}” was moved or renamed to “{found}”.	„{name}“ бе преместен или преименуван на „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ вече не е в „{path}“; преместен е в друга папка или е изтрит.
 	Tried {n} times. Zoom or rotate the page to try again.	Опитано {n} пъти. Увеличете или завъртете страницата, за да опитате отново.
+	On disk: {n} pages, written {when}.	На диска: {n} страници, записан {when}.
+	On disk: written {when}.	На диска: записан {when}.
+	The version on disk is too large to compare here.	Версията на диска е твърде голяма, за да се сравни тук.
+	“{name}” could not be opened to compare it.	„{name}“ не можа да бъде отворен за сравнение.
+	{name} (on disk)	{name} (на диска)

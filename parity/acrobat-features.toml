@@ -278,6 +278,18 @@ evidence = ["crates/ui-egui/tests/editing.rs::save_writes_an_incremental_update_
 notes = "The atomic write stages to a new, randomly named file created with create_new, so a file or link planted at the staging path is never written through (desktop app, automation and CLI). The shared staging helper rejects non-filename paths before truncation or filesystem access, and rejects alternate streams on Windows. Unix staging requests owner-only 0600 at creation, subject to umask, and retains it after replacement rather than copying broader permissions/ACLs; Windows ACL behavior is unchanged. Deterministic operation faults cover partial-write and rename errors in both callers; these are not physical disk-full or process-kill tests. Test children are killed at partial-write, pre-rename and post-rename barriers, with target-byte and safe-retry checks; this is not application restart recovery or power-loss testing. This is not a full parent-directory race sandbox or a power-loss durability guarantee."
 
 [[feature]]
+id = "core.save-conflict"
+title = "Notice a file changed on disk and decide before overwriting it"
+area = "A"
+tier = "P0"
+milestone = "M1"
+status = "partial"
+commands = ["file.save", "file.save_as"]
+tools = []
+evidence = ["crates/ui-egui/src/conflict.rs::a_stamp_taken_from_memory_matches_the_file_it_came_from", "crates/ui-egui/src/conflict.rs::different_bytes_of_the_same_length_are_a_change", "crates/ui-egui/src/conflict.rs::the_version_on_disk_is_described_by_its_pages_and_size", "crates/ui-egui/src/conflict.rs::a_version_that_cannot_be_parsed_is_still_described_by_what_the_filesystem_knows", "crates/ui-egui/src/conflict.rs::reading_a_file_stops_at_the_cap_rather_than_loading_it", "crates/ui-egui/src/disk_watch.rs::another_program_writing_the_file_is_reported_as_changed", "crates/ui-egui/src/disk_watch.rs::a_renamed_file_is_found_by_its_identity", "crates/ui-egui/tests/conflict.rs::an_external_change_blocks_the_save_until_the_user_overwrites", "crates/ui-egui/tests/conflict.rs::cancelling_keeps_the_other_version_and_the_next_save_asks_again", "crates/ui-egui/tests/conflict.rs::an_idle_document_reports_that_its_file_changed_on_disk", "crates/ui-egui/tests/conflict.rs::the_other_version_can_be_compared_before_anything_is_written", "crates/ui-egui/src/editing.rs::the_other_version_opens_under_a_name_that_names_it", "crates/ui-egui/tests/control.rs::a_file_that_changed_on_disk_is_reported_with_the_held_save"]
+notes = "An in-place save is held back when the file's bytes differ from what the app loaded or last wrote (a 64-bit content stamp over the whole file, not a timestamp), and the prompt offers Compare, Save As, Overwrite or Cancel; the other version's page count and modification time are read from the file, and Compare opens it as a pathless document and runs the existing compare with it as the older version. Open documents are also polled every 3 s (contents confirmed every 60 s) and a rewritten, renamed or deleted file is reported once per new situation. Reading either the facts or the bytes for a comparison is capped at 32 MiB. Partial because the command line's `edit --out` writes with std::fs::write and checks nothing, the web build has no local path, the rename notice needs Unix metadata, and the prompt's wording and options are not verified against Acrobat's own dialog"
+
+[[feature]]
 id = "core.save-as-full-rewrite"
 title = "Save as a new file with a full rewrite and garbage collection"
 area = "A"
@@ -794,7 +806,7 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::missing_page_and_garbage_input_fail_gracefully", "crates/render/src/raster.rs::scale_is_clamped_for_huge_pages", "crates/render/src/raster.rs::watchdog_skips_a_stuck_page_and_keeps_rendering", "crates/ui-egui/src/canvas.rs::tests::a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change", "crates/ui-egui/src/canvas.rs::tests::a_refused_page_is_retried_twice_then_waits_for_a_new_demand", "crates/automation/tests/automation.rs::a_failed_export_leaves_the_document_open_and_usable"]
+evidence = ["crates/render/src/raster.rs::missing_page_and_garbage_input_fail_gracefully", "crates/render/src/raster.rs::scale_is_clamped_for_huge_pages", "crates/render/src/raster.rs::watchdog_skips_a_stuck_page_and_keeps_rendering", "crates/ui-egui/src/canvas.rs::a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change", "crates/ui-egui/src/canvas.rs::a_refused_page_is_retried_twice_then_waits_for_a_new_demand", "crates/automation/tests/automation.rs::a_failed_export_leaves_the_document_open_and_usable"]
 notes = "a page the renderer refuses says why on the page and is retried twice (after 1 s and 4 s) before it waits for the view to change; an edit, a rotation or a zoom tries again, and the page reports how often it was tried; only that page is reported, and neighbours, thumbnails, print previews and other documents keep drawing. A failed export reports why and leaves the document open and unchanged; a page that comes back through a retry shows itself again instead of keeping its card"
 
 [[feature]]
@@ -1538,7 +1550,7 @@ milestone = "M3"
 status = "shipped"
 commands = ["edit.snapshot"]
 tools = ["page_render"]
-evidence = ["crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot", "crates/ui-egui/src/zoom_snap.rs::tests::a_snapshot_is_rendered_at_the_scale_the_page_is_drawn_at", "crates/ui-egui/src/zoom_snap.rs::tests::a_large_area_is_copied_at_a_lower_scale_rather_than_cropped", "crates/ui-egui/src/zoom_snap.rs::tests::a_snapshot_never_goes_below_half_a_pixel_per_point"]
+evidence = ["crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot", "crates/ui-egui/src/zoom_snap.rs::a_snapshot_is_rendered_at_the_scale_the_page_is_drawn_at", "crates/ui-egui/src/zoom_snap.rs::a_large_area_is_copied_at_a_lower_scale_rather_than_cropped", "crates/ui-egui/src/zoom_snap.rs::a_snapshot_never_goes_below_half_a_pixel_per_point"]
 notes = "copies the area at the scale the page is drawn on screen, so the image holds one pixel per screen pixel and is never resampled (it used to hold three quarters, which made every copy soft); a selection larger than the renderer's 4096-pixel tile is copied whole at a lower scale rather than cropped"
 
 [[feature]]

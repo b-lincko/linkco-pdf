@@ -647,12 +647,37 @@ impl Host for crate::PdfCraftApp {
             .enumerate()
             .filter_map(|(i, v)| {
                 let d = self.session.get(v.id)?;
-                Some(json!({ "tab": i, "doc": v.id.0, "name": d.name, "path": d.path, "pages": d.info.pages.len(), "dirty": d.dirty, "active": self.active == Some(i) }))
+                // What the last poll found for this file: another program writing it, the file
+                // being renamed inside its folder, or the file being gone.
+                let disk = match self.disk_alerts.get(&v.id) {
+                    Some(crate::disk_watch::Alert::Changed) => json!({ "state": "changed" }),
+                    Some(crate::disk_watch::Alert::Renamed(to)) => json!({ "state": "renamed", "at": to.to_string_lossy() }),
+                    Some(crate::disk_watch::Alert::Gone) => json!({ "state": "gone" }),
+                    _ => Value::Null,
+                };
+                Some(json!({
+                    "tab": i,
+                    "doc": v.id.0,
+                    "name": d.name,
+                    "path": d.path,
+                    "pages": d.info.pages.len(),
+                    "dirty": d.dirty,
+                    "active": self.active == Some(i),
+                    "disk": disk,
+                }))
             })
             .collect();
         json!({
             "docking": self.docking,
             "documents": docs,
+            // A save held back because the file changed on disk, with what the other version holds.
+            "save_conflict": self.save_conflict.as_ref().map(|c| json!({
+                "doc": c.id.0,
+                "name": c.name,
+                "dest": c.dest,
+                "disk_pages": c.disk.and_then(|d| d.pages()),
+                "disk_bytes": c.disk.map(|d| d.bytes()),
+            })),
             "active": active.map(|v| json!({
                 "doc": v.id.0,
                 "page": v.current + 1,

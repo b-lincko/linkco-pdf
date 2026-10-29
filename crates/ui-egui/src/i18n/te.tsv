@@ -2161,3 +2161,8 @@ key	Space	స్పేస్
 	“{name}” was moved or renamed to “{found}”.	“{name}” తరలించబడింది లేదా “{found}”గా పేరు మార్చబడింది.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}” ఇప్పుడు “{path}”లో లేదు; మరొక ఫోల్డర్కు తరలించబడింది లేదా తొలగించబడింది.
 	Tried {n} times. Zoom or rotate the page to try again.	{n} సార్లు ప్రయత్నించాం. మళ్లీ ప్రయత్నించడానికి పేజీని జూమ్ చేయండి లేదా తిప్పండి.
+	On disk: {n} pages, written {when}.	డిస్క్‌లో: {n} పేజీలు, రాయబడింది {when}.
+	On disk: written {when}.	డిస్క్‌లో: రాయబడింది {when}.
+	The version on disk is too large to compare here.	డిస్క్‌లోని వెర్షన్ ఇక్కడ పోల్చడానికి చాలా పెద్దది.
+	“{name}” could not be opened to compare it.	పోల్చడానికి “{name}” తెరవలేకపోయాం.
+	{name} (on disk)	{name} (డిస్క్‌లో)

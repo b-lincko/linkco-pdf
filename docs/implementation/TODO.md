@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B022 · **Active stage:** basic
+**Active component:** B023 · **Active stage:** basic
 
-## Basic (353 records)
+## Basic (354 records)
 
-complete: 22, in_progress: 1, pending: 330
+ci_pending: 1, complete: 22, in_progress: 2, pending: 329
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -40,6 +40,7 @@ complete: 22, in_progress: 1, pending: 330
 | B020 | [x] Say the same thing about what works everywhere a user reads it | P0 | complete | REC-R12 |
 | B021 | [x] Copy what is on screen at the resolution it is shown at | P0 | complete | REC-R02 |
 | B022 | [x] One malformed page or a failed export does not spoil the rest | P0 | complete | REC-R06 |
+| B023 | [ ] See what the other version changed before replacing it | P0 | ci_pending | REC-R05 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -83,7 +84,7 @@ complete: 22, in_progress: 1, pending: 330
 | REC-R02 | [ ] Independent rendering-fidelity benchmark | P0 | pending | view.render-pages view.render-transparency view.render-cid-fonts |
 | REC-R03 | [ ] Global memory and decoded-data budgets | P0 | pending | core.lazy-loading misc.performance-budgets |
 | REC-R04 | [ ] Cancellable background-job centre | P0 | pending | '- |
-| REC-R05 | [ ] External-file change and save-conflict detection | P0 | pending | '- |
+| REC-R05 | [ ] External-file change and save-conflict detection | P0 | in_progress | '- |
 | REC-R06 | [ ] Recoverable per-document operation failures | P0 | pending | '- |
 | REC-R07 | [ ] Open-save-reopen interoperability matrix | P0 | pending | '- |
 | REC-R08 | [ ] Performance budgets on ordinary office hardware | P0 | pending | misc.performance-budgets |
@@ -1096,3 +1097,20 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40843250147
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40843250027
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/40843250254
+
+### B023: See what the other version changed before replacing it
+
+- Status: **ci_pending**; parent(s): REC-R05.
+- Acceptance: When the file of an open document changed on disk, the save-conflict prompt says what the other version holds — how many pages and when it was written, read from the file itself — and offers to open that version beside the document and show the differences with the existing compare, so the reader chooses between comparing, saving a copy and overwriting with the facts in front of them; comparing writes nothing and leaves the document unsaved, and its copy cannot be saved over the original; a version too large or too damaged to open is refused with a reason instead of freezing the window; and the automation control channel reports both the change and the held save.
+- Audit: Started from the recommendation's acceptance line — concurrent modification prompts for compare, save-copy or explicit overwrite instead of silent loss — and asked which of the three the interface actually offers. Two were there. Overwrite and Save As… were bounded by B010, and Cancel writes nothing; the poll added by B012 notices a rewritten, renamed or deleted file while the document sits idle. Compare was not: the prompt named the situation and left the reader to guess its size. The audit also found that the parity table had no entry for any of the three components, that the control channel reported neither the disk state nor the held save, and that SaveConflict carried only the document and path, so the prompt had nothing to say about the other version. Six decisions came out of it. The facts are read from the file at the moment the conflict is raised, not per frame, because a prompt is raised once per save attempt. They are bounded by READ_LIMIT (32 MiB) with a capped read that stops one byte past the limit, so a huge file is never loaded to discover that it is huge; a version that cannot be parsed still gets a prompt, with no page count claimed for it. Compare opens the other version with no path, so it cannot become an accidental second way to overwrite the original. The comparison is the existing doc.compare path — the same one the Compare Files dialog runs — with the file on disk as the older version and this document as the newer one, so the panel, the shading and the report behave exactly as elsewhere. The held save is dropped, not re-attempted: comparing must not write, and the next save asks again. The disk state and the held save are exposed on the control channel, which is the automation surface this feature can have without inventing a headless duplicate of a modal. Re-audit: the facts are re-read on every raise, so a second attempt after another program wrote again describes the new bytes; a rotation of state — compare, then cancel, then overwrite — leaves no stale comparison pointing at a closed document (the copy is an ordinary tab the user can close); the password prompt a pathless encrypted copy would raise is cancelled and reported instead of stacking two dialogs; and the five new strings are in all sixteen catalogs with the catalogs' SHA-256s re-recorded in ATTRIBUTION.toml. A last finding is about the audit trail itself: `cargo xtask parity` is not one of the five workflows, so nothing has been validating the feature table. Run by hand, it rejected five evidence references B021 and B022 had written as `path.rs::tests::fn`, which the validator splits at the first `::`; those are corrected to the `path.rs::fn` form the rest of the file uses. It also reports three `print.*` features citing tests that no longer exist under those names (`crates/print/src/tests.rs::windows_printers_carry_one_default_and_keep_their_names`, `::the_print_script_renders_the_job_and_reaches_the_spooler`, `::the_windows_job_is_the_environment_of_the_print_script`). That drift predates this component and is left alone rather than repointed at a test whose claim would have to be guessed; the finding is recorded here instead.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and the craft-libs dependency needs the network), so none of the Rust — production or test — was compiled or run here; it is verified by CI or not at all. The Python side was run. Not claimed: the CLI's conflict check, a web-build equivalent, identity-based rename detection off Unix, Acrobat parity for the prompt's wording or options (the table's entry for this feature marks it partial and says so), and any guarantee that a comparison of two very large documents is quick.
+- Ci: pending
+- Notes: Bounded part of REC-R05 (external-file change and save-conflict detection), which stays open for the command line. B010 already refused to overwrite a file another program changed, offering Save As, Cancel or Overwrite, and B012 already polled the open files and reported a rewritten, renamed or deleted one. What neither did was the third option the recommendation names: a comparison. The prompt said a file changed, not what changed, so the reader decided between losing their work and losing the other program's work without seeing either. The prompt now states the other version's page count and when it was written, and Compare opens that version beside the document and runs the app's own text and visual compare, marking the differences on this document's pages. The copy is opened without a path, so it cannot be saved over the file it came from; the deferred save is dropped rather than performed, so the document stays unsaved and saving again asks the same question. Both the facts and the compare read the file at most up to 32 MiB (conflict::READ_LIMIT) and through the parser's own catch-unwind, so a hostile or huge file is refused with a sentence rather than stalling the window. The facts also go to the agent control channel: each document reports its disk state (changed, renamed to a path, or gone) and a top-level save_conflict reports the held save with the other version's pages and bytes. Still open in REC-R05: the CLI's pdfcraft-cli edit --out writes with std::fs::write and checks nothing, so a command line edit can still replace a file another program wrote; the web build has no local path to watch; and the identity-based rename notice is Unix-only.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: The three new unit tests in crates/ui-egui/src/conflict.rs read a real two-page file (page count, size and modification time), show that an unparseable file is still described without claiming pages, and prove the capped read stops at the cap rather than loading the file.
+- Local evidence: crates/ui-egui/src/editing.rs::the_other_version_opens_under_a_name_that_names_it keeps the copy's title recognisable and its extension intact.
+- Local evidence: crates/ui-egui/tests/conflict.rs::the_other_version_can_be_compared_before_anything_is_written drives a real conflict through the shell: the prompt knows the other version has 3 pages, clicking Compare opens it, the compare runs with the disk version as the older document, nothing is written and the document stays unsaved.
+- Local evidence: crates/ui-egui/tests/control.rs::a_file_that_changed_on_disk_is_reported_with_the_held_save reads the disk state and the held save back through the control channel.
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes (51 tests).
+- Local evidence: All 247 recorded asset SHA-256s match their files, including the sixteen edited catalogs.
+- Local evidence: Every evidence reference this component adds was checked against the function it names, and every command and tool it lists against the two registries the parity validator reads.

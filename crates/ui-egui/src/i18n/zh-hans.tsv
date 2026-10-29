@@ -2195,3 +2195,8 @@ key	Space	空格
 	“{name}” was moved or renamed to “{found}”.	“{name}”已被移动或重命名为“{found}”。
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}”已不在“{path}”；它被移到其他文件夹或被删除。
 	Tried {n} times. Zoom or rotate the page to try again.	已尝试 {n} 次。请缩放或旋转页面后重试。
+	On disk: {n} pages, written {when}.	磁盘上：{n} 页，写入于 {when}。
+	On disk: written {when}.	磁盘上：写入于 {when}。
+	The version on disk is too large to compare here.	磁盘上的版本太大，无法在此比较。
+	“{name}” could not be opened to compare it.	无法打开“{name}”进行比较。
+	{name} (on disk)	{name}（磁盘上）
