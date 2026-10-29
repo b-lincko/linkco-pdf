@@ -4003,7 +4003,7 @@ trailer << /Root 1 0 R >>
                 for p in range.start * cols..(range.end * cols).min(info.pages.len()) {
                     v.need_thumbnail(p, p / cols == row);
                 }
-                let queue = v.prepare_render_queue(&info, ppp);
+                let queue = v.prepare_render_queue(&info, ppp, 0.0);
                 assert!(queue.len() <= 5 * cols, "only three visible rows and two prefetch rows");
                 assert_eq!(queue.first().unwrap().page / cols, row, "visible cells precede prefetch");
                 let bytes: usize = queue
@@ -4017,7 +4017,7 @@ trailer << /Root 1 0 R >>
                     })
                     .sum();
                 assert!(bytes <= THUMB_BYTES);
-                assert_eq!(queue, v.prepare_render_queue(&info, ppp), "unchanged demand reconstructs the same work");
+                assert_eq!(queue, v.prepare_render_queue(&info, ppp, 0.0), "unchanged demand reconstructs the same work");
             }
         }
     }
@@ -4029,7 +4029,7 @@ trailer << /Root 1 0 R >>
         for page in 0..MAX_THUMB_DEMAND {
             v.need_thumbnail(page, true);
         }
-        let queue = v.prepare_render_queue(&info, 2.0);
+        let queue = v.prepare_render_queue(&info, 2.0, 0.0);
         assert_eq!(queue.len(), MAX_THUMB_DEMAND);
         let bytes: usize = queue
             .iter()
@@ -4060,19 +4060,19 @@ trailer << /Root 1 0 R >>
         let info = thumbnail_info(10_000);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.need_thumbnail(0, true);
-        let first = v.prepare_render_queue(&info, 1.0);
+        let first = v.prepare_render_queue(&info, 1.0, 0.0);
         v.last_queue = first.clone();
         assert_eq!(v.receive_result(&ctx, solid_result(first[0], 132, 171)), 132 * 171 * 4);
-        assert!(v.prepare_render_queue(&info, 1.0).is_empty());
+        assert!(v.prepare_render_queue(&info, 1.0, 0.0).is_empty());
         v.begin_render_frame();
         v.need_thumbnail(9999, true);
-        v.prepare_render_queue(&info, 1.0);
+        v.prepare_render_queue(&info, 1.0, 0.0);
         assert!(v.thumbs.is_empty(), "jump releases old handles");
         v.begin_render_frame();
         v.need_thumbnail(0, true);
-        assert_eq!(v.prepare_render_queue(&info, 1.0), first, "an evicted result must be requested again");
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0), first, "an evicted result must be requested again");
         v.begin_render_frame();
-        assert!(v.prepare_render_queue(&info, 1.0).is_empty(), "closing consumers cancels thumbnail work");
+        assert!(v.prepare_render_queue(&info, 1.0, 0.0).is_empty(), "closing consumers cancels thumbnail work");
     }
 
     #[test]
@@ -4081,8 +4081,8 @@ trailer << /Root 1 0 R >>
         let info = thumbnail_info(1);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.need_thumbnail(0, true);
-        let first = v.prepare_render_queue(&info, 1.0)[0];
-        v.last_queue = v.prepare_render_queue(&info, 2.0);
+        let first = v.prepare_render_queue(&info, 1.0, 0.0)[0];
+        v.last_queue = v.prepare_render_queue(&info, 2.0, 0.0);
         // Valid pixels: only the request gate can keep these out (a size check can't).
         let obsolete = || solid_result(first, 132, 171);
         assert_eq!(v.receive_result(&ctx, obsolete()), 0);
@@ -4111,7 +4111,7 @@ trailer << /Root 1 0 R >>
         v.receive_result(&ctx, solid_result(req, 10, 10));
         v.frame_queue = vec![req];
         v.page_changed(0);
-        assert_eq!(v.prepare_render_queue(&info, 1.0), vec![req]);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0), vec![req]);
         assert_eq!(v.pages.get(&0).unwrap().tag, STALE_TAG);
     }
 
@@ -4124,12 +4124,12 @@ trailer << /Root 1 0 R >>
         }
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.frame_queue = (0..40).map(|page| RenderRequest { page, scale: 1.0, tag: 1000, ..Default::default() }).collect();
-        let queue = v.prepare_render_queue(&info, 1.0);
+        let queue = v.prepare_render_queue(&info, 1.0, 0.0);
         assert_eq!(queue.len(), 2, "128 MiB admits two 4000-square pages, not 24");
         v.frame_queue = (0..40)
             .map(|page| RenderRequest { page, scale: 1.0, tag: 1000, tile: Some(Tile { x: 0, y: 0, w: 1024, h: 1024 }), ..Default::default() })
             .collect();
-        assert_eq!(v.prepare_render_queue(&info, 1.0).len(), 32);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0).len(), 32);
         assert!(!v.admit_texture(RenderRequest::default(), PAGE_BYTES + 1));
     }
 
@@ -4145,7 +4145,7 @@ trailer << /Root 1 0 R >>
         // Ten 16 MB pages on screen (a zoomed-out HiDPI view) exceed the 128 MiB allowance.
         v.frame_visible = (0..10).collect();
         v.frame_queue = (0..40).map(|page| RenderRequest { page, scale: 1.0, tag: 1000, ..Default::default() }).collect();
-        let queue = v.prepare_render_queue(&info, 1.0);
+        let queue = v.prepare_render_queue(&info, 1.0, 0.0);
         let pages: Vec<usize> = queue.iter().map(|r| r.page).collect();
         assert_eq!(pages, (0..10).collect::<Vec<_>>(), "every on-screen page, and no prefetch past the allowance");
         v.last_queue = queue.clone();
@@ -4157,7 +4157,7 @@ trailer << /Root 1 0 R >>
         v.frame_queue = (0..40)
             .map(|x| RenderRequest { page: 0, scale: 1.0, tag: 1000, tile: Some(Tile { x: x * TILE, y: 0, w: 1024, h: 1024 }), ..Default::default() })
             .collect();
-        assert_eq!(v.prepare_render_queue(&info, 1.0).len(), 40);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0).len(), 40);
     }
 
     #[test]
@@ -4168,21 +4168,21 @@ trailer << /Root 1 0 R >>
         let req = |page| RenderRequest { page, scale: 1.0, tag: 1000, ..Default::default() };
         v.frame_visible = [0].into();
         v.frame_queue = vec![req(0)];
-        v.last_queue = v.prepare_render_queue(&info, 1.0);
+        v.last_queue = v.prepare_render_queue(&info, 1.0, 0.0);
         v.receive_result(&ctx, solid_result(req(0), 100, 130));
         // Single-page view moves on to page 1: page 0 is no longer demanded.
         v.begin_render_frame();
         v.current = 1;
         v.frame_visible = [1].into();
         v.frame_queue = vec![req(1)];
-        assert_eq!(v.prepare_render_queue(&info, 1.0), vec![req(1)]);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0), vec![req(1)]);
         assert!(v.pages.contains_key(&0), "kept while the allowance has room");
         // And back: nothing to render.
         v.begin_render_frame();
         v.current = 0;
         v.frame_visible = [0].into();
         v.frame_queue = vec![req(0)];
-        assert!(v.prepare_render_queue(&info, 1.0).is_empty());
+        assert!(v.prepare_render_queue(&info, 1.0, 0.0).is_empty());
     }
 
     #[test]
@@ -4226,7 +4226,7 @@ trailer << /Root 1 0 R >>
 
             view.begin_render_frame();
             view.need_thumbnail(0, true);
-            let queue = view.prepare_render_queue(&info, ctx.pixels_per_point());
+            let queue = view.prepare_render_queue(&info, ctx.pixels_per_point(), 0.0);
             assert!(queue.is_empty(), "the synthetic thumbnail satisfies current demand");
             view.last_queue = queue;
             expected.push((request, dimensions));
@@ -4398,7 +4398,7 @@ trailer << /Root 1 0 R >>
         let info = thumbnail_info(1);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.need_thumbnail(0, true);
-        let queue = v.prepare_render_queue(&info, 2.0);
+        let queue = v.prepare_render_queue(&info, 2.0, 0.0);
         let scale = queue.first().expect("one thumbnail").scale;
         assert!(612.0 * scale >= 150.0 * 2.0, "{scale}");
     }
