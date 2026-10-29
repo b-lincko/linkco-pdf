@@ -222,10 +222,11 @@ mod tests {
     fn a_version_that_cannot_be_parsed_is_still_described_by_what_the_filesystem_knows() {
         let dir = store("unparseable");
         let path = dir.join("other.pdf");
-        std::fs::write(&path, b"not a PDF at all").unwrap();
+        let junk = b"not a PDF at all";
+        std::fs::write(&path, junk).unwrap();
         let facts = DiskVersion::of_path(&path).expect("a regular file");
         assert_eq!(facts.pages(), None, "no page count is claimed for a file that cannot be read");
-        assert_eq!(facts.bytes(), 14);
+        assert_eq!(facts.bytes(), junk.len() as u64);
         assert!(facts.modified().is_some());
         // A directory or a missing path describes nothing at all.
         assert_eq!(DiskVersion::of_path(&dir), None);
