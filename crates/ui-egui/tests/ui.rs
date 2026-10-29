@@ -884,6 +884,8 @@ fn the_jobs_card_lists_each_job_and_cancels_only_its_own() {
     let tokens: std::sync::Arc<std::sync::Mutex<Vec<JobToken>>> = std::sync::Arc::default();
     let held = tokens.clone();
     let mut h = harness(move |app| {
+        // A document tab, as when these jobs are started: the card is drawn over the canvas.
+        app.open_bytes("doc.pdf", None, FIXTURE.to_vec()).unwrap();
         let (optimize, a) = app.jobs.begin(Kind::Optimize, "Optimize PDF…".into(), 10);
         app.jobs.stage(optimize, "Optimizing… image 4 of 10", 0.275);
         let (_, b) = app.jobs.begin(Kind::Export, "Export to Image".into(), 4);
