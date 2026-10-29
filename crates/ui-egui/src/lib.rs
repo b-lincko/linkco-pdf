@@ -41,7 +41,7 @@ mod combine_ui;
 // The web build has no path-based files to compare: the shared types stay compiled (a dropped
 // file still has a name) but the desktop-only checks are allowed to go unused there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub mod conflict;
+mod conflict;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod disk_watch;
 pub mod docking;
