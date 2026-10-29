@@ -555,6 +555,26 @@ fn writing_to_a_folder_touches_nothing_beside_it() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+/// An export that fails — its output folder is a file — reports why, leaves the document open
+/// and untouched, and the next export to a real folder works: a failed operation is confined to
+/// that operation, not to the document or the session.
+#[test]
+fn a_failed_export_leaves_the_document_open_and_usable() {
+    let (base, root) = sandbox("failed-export");
+    let mut a = auto(&root);
+    std::fs::write(root.join("not-a-folder"), b"x").unwrap();
+    let doc = ok(&mut a, "doc_open", json!({ "path": "inside.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_list", json!({}));
+    let failed = a.call("doc_export_images", &json!({ "doc": doc, "folder": "not-a-folder", "dpi": 18 })).unwrap_err();
+    assert!(matches!(&failed, ToolError::Failed(_)), "the export says why it failed: {failed:?}");
+    // The document is still open, with the same page count and nothing half-written.
+    assert_eq!(ok(&mut a, "doc_list", json!({})), before);
+    let out = ok(&mut a, "doc_export_images", json!({ "doc": doc, "folder": "out", "dpi": 18 }));
+    assert_eq!(out["files"].as_array().unwrap().len(), 1, "{out}");
+    assert!(root.join("out").join("inside_page_1.png").is_file());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 #[test]
 fn file_names_from_documents_stay_in_the_output_folder() {
     // Folder outputs name their files after the document. A document name with separators,

@@ -243,6 +243,52 @@ struct PageTex {
     tex: TextureHandle,
 }
 
+/// A page the renderer refused: the reason shown on it, the demand that failed, and whether it
+/// may be tried again.
+///
+/// A render can fail for a reason that goes away — a worker was retired and replaced, memory was
+/// briefly exhausted, a huge page lost its race with a resize — so a failure is not final. It is
+/// retried on a short backoff a bounded number of times ([`RETRY_DELAYS`]) and then left alone,
+/// so a page that is genuinely broken costs two extra renders rather than one per frame. Any
+/// change to what is demanded of the page (a zoom, a rotation, a reflow) is a fresh attempt, and
+/// so is an edit to the page, which clears the failure.
+#[derive(Clone, Debug)]
+pub struct PageFailure {
+    /// What the renderer said, shown on the page.
+    pub message: String,
+    /// The demand (scale tag) that failed: another one means the page is being drawn differently.
+    tag: u64,
+    /// Attempts at this demand, the first failure included.
+    pub attempts: u8,
+    /// When the next automatic attempt is due (egui's clock, seconds); `None` once they run out.
+    next_try: Option<f64>,
+}
+
+/// How long to wait before each automatic retry of a page that failed to render. Its length is
+/// also how many retries there are: after these, the page waits for the demand to change.
+const RETRY_DELAYS: [f64; 2] = [1.0, 4.0];
+
+impl PageFailure {
+    /// The failure of a first attempt at `tag`, due at `now`.
+    fn first(message: String, tag: u64, now: f64) -> Self {
+        Self { message, tag, attempts: 1, next_try: RETRY_DELAYS.first().copied().map(|d| now + d) }
+    }
+
+    /// The same page failing again at the same demand.
+    fn again(&mut self, message: String, now: f64) {
+        self.message = message;
+        self.attempts = self.attempts.saturating_add(1);
+        // The first retry waits RETRY_DELAYS[0], the second RETRY_DELAYS[1], and then there
+        // are none: `attempts` counts the first failure too.
+        self.next_try = RETRY_DELAYS.get(usize::from(self.attempts.saturating_sub(1))).copied().map(|d| now + d);
+    }
+
+    /// Whether this failure may be tried again now.
+    fn due(&self, now: f64) -> bool {
+        self.next_try.is_some_and(|t| now >= t)
+    }
+}
+
 /// Retained RGBA texture accounting for automation and performance regressions. These
 /// surface bytes exclude driver overhead and temporary upload buffers; they are not RSS.
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
@@ -292,8 +338,8 @@ pub struct DocView {
     /// Compare files: differences shaded on this document's pages (page, user-space box, colour).
     pub compare_marks: Vec<(usize, [f32; 4], Color32)>,
     pages: HashMap<usize, PageTex>,
-    /// Pages the renderer could not draw, with the reason (never re-requested).
-    errors: HashMap<usize, String>,
+    /// Pages the renderer could not draw: why, how often, and when to try again.
+    errors: HashMap<usize, PageFailure>,
     /// When each still-missing page was first shown, to flag unusually slow renders.
     waiting_since: HashMap<usize, f64>,
     thumbs: HashMap<usize, PageTex>,
@@ -484,9 +530,15 @@ impl DocView {
 
     /// Pages that could not be rendered, with the reason (for automation; 0-based pages).
     pub fn page_errors(&self) -> Vec<(usize, &str)> {
-        let mut v: Vec<(usize, &str)> = self.errors.iter().map(|(p, e)| (*p, e.as_str())).collect();
+        let mut v: Vec<(usize, &str)> = self.errors.iter().map(|(p, e)| (*p, e.message.as_str())).collect();
         v.sort_unstable_by_key(|(p, _)| *p);
         v
+    }
+
+    /// How many times the renderer has refused `page` without an edit or a change of demand
+    /// since; `None` while it is drawing (or about to). For tests and diagnosis.
+    pub fn page_attempts(&self, page: usize) -> Option<u8> {
+        self.errors.get(&page).map(|f| f.attempts)
     }
 
     /// A view of a newly opened document, shown as `defaults` say. Opening a file then applies
@@ -1000,6 +1052,19 @@ impl DocView {
     pub fn rotate_view(&mut self, clockwise: bool) {
         self.rotation = (self.rotation + if clockwise { 90 } else { 270 }) % 360;
         self.goto = Some((self.current, 0.0));
+        // A rotation is a reader asking to see the page again: a page that failed gets another
+        // attempt rather than keeping its error through a change of view.
+        self.retry_failed();
+    }
+
+    /// Ask for another attempt at every page that failed to draw.
+    fn retry_failed(&mut self) {
+        if self.errors.is_empty() {
+            return;
+        }
+        self.errors.clear();
+        self.waiting_since.clear();
+        self.last_queue.clear();
     }
 
     /// Switch the zoom mode, keeping the current page in view.
@@ -1184,9 +1249,29 @@ impl DocView {
             .collect()
     }
 
+    /// Whether `page` may be asked to render at `tag` now.
+    ///
+    /// A page the renderer refused waits for its next automatic attempt ([`RETRY_DELAYS`]), and
+    /// once those are spent it is left as failed until the demand changes or an edit clears it.
+    /// A different `tag` *is* a change of demand, so it clears the failure and asks again.
+    fn may_request(&mut self, page: usize, tag: u64, now: f64) -> bool {
+        // Only the document view's own demand (a whole-page raster or a tile) says how the page
+        // is being drawn: a thumbnail's or a sheet preview's tag is a different question, and
+        // must not clear the page's failure, or two kinds of request would keep reviving it.
+        let view_demand = tag & (THUMB_TAG | PRINT_TAG | GRID_TAG) == 0;
+        match self.errors.get(&page) {
+            None => return true,
+            Some(failure) if !(view_demand && failure.tag != tag) => return failure.due(now),
+            Some(_) => {}
+        }
+        self.errors.remove(&page);
+        self.waiting_since.remove(&page);
+        true
+    }
+
     /// Admit current demand within explicit byte limits. Cached and pending surfaces share
     /// the allowance, so an evicted page can be requested again without a permanent done set.
-    fn prepare_render_queue(&mut self, info: &DocInfo, ppp: f32) -> Vec<RenderRequest> {
+    fn prepare_render_queue(&mut self, info: &DocInfo, ppp: f32, now: f64) -> Vec<RenderRequest> {
         let requests = std::mem::take(&mut self.frame_queue);
         let mut queue = Vec::new();
         let mut pages = HashSet::new();
@@ -1196,6 +1281,11 @@ impl DocView {
         let (mut page_bytes, mut tile_bytes) = (0usize, 0usize);
         for req in requests.iter().filter(|r| r.kind == RequestKind::Pixels) {
             let Some(p) = info.pages.get(req.page) else { continue };
+            // A page that failed is asked for again when its retry is due, and not before; a
+            // different demand for it (a zoom, a rotation, a reflow) is a fresh attempt.
+            if !self.may_request(req.page, req.tag, now) {
+                continue;
+            }
             // Organize-grid renders: only the cells in view that need one (organize_grid).
             if req.tag & GRID_TAG != 0 {
                 grid.push(*req);
@@ -1203,9 +1293,7 @@ impl DocView {
             }
             // Print-preview rasters: a few sheets at the pane's size (the dialog bounds them).
             if req.tag & PRINT_TAG != 0 {
-                if !self.errors.contains_key(&req.page) {
-                    queue.push(*req);
-                }
+                queue.push(*req);
                 continue;
             }
             // On-screen work is always admitted (the viewport bounds it); the limits only
@@ -1256,8 +1344,13 @@ impl DocView {
         let mut admitted = HashSet::new();
         for req in thumbs {
             let Some(p) = info.pages.get(req.page) else { continue };
+            // A page the renderer refuses is not asked for a thumbnail every frame either: it
+            // waits for the same retries the page itself gets, and then stays failed.
+            if !self.may_request(req.page, req.tag, now) {
+                continue;
+            }
             let bytes = rgba_bytes(device_pixels(p.width, req.scale) as usize, device_pixels(p.height, req.scale) as usize);
-            if thumb_bytes.saturating_add(bytes) > THUMB_BYTES || self.errors.contains_key(&req.page) {
+            if thumb_bytes.saturating_add(bytes) > THUMB_BYTES {
                 continue;
             }
             thumb_bytes += bytes;
@@ -1274,7 +1367,7 @@ impl DocView {
     }
 
     pub(crate) fn finish_render_frame(&mut self, ctx: &egui::Context, info: &DocInfo, pool: &RenderPool) {
-        let queue = self.prepare_render_queue(info, ctx.pixels_per_point());
+        let queue = self.prepare_render_queue(info, ctx.pixels_per_point(), ctx.input(|i| i.time));
         if queue != self.last_queue {
             pool.set_queue(queue.clone());
             self.last_queue = queue;
@@ -1325,8 +1418,20 @@ impl DocView {
             return 0;
         }
         if let Some(e) = r.error {
-            log::warn!("page {}: {e}", r.request.page + 1);
-            self.errors.insert(r.request.page, e);
+            let (page, tag) = (r.request.page, r.request.tag);
+            log::warn!("page {}: {e}", page + 1);
+            let now = ctx.input(|i| i.time);
+            match self.errors.get_mut(&page) {
+                // The demand that failed first is the one whose schedule counts: a page that
+                // also fails as a thumbnail or a sheet preview must not restart that schedule,
+                // or two demands failing in turn could keep reviving each other for ever.
+                Some(failure) if failure.tag == tag => failure.again(e, now),
+                Some(_) => {}
+                None => {
+                    self.errors.insert(page, PageFailure::first(e, tag, now));
+                }
+            }
+            self.waiting_since.remove(&page);
             return 0;
         }
         let page = r.request.page;
@@ -1354,6 +1459,12 @@ impl DocView {
             self.pages.insert(page, PageTex { tag: r.request.tag, tex });
             self.signature_drag.page_received(page);
             self.waiting_since.remove(&page);
+        }
+        // A page that came back is not a failed page: the card goes and the page shows. Only a
+        // whole-page or tile render says how the page itself is drawn — a thumbnail that came
+        // back says nothing about that.
+        if r.request.tag & (THUMB_TAG | PRINT_TAG | GRID_TAG) == 0 {
+            self.errors.remove(&page);
         }
         bytes
     }
@@ -1473,7 +1584,7 @@ impl DocView {
     pub(crate) fn queue_print_previews(&mut self, pages: &[(usize, f32)]) {
         self.print_pages.retain(|page, _| pages.iter().any(|(p, _)| p == page));
         for &(page, scale) in pages {
-            if self.errors.contains_key(&page) || !scale.is_finite() || scale <= 0.0 {
+            if !scale.is_finite() || scale <= 0.0 {
                 continue;
             }
             let tag = scale_tag(scale) | PRINT_TAG;
@@ -2115,7 +2226,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     26.0,
                     Color32::from_rgb(0xC8, 0x3A, 0x3A),
                 );
-                let message = crate::i18n::fmt(tl!("This page couldn't be displayed.\n{e}"), &[("e", err)]);
+                let mut message = crate::i18n::fmt(tl!("This page couldn't be displayed.\n{e}"), &[("e", &err.message)]);
+                // A page that failed more than once is not being asked again on its own; say
+                // so, and that changing the view (or an edit) tries afresh.
+                if err.attempts > 1 {
+                    let tried = crate::i18n::fmt(tl!("Tried {n} times. Zoom or rotate the page to try again."), &[("n", &err.attempts.to_string())]);
+                    message.push('\n');
+                    message.push_str(&tried);
+                }
                 let msg =
                     ui.fonts_mut(|f| f.layout(message, theme::regular(12.5), Color32::from_rgb(0x6A, 0x2A, 0x2A), (r.width() - 40.0).max(80.0)));
                 painter.galley(pos2(r.center().x - msg.size().x / 2.0, r.center().y), msg, Color32::BLACK);
@@ -3772,6 +3890,27 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A render can fail for a reason that goes away (a retired worker, a brief allocation
+    /// failure), so a failure is retried twice and then left alone: never given up on at the
+    /// first error, and never re-requested for ever either.
+    #[test]
+    fn a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change() {
+        let mut failure = PageFailure::first("the renderer refused it".into(), 7, 100.0);
+        assert_eq!(failure.attempts, 1);
+        assert!(!failure.due(100.5), "the first retry waits");
+        assert!(failure.due(101.0));
+        failure.again("the renderer refused it".into(), 101.0);
+        assert_eq!(failure.attempts, 2);
+        assert!(!failure.due(104.5));
+        assert!(failure.due(105.0));
+        failure.again("the renderer refused it".into(), 105.0);
+        assert_eq!(failure.attempts, 3);
+        assert_eq!(failure.next_try, None, "the automatic attempts are spent");
+        assert!(!failure.due(100_000.0));
+        // The clock never runs backwards into a claim that a spent failure is due.
+        assert!(!failure.due(f64::NEG_INFINITY));
+    }
 
     #[test]
     fn zoom_anchor_scroll_stays_within_the_content() {

@@ -31,6 +31,33 @@ fn fixture(n: usize) -> Vec<u8> {
     out
 }
 
+/// Two pages: the first has an empty page box, which the renderer refuses (a hostile file the
+/// layout still gives a placeholder size for), the second is ordinary.
+fn hostile_fixture() -> Vec<u8> {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 0 0] /Contents 5 0 R >>".into(),
+        "<< /Length 37 >>\nstream\nBT /F1 18 Tf 20 150 Td (unreachable) Tj ET\nendstream".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>".into(),
+        "<< /Length 34 >>\nstream\nBT /F1 18 Tf 20 150 Td (drawn Page) Tj ET\nendstream".into(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offs.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let x = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offs {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
 fn harness() -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
         let mut app = PdfCraftApp::new();
@@ -375,6 +402,67 @@ fn marquee_zoom_and_snapshot() {
     h.run_steps(4);
     let after = h.state().views[i].zoom;
     assert!(after > before * 2.0, "{before} → {after}");
+}
+
+/// A malformed page (an empty page box, which the renderer refuses but the layout can still
+/// place) says why it is blank, is tried again when the reader changes the view instead of
+/// staying broken for good, and leaves the other document's own drawings alone.
+#[test]
+fn a_page_that_cannot_be_drawn_is_retried_and_leaves_the_others_alone() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("fine.pdf", None, fixture(2)).unwrap();
+        app.open_bytes("hostile.pdf", None, hostile_fixture()).unwrap();
+        app
+    });
+    // The well-formed document draws first, so what it keeps can be compared afterwards.
+    h.state_mut().active = Some(0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(2);
+        if h.state().views[0].raster_memory().page_count >= 1 && !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let fine = h.state().views[0].raster_memory().page_count;
+    assert!(fine >= 1, "the well-formed document drew");
+
+    // Now the document whose first page the renderer cannot draw.
+    h.state_mut().active = Some(1);
+    let broken = |h: &Harness<'static, PdfCraftApp>| h.state().views[1].page_errors().iter().any(|(page, _)| *page == 0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(2);
+        if broken(&h) && !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let s = h.state();
+    let errors = s.views[1].page_errors();
+    assert_eq!(errors.len(), 1, "only the malformed page is reported: {errors:?}");
+    assert_eq!(errors[0].0, 0);
+    assert!(errors[0].1.contains("page box"), "{:?}", errors[0].1);
+    assert!(s.views[1].page_attempts(0).is_some_and(|n| n >= 1));
+    // One malformed page cannot spoil another tab: the other document reports nothing and
+    // still holds what it drew.
+    assert!(s.views[0].page_errors().is_empty(), "the other document reports nothing");
+    assert_eq!(s.views[0].raster_memory().page_count, fine, "and keeps what it drew");
+
+    // Changing the view asks for the page again instead of leaving it failed for good.
+    h.state_mut().views[1].rotate_view(true);
+    assert_eq!(h.state().views[1].page_attempts(0), None, "a rotation clears the failure");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(2);
+        if broken(&h) && !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.state().views[1].page_attempts(0).is_some(), "the page was tried again");
 }
 
 #[test]

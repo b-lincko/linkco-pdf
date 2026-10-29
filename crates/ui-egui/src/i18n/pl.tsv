@@ -2225,3 +2225,4 @@ key	Space	Spacja
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Nadpisanie zastąpi wersję zapisaną przez inny program. Jeśli potrzebne są obie, zapisz kopię.
 	“{name}” was moved or renamed to “{found}”.	Plik „{name}“ został przeniesiony lub zmieniono jego nazwę na „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	Pliku „{name}“ nie ma już w „{path}“; został przeniesiony do innego folderu lub usunięty.
+	Tried {n} times. Zoom or rotate the page to try again.	Próby: {n}. Powiększ lub obróć stronę, aby spróbować ponownie.

@@ -2116,3 +2116,4 @@ key	Space	空格
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	覆寫儲存將取代另一個程式寫入的版本。如果兩個版本都需要，請另存一份。
 	“{name}” was moved or renamed to “{found}”.	「{name}」已移動或重新命名為「{found}」。
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	「{name}」已不在「{path}」；它被移到其他資料夾或被刪除。
+	Tried {n} times. Zoom or rotate the page to try again.	已嘗試 {n} 次。請縮放或旋轉頁面後重試。

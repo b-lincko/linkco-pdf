@@ -2160,3 +2160,4 @@ key	Space	స్పేస్
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	దీనిపై సేవ్ చేస్తే మరొక ప్రోగ్రామ్ రాసిన వెర్షన్ భర్తీ చేయబడుతుంది. రెండూ కావాలంటే ఒక ప్రతి సేవ్ చేయండి.
 	“{name}” was moved or renamed to “{found}”.	“{name}” తరలించబడింది లేదా “{found}”గా పేరు మార్చబడింది.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}” ఇప్పుడు “{path}”లో లేదు; మరొక ఫోల్డర్కు తరలించబడింది లేదా తొలగించబడింది.
+	Tried {n} times. Zoom or rotate the page to try again.	{n} సార్లు ప్రయత్నించాం. మళ్లీ ప్రయత్నించడానికి పేజీని జూమ్ చేయండి లేదా తిప్పండి.

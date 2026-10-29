@@ -2146,3 +2146,4 @@ key	Space	Espacio
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Guardar encima reemplazaría la versión que escribió otro programa. Guarde una copia si necesita ambas.
 	“{name}” was moved or renamed to “{found}”.	«{name}» se movió o se le cambió el nombre a «{found}».
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» ya no está en «{path}»; se movió a otra carpeta o se eliminó.
+	Tried {n} times. Zoom or rotate the page to try again.	Se intentó {n} veces. Amplía o gira la página para volver a intentarlo.

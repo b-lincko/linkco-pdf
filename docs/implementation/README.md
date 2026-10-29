@@ -289,6 +289,24 @@ Two smaller faults were in the same function. The 8-pixels-per-point ceiling mad
 
 Local evidence: formatting passes, the ledger validates and the docs suite passes (51 tests); the change is covered by three unit tests in `zoom_snap.rs` and by `marquee_zoom_and_snapshot`, which now measures the copy against the area's size on screen instead of only checking that something was copied. **Verified at `b8ee83b`** by all five workflows at b8ee83b: CI (ubuntu and Windows build, clippy with warnings denied, the whole workspace test suite including the three new scale tests and the strengthened `marquee_zoom_and_snapshot`, wasm32 check, dependency licences and the docs step), packaging lint, the Windows preview handler, the Windows ARM64 job (native tests, unsigned MSI, install and run) and the FreeBSD build-and-test job, on the first attempt. Not claimed: any change to how the page renders on screen (it was already device-exact), colour management, or a regenerated README screenshot — `docs/images/capture.sh` captures at 2× without the resampling `--width` applied, but the committed images were made by an older build.
 
+## B022 — a page that fails is retried, and a failure stays in its page
+
+Parent: **REC-R06** (bounded; a job centre, deeper rollback and a diagnostics bundle stay open). A page the renderer refused was recorded as a bare string and cleared only by an edit. Four consequences: a failure with a passing cause (a retired worker, a brief allocation failure, a page that lost its race with a resize) kept the page blank until the file was reopened; the field's own comment said "never re-requested" while the demand loop went on demanding the page every frame, with only the queue's de-duplication preventing a render storm; thumbnails, print previews and the organize grid were blocked for that page for ever; and nothing told the reader the page had been tried more than once.
+
+A failure is now a record — the reason, the demand that failed, the number of attempts and when the next is due.
+
+| Rule | Why |
+|---|---|
+| Retried after 1 s and 4 s, then left alone | a transient cause deserves another try; a broken page must not cost a render per frame |
+| Only the view's own demand (a page raster or a tile) clears a failure when its tag changes | a thumbnail's and a sheet preview's tags differ from the page's, so letting any of them clear it would revive the failure for ever |
+| Rotation clears the failure explicitly | rotating the view does not change the render scale, so it would not otherwise retry |
+| The page says how often it was tried | a repeated failure is visible instead of mysterious |
+| A render that comes back clears the record | otherwise the card would cover a page that has drawn |
+
+The export half of the acceptance was checked too: the atomic writer already keeps the target intact, and a new automation test exports into a path that is a file, checks the open documents are unchanged, then exports into a real folder.
+
+Local evidence: formatting passes, the ledger validates, the docs suite passes (51 tests) and the new string is translated in all sixteen interface languages. The Rust is CI-only: `rten` needs rustc 1.94 and this workspace has 1.88. Not claimed: a job centre that lists and cancels work, rollback beyond the atomic save, a diagnostics bundle, or a guarantee that a transient failure is always recovered — the retries are bounded on purpose, and the page then says so.
+
 ## Regeneration and verification
 
 ```sh

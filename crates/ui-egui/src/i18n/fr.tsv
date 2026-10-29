@@ -2230,3 +2230,4 @@ key	Space	Espace
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	Enregistrer par-dessus remplacerait la version écrite par un autre programme. Enregistrez une copie si vous avez besoin des deux.
 	“{name}” was moved or renamed to “{found}”.	« {name} » a été déplacé ou renommé en « {found} ».
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	« {name} » n’est plus dans « {path} » ; il a été déplacé vers un autre dossier ou supprimé.
+	Tried {n} times. Zoom or rotate the page to try again.	Essayé {n} fois. Zoomez ou faites pivoter la page pour réessayer.

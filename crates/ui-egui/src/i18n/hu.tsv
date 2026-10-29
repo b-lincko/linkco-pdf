@@ -2228,3 +2228,4 @@ key	Space	Szóköz
 	Saving over it would replace the version another program wrote. Save a copy if you need both.	A felülírás lecserélné a másik program által mentett változatot. Mentse másolatként, ha mindkettőre szüksége van.
 	“{name}” was moved or renamed to “{found}”.	A(z) „{name}“ át lett helyezve vagy átnevezve erre: „{found}“.
 	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	A(z) „{name}“ már nincs itt: „{path}“; másik mappába helyezték vagy törölték.
+	Tried {n} times. Zoom or rotate the page to try again.	Próbálkozások: {n}. Nagyítsa vagy forgassa el az oldalt az újrapróbáláshoz.
