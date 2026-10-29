@@ -3944,13 +3944,15 @@ mod tests {
         for _ in 0..60 {
             assert!(demand(&mut v, 0.0).is_empty());
         }
-        // The first retry is due after 1 s, the second after another 4 s, and then none is.
+        // The first retry is due after 1 s, the second after 4 s more, and then none is. A result
+        // is stamped with the frame's own clock (here the default context's 0 s), so the times
+        // the demand is asked at are what tell the retries apart.
         assert_eq!(demand(&mut v, 1.0), vec![req]);
         v.last_queue = vec![req];
         v.receive_result(&ctx, refused());
         assert_eq!(v.page_attempts(0), Some(2));
-        assert!(demand(&mut v, 4.9).is_empty());
-        assert_eq!(demand(&mut v, 5.0), vec![req]);
+        assert!(demand(&mut v, 3.9).is_empty());
+        assert_eq!(demand(&mut v, 4.0), vec![req]);
         v.last_queue = vec![req];
         v.receive_result(&ctx, refused());
         assert_eq!(v.page_attempts(0), Some(3));
