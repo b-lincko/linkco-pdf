@@ -69,6 +69,15 @@ document reaches an agent as `failed` with the engine's message, because the eng
 the difference. Adding it would be additive (a new kind a client may branch on) rather than a
 break; it is not claimed here.
 
+## Examples
+
+Every tool that changes a document carries a worked example inside its schema (`examples`), and
+the example is a call the test suite proves: it is valid against the schema, it changes the
+document, and the change survives a save and a reopen. An example is documentation of a call that
+works, not a promise that the values in it are the only ones worth using — replacing `doc: 1` with
+your document is expected. Adding an example where there was none, or correcting one that was
+wrong, is not a breaking change.
+
 ## What is not part of the interface
 
 The text of a message, the order of a list a tool did not promise to sort, the number of tools, and

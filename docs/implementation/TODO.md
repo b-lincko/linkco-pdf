@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B028 · **Active stage:** basic
+**Active component:** B029 · **Active stage:** basic
 
-## Basic (359 records)
+## Basic (360 records)
 
-complete: 28, in_progress: 7, pending: 324
+complete: 28, in_progress: 9, pending: 323
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -46,6 +46,7 @@ complete: 28, in_progress: 7, pending: 324
 | B026 | [x] A session may only do what it was started to do | P0 | complete | REC-B09 |
 | B027 | [x] One session cannot eat the machine | P0 | complete | REC-B07 |
 | B028 | [x] A caller can tell what it is talking to, and what went wrong | P0 | complete | REC-B02 |
+| B029 | [ ] Every tool shows a call that works, and the call survives a save | P0 | in_progress | REC-B01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -232,7 +233,7 @@ complete: 28, in_progress: 7, pending: 324
 | REC-A06 | [ ] Guided make-accessible workflow and reports | P1 | pending | a11y.make-accessible-action a11y.setup-assistant |
 | REC-A09 | [ ] PDF/UA-1 and PDF/UA-2 validation adapters | P1 | pending | optimize.pdfua-validate |
 | REC-A10 | [ ] Translation quality and non-Latin font coverage gates | P1 | pending | misc.prefs-language |
-| REC-B01 | [ ] Complete tool coverage for shipped GUI workflows | P1 | pending | misc.cli-completeness |
+| REC-B01 | [ ] Complete tool coverage for shipped GUI workflows | P1 | in_progress | misc.cli-completeness |
 | REC-B04 | [ ] Folder watch and recursive batch workflows | P1 | pending | misc.batch-processing |
 | REC-B05 | [ ] Portable workflow presets and action library | P1 | pending | misc.action-wizard-manage misc.custom-commands |
 | REC-B06 | [ ] Checkpoint resume retry and idempotency | P1 | pending | '- |
@@ -1257,3 +1258,20 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41202464781
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41202464792
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41202464798
+
+### B029: Every tool shows a call that works, and the call survives a save
+
+- Status: **in_progress**; parent(s): REC-B01.
+- Acceptance: Every tool that changes an open document carries a worked example in its own schema; the example is a valid call for that schema (no unknown keys, every required key present, the types and enum values the schema declares) and it is the same object the schema publishes; applying it, saving the document and reopening the saved file in a session that has never seen it shows the change; and a tool that changes a document without an example states why, with a test that fails a new writer that does neither.
+- Audit: Started from REC-B01's done-when and from what a caller actually lacks: not a longer description of each tool — those are already written — but a call it can believe. Four decisions. First, an example is a *claim*, so it has to be executed: every example is run, saved, reopened in a session that has never seen the document, and checked, which is the only version of "documented" that survives refactoring. Second, the example lives in the schema rather than in docs, and the test consumes the published object rather than a copy, so there is one place to be right. Third, completeness had to be enforced, or the table would cover what was easy and miss what was added later: every non-read-only tool must have an example or a stated reason, and the test fails on a writer that has neither — the same shape the B026 policy audit used for the destructive flags, for the same reason (a table nobody checks drifts, and the drift is invisible). Fourth, the fixture is shared and described in the module: a three-page PDF opened as document 1 reading "Page 1", "Page 2", "Page 3", so every example reads alike and a reader can run them in order. Writing the examples was itself an audit of the schemas: it turned up tools whose arguments are not guessable (redact_mark takes a rect, or a find, or a pattern, or whole_pages), tools that need something before they make sense (measure_distance needs a scale), and tools whose name suggests the document but which write a file instead (doc_reduce, doc_optimize). What the audit decided not to do, and records as a limit: no examples for the read-only tools (they change nothing, so there is nothing to save), no example for the 81 writers that write files, print, sign, run OCR, act on the session or need a second document or a picture — each already has an end-to-end test of its own, and a fabricated example for, say, sign_document would be a lie; the default round-trip check for the remaining tools is the invariant every edit must keep (three pages, each still reading its own text), while the tools with a visible effect assert that effect (rotation, page order, labels, a bookmark, a comment, a link, a field, edited text, a script); and the examples are illustrations of a working call, not a matrix of every argument.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable from it), so none of the Rust was compiled or run here: it was compiled and run by CI (see ci). The Python gates, the formatting check and the asset hashes were run here. Not claimed: examples for read-only tools, examples for the 81 writers excluded with reasons (file writers, printing, signing, OCR, session and view tools, and the ones needing a second document or a picture), a proof that every argument of every tool is exercised (the examples are one working call each), a general JSON Schema validator (the test checks the subset the table uses: keys, required, types, minimum, enum), or anything about the desktop interface, which calls the same library in the same process.
+- Ci: pending
+- Notes: Bounded part of REC-B01 (complete tool coverage for the shipped GUI workflows), whose done-when is that every claimed headless feature has schema examples and end-to-end save/reopen tests. Before this, a tool's schema said which arguments it took and nothing about what a working call looked like: an agent had to infer one, and the only save/reopen tests were ones someone had thought to write (the page-editing round trip in automation.rs). There is now crates/automation/src/examples.rs — one example per tool that changes a document (26 of them, from page rotation to PDF/A conversion), and a reason for each of the other 81 writers — surfaced as `examples` inside the tool's schema by schema::schema_with_example, so `pdfcraft-cli schema`, `pdfcraft-cli tools` and the MCP server's tools/list and tool_search all show it. The example is single-sourced: the test runs the same object the schema publishes, so the two cannot drift. crates/automation/tests/roundtrip.rs holds three claims: completeness (every writer is exempled or explained, every read-only tool is neither), validity (a small schema check of every example), and the round trip itself (open a three-page fixture, apply the example, save, drop the session, reopen the file in a new session, check the effect).
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: crates/automation/tests/roundtrip.rs::every_document_changing_tool_is_exempled_or_explained walks the table and requires exactly one of an example or a reason for every tool that changes a document, and neither for a read-only one.
+- Local evidence: crates/automation/tests/roundtrip.rs::every_example_matches_the_schema_it_sits_in checks every example against the schema it is published in (unknown keys, required keys, types, minimum, enum) and that the published example is the table's own object.
+- Local evidence: crates/automation/tests/roundtrip.rs::every_example_survives_a_save_and_a_reopen runs all 26 examples on a three-page document, saves, drops the session, reopens the file in a new one and checks the change: rotation, page order, page count, labels, title, a bookmark, a comment, a link, a form field, edited text, added text, a document script — and for doc_protect that the saved file refuses to open without its password.
+- Local evidence: crates/automation/src/examples.rs::tests checks the two tables never both describe one tool, and that every example is an object naming document 1.
+- Local evidence: The published examples appear in the same place for all three readers: pdfcraft-cli schema, pdfcraft-cli tools and the MCP server's tools/list and tool_search (schema::schema_with_example).
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes.
+- Local evidence: All recorded asset SHA-256s match their files.

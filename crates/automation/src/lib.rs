@@ -15,6 +15,7 @@ mod a11y;
 mod comments;
 mod content;
 mod conventions;
+pub mod examples;
 mod forms;
 mod limits;
 mod links;

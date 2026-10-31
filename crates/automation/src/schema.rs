@@ -54,6 +54,10 @@ pub fn schema_document() -> Value {
 
 /// One tool as the schema document lists it: the name it is called by, what it does, its arguments
 /// and the two hints a caller needs to decide whether to run it unattended.
+///
+/// A tool that changes a document also carries a worked example inside its schema
+/// (`examples`, one call that is known to work — see [`crate::examples`]), so a caller can copy a
+/// call instead of guessing at one.
 pub fn tool_json(t: &ToolDef) -> Value {
     json!({
         "name": t.name,
@@ -62,8 +66,18 @@ pub fn tool_json(t: &ToolDef) -> Value {
         "read_only": t.read_only,
         "destructive": t.destructive,
         "command": t.command,
-        "input_schema": t.input_schema,
+        "input_schema": schema_with_example(t),
     })
+}
+
+/// The tool's schema with its example, when it has one. A copy: the table's own schema is never
+/// changed, so two listings cannot disagree about what a tool takes.
+pub fn schema_with_example(t: &ToolDef) -> Value {
+    let mut schema = t.input_schema.clone();
+    if let Some(example) = crate::examples::example(t.name) {
+        schema["examples"] = Value::Array(vec![example]);
+    }
+    schema
 }
 
 /// `s` split into its major and minor numbers, if it is a version this module would accept.

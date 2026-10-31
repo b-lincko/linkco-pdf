@@ -9373,7 +9373,7 @@ milestone = "M13"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools"]
+evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools", "crates/automation/tests/roundtrip.rs::every_document_changing_tool_is_exempled_or_explained", "crates/automation/tests/roundtrip.rs::every_example_matches_the_schema_it_sits_in", "crates/automation/tests/roundtrip.rs::every_example_survives_a_save_and_a_reopen"]
 notes = "tools grow as features land"
 
 [[feature]]
@@ -9397,7 +9397,7 @@ milestone = "M13"
 status = "shipped"
 commands = []
 tools = ["command_list"]
-evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools"]
+evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools", "crates/automation/tests/roundtrip.rs::every_document_changing_tool_is_exempled_or_explained", "crates/automation/tests/roundtrip.rs::every_example_matches_the_schema_it_sits_in", "crates/automation/tests/roundtrip.rs::every_example_survives_a_save_and_a_reopen"]
 notes = ""
 
 [[feature]]

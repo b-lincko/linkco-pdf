@@ -322,7 +322,7 @@ fn search_tools(args: &Value, policy: &crate::Policy) -> Result<Value, (&'static
         let t = all.iter().find(|t| t.name == name).ok_or_else(|| refused_or_unknown(name, policy))?;
         return Ok(json!({ "tool": {
             "name": t.name, "title": t.title, "category": category_of(t.name), "description": t.description,
-            "read_only": t.read_only, "destructive": t.destructive, "input_schema": t.input_schema,
+            "read_only": t.read_only, "destructive": t.destructive, "input_schema": crate::schema::schema_with_example(t),
         } }));
     }
     let category = category.map(|c| c.trim_end_matches('_').to_lowercase()).filter(|c| !c.is_empty());
@@ -540,7 +540,9 @@ fn tool_json(t: &crate::ToolDef) -> Value {
         "name": t.name,
         "title": t.title,
         "description": t.description,
-        "inputSchema": t.input_schema,
+        // The tool's schema, with the worked example a document-changing tool carries (REC-B01),
+        // so an agent can copy a call that is known to work.
+        "inputSchema": crate::schema::schema_with_example(t),
         "annotations": { "title": t.title, "readOnlyHint": t.read_only, "destructiveHint": t.destructive, "idempotentHint": t.read_only || matches!(t.name, "doc_save" | "doc_optimize" | "doc_export_data" | "measure_export" | "doc_export_images" | "doc_export_office" | "doc_export_all_images" | "doc_export_text" | "image_save"), "openWorldHint": false },
     })
 }

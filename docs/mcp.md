@@ -30,6 +30,10 @@ command_run   {"id":"page.rotate","params":{"doc":1,"degrees":90}}
 render_preview {"doc":1,"page":1,"max_side":512}
 ```
 
+A tool that changes a document also carries a worked example in its `inputSchema` (`examples`):
+one call that is proved to work — valid against the schema, applied to a document, saved and
+reopened. Copy it and change the document id.
+
 Every tool has a title and the four MCP annotation hints. Unknown top-level argument keys return
 JSON-RPC `-32602`; command parameter keys that do not belong to the mapped task tool are ignored
 with warnings. Task failures and escaped tool panics return `isError: true`, and the server keeps

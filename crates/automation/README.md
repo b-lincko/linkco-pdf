@@ -109,6 +109,16 @@ removing a tool, making an optional argument required, or changing what a tool w
 is a major bump. The MCP server reports the same version in `initialize` and `tools/list`, so the
 three cannot drift.
 
+**Every tool that changes a document carries a worked example.** `examples.rs` holds one call per
+such tool, and `schema_with_example` puts it in the tool's schema as `examples`, so
+`pdfcraft-cli schema`, `pdfcraft-cli tools` and the MCP server all show a call that is known to
+work instead of leaving the caller to guess at one. The examples are not decoration:
+`crates/automation/tests/roundtrip.rs` checks each against its own schema (keys, required keys,
+types, `minimum`, `enum`), runs it on a three-page document, saves, reopens the file in a session
+that has never seen it, and checks the change is still there. A tool that changes a document and
+has no example has a stated reason instead (`examples::why_not`), and a test holds the table to
+that, so a new writer cannot ship without someone deciding how it is shown.
+
 `ToolError::kind()` gives every failure a stable kind — `usage`, `unsupported`, `refused`,
 `failed` — using the vocabulary the command line uses for its exit codes, and `ToolError::json()`
 returns it with the message. The MCP server returns that object as a failed call's
