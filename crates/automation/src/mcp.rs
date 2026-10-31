@@ -132,7 +132,7 @@ impl McpServer {
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false, "subscribe": false } },
                     "serverInfo": { "name": "pdfcraft", "title": "Linkco PDF Editor", "version": env!("CARGO_PKG_VERSION"), "websiteUrl": pdfcraft_engine::links::APP_PAGE },
-                    "instructions": if self.compact { format!("{INSTRUCTIONS}{COMPACT_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() },
+                    "instructions": self.instructions(),
                 }))
             }
             "ping" => Ok(json!({})),
@@ -142,7 +142,7 @@ impl McpServer {
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
                 if self.compact && name == TOOL_SEARCH {
                     check_keys(name, &args, &["query", "category", "name"]).map_err(|e| (INVALID_PARAMS, e))?;
-                    return Ok(match search_tools(&args) {
+                    return Ok(match search_tools(&args, self.automation.policy()) {
                         Ok(found) => call_result(vec![Content::Json(found)]),
                         Err(message) => tool_error(&message),
                     });
@@ -186,15 +186,43 @@ impl McpServer {
 }
 
 impl McpServer {
-    /// What `tools/list` returns: every tool, or in compact mode the core set and the meta tools.
+    /// What the server tells a client about itself: the conventions, the compact note, and — when
+    /// the session is narrower than the default — the profile it runs with, so an agent is not left
+    /// guessing why `tools/list` is short.
+    fn instructions(&self) -> String {
+        let mut text = if self.compact { format!("{INSTRUCTIONS}{COMPACT_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() };
+        text.push_str(&policy_note(self.automation.policy().profile()));
+        text
+    }
+
+    /// What `tools/list` returns: every tool this session may run, or in compact mode the core set
+    /// and the meta tools. A tool the profile refuses is not listed — advertising a call that will
+    /// always be refused wastes an agent's turn and teaches it nothing.
     fn tool_list(&self) -> Vec<Value> {
         let all = crate::tools();
+        let policy = self.automation.policy();
         if !self.compact {
-            return all.iter().map(tool_json).collect();
+            return all.iter().filter(|t| policy.allows(t)).map(tool_json).collect();
         }
-        let mut out: Vec<Value> = COMPACT_CORE_TOOLS.iter().filter_map(|n| all.iter().find(|t| t.name == *n)).map(tool_json).collect();
+        let mut out: Vec<Value> =
+            COMPACT_CORE_TOOLS.iter().filter_map(|n| all.iter().find(|t| t.name == *n)).filter(|t| policy.allows(t)).map(tool_json).collect();
         out.extend(meta_tools());
         out
+    }
+}
+
+/// The sentence appended to the instructions when the session is narrower than the default.
+fn policy_note(profile: crate::Profile) -> &'static str {
+    match profile {
+        crate::Profile::Destructive => "",
+        crate::Profile::ReadOnly => {
+            " This server runs with the read-only profile: only tools that change nothing are listed or run, \
+            whatever a document says, and the profile is set where the server was started."
+        }
+        crate::Profile::Project => {
+            " This server runs with the project profile: writes stay inside its root, and a destructive tool \
+            runs only if the server was started with --approve for it. documents cannot approve anything."
+        }
     }
 }
 
@@ -267,7 +295,7 @@ fn check_keys(tool: &str, args: &Value, allowed: &[&str]) -> Result<(), String> 
 }
 
 /// `tool_search`: filter the tool table by query and category, or describe one tool in full.
-fn search_tools(args: &Value) -> Result<Value, String> {
+fn search_tools(args: &Value, policy: &crate::Policy) -> Result<Value, String> {
     if !(args.is_object() || args.is_null()) {
         return Err(format!("{TOOL_SEARCH} takes an object with optional query, category and name"));
     }
@@ -278,10 +306,11 @@ fn search_tools(args: &Value) -> Result<Value, String> {
         Some(_) => Err(format!("{TOOL_SEARCH}: {key} must be a string")),
     };
     let (query, category, name) = (text("query")?, text("category")?, text("name")?);
-    let all = crate::tools();
+    // Only the tools this session could actually run: a search that offered a refused tool would
+    // send the agent off to call something that cannot work.
+    let all: Vec<crate::ToolDef> = crate::tools().into_iter().filter(|t| policy.allows(t)).collect();
     if let Some(name) = name {
-        let t =
-            all.iter().find(|t| t.name == name).ok_or_else(|| format!("unknown tool {name:?}; call {TOOL_SEARCH} without name to list the tools"))?;
+        let t = all.iter().find(|t| t.name == name).ok_or_else(|| refused_or_unknown(name, policy))?;
         return Ok(json!({ "tool": {
             "name": t.name, "title": t.title, "category": category_of(t.name), "description": t.description,
             "read_only": t.read_only, "destructive": t.destructive, "input_schema": t.input_schema,
@@ -302,6 +331,18 @@ fn search_tools(args: &Value) -> Result<Value, String> {
         .map(|t| json!({ "name": t.name, "category": category_of(t.name), "description": first_sentence(t.description), "read_only": t.read_only }))
         .collect();
     Ok(json!({ "count": found.len(), "tools": found, "categories": categories }))
+}
+
+/// Why `tool_search` has no `name`: either it is not a tool at all, or the profile refuses it.
+fn refused_or_unknown(name: &str, policy: &crate::Policy) -> String {
+    match crate::tools::find(name) {
+        Some(def) => format!(
+            "the {} profile refuses {name} ({}); nothing in a document can widen it",
+            policy.profile().name(),
+            if def.destructive { "it can overwrite a file or remove content" } else { "it writes a file" }
+        ),
+        None => format!("unknown tool {name:?}; call {TOOL_SEARCH} without name to list the tools"),
+    }
 }
 
 /// `tool_call`: the tool name and its arguments from the meta tool's own arguments.

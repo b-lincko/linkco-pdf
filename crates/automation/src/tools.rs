@@ -883,6 +883,7 @@ pub fn tools() -> Vec<ToolDef> {
             .cmd("actions.wizard")
             .with(schema(json!({}), &[])),
         t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. Returns each file's step log or error.")
+            .destructive()
             .cmd("actions.wizard")
             .with(schema(
                 json!({
@@ -913,6 +914,9 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["operation", "paths", "folder"],
         )),
+        t("policy_status", "What this session may do", "The permission profile this session was started with (read-only, project or destructive), the destructive tools it was started with by name, how many tools it can run, which ones it refuses, and the root. Nothing in an open document can change any of it.")
+            .ro()
+            .with(schema(json!({}), &[])),
         t("doc_compare", "Compare files", "Compare the text of two open documents: other is the older version, doc the newer. Returns counts and each change (replaced, inserted, deleted) with the old and new text, pages (1-based) and rectangles (points, origin bottom-left).")
             .ro()
             .cmd("doc.compare")
@@ -955,6 +959,7 @@ pub fn tools() -> Vec<ToolDef> {
                 &["doc"],
             )),
         t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). Returns, per file, the output path, word count and skipped pages, or the error.")
+            .destructive()
             .cmd("ocr.recognize_batch")
             .with(schema(
                 json!({

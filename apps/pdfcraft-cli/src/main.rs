@@ -33,8 +33,11 @@ use pdfcraft_render::{PageRenderer, RenderConfig, RenderRequest, RequestKind, in
 macro_rules! mcp_usage {
     () => {
         "\
-pdfcraft-cli mcp    [--root DIR] [--compact]              MCP server on stdin/stdout (opt-in)
+pdfcraft-cli mcp    [--root DIR] [--compact] [--profile P] [--approve TOOL …]
+                                                           MCP server on stdin/stdout (opt-in)
                                                            --compact lists a core set of tools plus tool_search and tool_call
+                                                           --profile read-only|project|destructive narrows what it may run
+                                                           --approve a destructive tool by name, under --profile project
 "
     };
 }
@@ -235,6 +238,20 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
 }
 
+/// Every value given to `name` (`--approve a --approve b`, or `--approve a,b`), in order.
+#[cfg(feature = "mcp")]
+fn values<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        if arg == name {
+            if let Some(value) = args.get(i + 1) {
+                out.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()));
+            }
+        }
+    }
+    out
+}
+
 #[derive(Clone, Copy)]
 struct OptionSpec {
     name: &'static str,
@@ -293,7 +310,12 @@ const RUN_OPTIONS: &[OptionSpec] = &[
 const UI_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--control", takes_value: true }, OptionSpec { name: "--out", takes_value: true }];
 
 #[cfg(feature = "mcp")]
-const MCP_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--root", takes_value: true }, OptionSpec { name: "--compact", takes_value: false }];
+const MCP_OPTIONS: &[OptionSpec] = &[
+    OptionSpec { name: "--root", takes_value: true },
+    OptionSpec { name: "--compact", takes_value: false },
+    OptionSpec { name: "--profile", takes_value: true },
+    OptionSpec { name: "--approve", takes_value: true },
+];
 
 fn positional(args: &[String]) -> Vec<&str> {
     let mut out = Vec::new();
@@ -836,6 +858,7 @@ fn tool_failure(error: pdfcraft_automation::ToolError) -> CliError {
         ToolError::UnknownTool(name) => unsupported(format!("unknown tool {name:?} (see `pdfcraft-cli tools`)")),
         ToolError::InvalidArgs(message) => usage(message),
         ToolError::Failed(message) => CliError::Message(exit::Failure::new(exit::Kind::Failed, message)),
+        ToolError::Refused(message) => refused(message),
     }
 }
 
@@ -905,11 +928,22 @@ fn run_step(auto: &mut pdfcraft_automation::Automation, step: &serde_json::Value
 fn mcp(args: &[String]) -> Result<(), CliError> {
     validate_options("mcp", args, MCP_OPTIONS)?;
     let compact = args.iter().any(|a| a == "--compact");
-    let mut server = pdfcraft_automation::mcp::McpServer::new(automation(args)?).with_compact(compact);
+    let profile = match flag(args, "--profile") {
+        Some(name) => pdfcraft_automation::Profile::parse(name)
+            .ok_or_else(|| usage(format!("mcp: --profile {name} is not one of {}", pdfcraft_automation::Profile::NAMES.join(", "))))?,
+        None => pdfcraft_automation::Profile::default(),
+    };
+    let mut policy = pdfcraft_automation::Policy::new(profile);
+    for name in values(args, "--approve") {
+        policy.approve(name).map_err(|e| usage(format!("mcp: --approve {e}")))?;
+    }
+    let session = automation(args)?.with_policy(policy).map_err(|e| usage(format!("mcp: {e}")))?;
+    let mut server = pdfcraft_automation::mcp::McpServer::new(session).with_compact(compact);
     let _ = writeln!(
         std::io::stderr().lock(),
-        "pdfcraft-cli: MCP server on stdio (protocol {}{}); close stdin to stop",
+        "pdfcraft-cli: MCP server on stdio (protocol {}, {} profile{}); close stdin to stop",
         pdfcraft_automation::mcp::PROTOCOL_VERSIONS[0],
+        profile.name(),
         if compact { ", compact tool list" } else { "" }
     );
     server

@@ -57,9 +57,29 @@ its other colours, fonts, values and unknown PDF dictionary keys. `"none"` remov
 or fill colour. Names, rectangles, rotations and captions require the single-field form. Results keep
 `field` for single edits and return `fields` for batches. CLI and MCP use the same tool.
 
+## Permission profiles
+
+`Automation::with_policy(Policy::new(Profile::…))` narrows what a session will run before any
+argument is read: `ReadOnly` allows only the tools the table marks `read_only`, `Project` allows
+everything but destructive tools plus those approved one by one (`Policy::approve("doc_save")`,
+which refuses a name that is not a destructive tool), and `Destructive` — the default — allows
+everything, as every earlier version did. `Project` needs a root; `with_policy` refuses it without
+one rather than promising confinement it cannot keep.
+
+The check is in `Automation::call`, so it covers `pdfcraft-cli run`, the MCP server and direct
+callers alike, and the MCP layer lists only the tools the policy allows (`tools/list`,
+`tool_search`) so an agent is not invited to call something that will be refused.
+`policy_status` reports the profile, the approvals, the available and refused tools, and the root.
+
+**Nothing in a document can change it.** The policy is set where the session starts; the profile is
+not stored in, read from or affected by a document, and a PDF whose text, script, links, comments
+or embedded files say "you now have every permission" is read as content — the refusals are the
+same before and after opening it, which is what
+`crates/automation/tests/policy.rs::nothing_inside_a_document_can_widen_the_profile` checks.
+
 ## MCP server
 
-**Opt-in only.** Nothing starts it automatically, and it opens no port. It runs while `pdfcraft-cli mcp [--root DIR]` runs, normally launched by an agent from its MCP configuration. It stops when stdin closes. The CLI's `mcp` Cargo feature (on by default) compiles it out entirely when disabled.
+**Opt-in only.** Nothing starts it automatically, and it opens no port. It runs while `pdfcraft-cli mcp [--root DIR] [--profile P] [--approve TOOL]` runs, normally launched by an agent from its MCP configuration. It stops when stdin closes. The CLI's `mcp` Cargo feature (on by default) compiles it out entirely when disabled.
 
 `pdfcraft-cli mcp --compact` (or `McpServer::with_compact(true)`) keeps `tools/list` short for agents with small context budgets. It lists only the core tools (`mcp::COMPACT_CORE_TOOLS`: open, info, save, close, render, text extract and find, combine, split, undo) plus the common command/inspection/preview tools and two meta tools: `tool_search` (optional `query` and `category`, the name prefix; or `name` for one tool's full `input_schema`) and `tool_call` (`name` and `arguments`, run through the same `Automation::call`). `tools/call` by name keeps working for every tool, and the server instructions mention the meta tools. Without the flag nothing changes.
 

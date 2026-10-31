@@ -21,6 +21,7 @@ mod links;
 pub mod mcp;
 mod measure;
 mod plan;
+mod policy;
 mod printing;
 mod redact;
 mod signing;
@@ -35,6 +36,7 @@ use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, 
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
+pub use policy::{Policy, Profile};
 pub use tools::{ToolDef, tools};
 
 /// One piece of a tool's result.
@@ -55,13 +57,16 @@ pub enum ToolError {
     InvalidArgs(String),
     /// The tool ran and failed (the message is for the agent to read).
     Failed(String),
+    /// The session's profile does not run this tool. Refused before any argument is read, and
+    /// nothing in a document can change that: the profile is set where the session was started.
+    Refused(String),
 }
 
 impl std::fmt::Display for ToolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ToolError::UnknownTool(t) => write!(f, "unknown tool {t:?}"),
-            ToolError::InvalidArgs(m) | ToolError::Failed(m) => f.write_str(m),
+            ToolError::InvalidArgs(m) | ToolError::Failed(m) | ToolError::Refused(m) => f.write_str(m),
         }
     }
 }
@@ -93,6 +98,8 @@ pub struct Automation {
     renderers: HashMap<DocId, (Arc<Vec<u8>>, PageRenderer)>,
     /// Extracted page text per document version (the working bytes it was taken from).
     texts: HashMap<DocId, TextCache>,
+    /// What this session may do, decided where it was started (`crate::Policy`, REC-B09).
+    policy: Policy,
 }
 
 impl Default for Automation {
@@ -103,7 +110,7 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, renderers: HashMap::new(), texts: HashMap::new() }
+        Self { session: Session::new(), root: None, renderers: HashMap::new(), texts: HashMap::new(), policy: Policy::default() }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -148,6 +155,9 @@ impl Automation {
             return Err(ToolError::InvalidArgs("arguments must be a JSON object".into()));
         }
         let def = tools::find(name).ok_or_else(|| ToolError::UnknownTool(name.into()))?;
+        // Before the arguments are looked at: a refused tool is refused whatever it was asked to do,
+        // so no argument can talk its way past the profile.
+        self.policy.check(def)?;
         tools::check_args(def, args)?;
         let a = Args(args);
         let out = match name {
@@ -594,6 +604,7 @@ impl Automation {
             "pdfa_convert" => self.pdfa_convert(&a)?,
             "action_run" => self.action_run(&a)?,
             "batch_plan" => self.batch_plan(&a)?,
+            "policy_status" => self.policy_status(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
             "doc_compare_mark" => self.doc_compare_mark(&a)?,
             "form_set_actions" => self.form_set_actions(&a)?,
