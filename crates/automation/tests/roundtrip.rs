@@ -131,15 +131,17 @@ fn check_against_schema(tool: &str, args: &Value) -> Result<(), String> {
         if !matches {
             return Err(format!("{tool}: {key} is {value}, but the schema says {kind}"));
         }
-        if let (Some(min), Some(n)) = (spec["minimum"].as_i64(), value.as_i64()) {
-            if n < min {
-                return Err(format!("{tool}: {key} is {n}, under the schema's minimum of {min}"));
-            }
+        if let Some(min) = spec["minimum"].as_i64()
+            && let Some(n) = value.as_i64()
+            && n < min
+        {
+            return Err(format!("{tool}: {key} is {n}, under the schema's minimum of {min}"));
         }
-        if let (Some(allowed), Some(s)) = (spec["enum"].as_array(), value.as_str()) {
-            if !allowed.iter().any(|a| a.as_str() == Some(s)) {
-                return Err(format!("{tool}: {key} is {s:?}, which is not one of the schema's values"));
-            }
+        if let Some(allowed) = spec["enum"].as_array()
+            && let Some(s) = value.as_str()
+            && !allowed.iter().any(|a| a.as_str() == Some(s))
+        {
+            return Err(format!("{tool}: {key} is {s:?}, which is not one of the schema's values"));
         }
     }
     for required in schema["required"].as_array().into_iter().flatten() {
