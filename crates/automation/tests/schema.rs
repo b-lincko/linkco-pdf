@@ -58,10 +58,10 @@ fn every_failure_kind_is_the_one_documented() {
         (ToolError::Refused("the read-only profile refuses doc_save".into()), "refused"),
         (ToolError::Failed("in.pdf: not a PDF".into()), "failed"),
     ];
-    for (error, kind) in documented {
-        assert_eq!(error.kind(), kind, "{error}");
+    for (error, kind) in &documented {
+        assert_eq!(error.kind(), *kind, "{error}");
         let json = error.json();
-        assert_eq!(json["kind"], kind);
+        assert_eq!(json["kind"], *kind);
         // The message a person reads is the same one the display form gives.
         assert_eq!(json["message"], error.to_string());
     }
@@ -77,5 +77,5 @@ fn the_schema_document_is_json_a_client_can_read() {
     let read: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(read["schema_version"], json!(TOOL_SCHEMA_VERSION));
     assert!(read["tools"].as_array().unwrap().iter().any(|t| t["name"] == "doc_open"));
-    assert_eq!(schema::parse_version(TOOL_SCHEMA_VERSION).is_some(), true);
+    assert!(schema::parse_version(TOOL_SCHEMA_VERSION).is_some());
 }

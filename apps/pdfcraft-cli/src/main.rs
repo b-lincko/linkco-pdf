@@ -933,12 +933,12 @@ fn schema(args: &[String]) -> Result<(), CliError> {
     let mut document = pdfcraft_automation::schema::schema_document();
     if let Some(asked) = flag(args, "--schema-version") {
         if !positional(args).is_empty() {
-            return Err(usage("schema: --schema-version takes no other arguments".into()));
+            return Err(usage("schema: --schema-version takes no other arguments"));
         }
         let Some(wanted) = pdfcraft_automation::schema::parse_version(asked) else {
             return Err(usage(format!("schema: {asked:?} is not a version like {mine}; versions are major.minor")));
         };
-        let (major, minor) = pdfcraft_automation::schema::parse_version(mine).unwrap_or((0, 0));
+        let (major, _) = pdfcraft_automation::schema::parse_version(mine).unwrap_or((0, 0));
         // The same major: additive changes only, so the caller's expectations still hold.
         let compatible = wanted.0 == major;
         document["asked"] = serde_json::json!({ "schema_version": asked, "compatible": compatible });
