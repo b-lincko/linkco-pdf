@@ -75,6 +75,7 @@ pub fn why_not(tool: &str) -> Option<&'static str> {
     const SETUP: &str = "needs a field, comment or link that the shared fixture does not have; covered in its own test";
     const CREATES: &str = "creates a document instead of changing one; covered in its own test";
     const PRINTS: &str = "sends the document to a printer, a preview or a rasteriser rather than changing it";
+    const NEEDS_A_MARK: &str = "needs a redaction mark to remove, which one call cannot have made first";
     Some(match tool {
         // Writes a file (the document is read, or a copy is written).
         "doc_save"
@@ -141,7 +142,6 @@ pub fn why_not(tool: &str) -> Option<&'static str> {
         | "content_delete"
         | "object_move"
         | "redact_apply"
-        | "redact_clear"
         | "doc_unprotect"
         | "doc_remove_marks"
         | "doc_flatten"
@@ -151,6 +151,7 @@ pub fn why_not(tool: &str) -> Option<&'static str> {
         | "measure_perimeter"
         | "measure_area" => SETUP,
         "doc_print" => PRINTS,
+        "redact_clear" => NEEDS_A_MARK,
         "doc_create" | "doc_revisions" | "doc_open_revision" => CREATES,
         _ => return None,
     })

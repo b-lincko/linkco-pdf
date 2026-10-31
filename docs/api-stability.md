@@ -15,8 +15,9 @@ version at the top; the MCP server reports the same number in `initialize`
 The version is bumped like this:
 
 * **minor** — a tool is added, an argument is added and is optional, a result gains a field, a
-  message gets better, `limits_status` or a similar report gains a counter. A caller that ignores
-  what it does not know keeps working.
+  schema gains something a caller may ignore (a worked example, a description), a message gets
+  better, `limits_status` or a similar report gains a counter. A caller that ignores what it does
+  not know keeps working.
 * **major** — a tool is removed or renamed, an optional argument becomes required, a documented
   result field is removed or changes meaning, or an existing tool starts doing something different
   to a document. Anything that breaks a caller that was working.
@@ -24,8 +25,8 @@ The version is bumped like this:
 Ask the build whether it speaks your revision:
 
 ```
-$ pdfcraft-cli schema --schema-version 1.0
-{ "schema_version": "1.0", "asked": { "schema_version": "1.0", "compatible": true }, … }
+$ pdfcraft-cli schema --schema-version 1.1
+{ "schema_version": "1.1", "asked": { "schema_version": "1.1", "compatible": true }, … }
 ```
 
 A different major version is not compatible, and the command exits **3** (`unsupported`) while
@@ -76,7 +77,7 @@ the example is a call the test suite proves: it is valid against the schema, it 
 document, and the change survives a save and a reopen. An example is documentation of a call that
 works, not a promise that the values in it are the only ones worth using — replacing `doc: 1` with
 your document is expected. Adding an example where there was none, or correcting one that was
-wrong, is not a breaking change.
+wrong, is not a breaking change — the examples arrived with schema version 1.1.
 
 ## What is not part of the interface
 

@@ -37,7 +37,11 @@ use crate::tools::{ToolDef, tools};
 ///
 /// Bump the minor for an addition or a harmless change, the major for anything that breaks a
 /// caller. See the module documentation for the two lists.
-pub const TOOL_SCHEMA_VERSION: &str = "1.0";
+///
+/// 1.1 added the worked example a document-changing tool carries inside its schema
+/// (`input_schema.examples`): additive, ignored by a caller that does not know it, and documented in
+/// `docs/api-stability.md` as the kind of change that bumps the minor version rather than the major.
+pub const TOOL_SCHEMA_VERSION: &str = "1.1";
 
 /// The whole table as one document, with the version that names it.
 ///
