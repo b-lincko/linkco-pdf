@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B026 · **Active stage:** basic
+**Active component:** B027 · **Active stage:** basic
 
-## Basic (357 records)
+## Basic (358 records)
 
-complete: 26, in_progress: 5, pending: 326
+complete: 26, in_progress: 7, pending: 325
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -44,6 +44,7 @@ complete: 26, in_progress: 5, pending: 326
 | B024 | [x] Stop any background job, and see what every one of them is doing | P0 | complete | REC-R04 |
 | B025 | [x] Say what a destructive batch would write before it writes it | P0 | complete | REC-B03 |
 | B026 | [x] A session may only do what it was started to do | P0 | complete | REC-B09 |
+| B027 | [ ] One session cannot eat the machine | P0 | in_progress | REC-B07 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -74,7 +75,7 @@ complete: 26, in_progress: 5, pending: 326
 | REC-A08 | [ ] Large targets zoom and non-drag alternatives | P0 | pending | '- |
 | REC-B02 | [ ] Versioned schemas stable exit codes and structured errors | P0 | pending | '- |
 | REC-B03 | [ ] Dry-run and destructive-operation approval plan | P0 | in_progress | '- |
-| REC-B07 | [ ] Bounded worker pools and resource controls | P0 | pending | '- |
+| REC-B07 | [ ] Bounded worker pools and resource controls | P0 | in_progress | '- |
 | REC-B09 | [ ] MCP permission profiles and per-action approvals | P0 | in_progress | '- |
 | REC-C01 | [ ] Interoperable annotation appearance regression suite | P0 | pending | comment.appearance-generation comment.text-box |
 | REC-D01 | [ ] Plain-language signature status and signed-revision viewer | P0 | pending | sign.signatures-panel sign.signature-properties sign.compare-signed-version |
@@ -1197,3 +1198,25 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41186112877
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41186112916
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41186112878
+
+### B027: One session cannot eat the machine
+
+- Status: **in_progress**; parent(s): REC-B07.
+- Acceptance: A session can be started with a worker count, an input size limit, an output size limit, a batch item limit and a time limit; a file over the input limit is refused from its size before a byte is read, a result over the output limit is refused before its file is opened so nothing half-written is left, a batch over the item limit is refused before a single path is resolved, and a batch under a time limit stops between items, finishing the one in hand and reporting the rest as skipped rather than dropping them; every refusal names the flag that would allow it and changes nothing; and the session reports its limits and what they refused through limits_status, so the bound is visible rather than assumed.
+- Audit: Started from the recommendation's done-when — concurrency, input and output quotas and timeouts that can be configured and audited — and asked what each part could mean in a program that is mostly one file in, one file out. Four decisions. First, the bounds belong to the session, not to a tool call: a call that could set its own limit could raise it, and the point is that the person who started the session decides what it may take. Limits is therefore a field of Automation, set with with_limits, and every tool reads it. Second, a quota must be answered before the work, not after: checking the size of a file you have already read into memory saves nothing, so doc_open stats before it reads, Budget::write checks before it opens the file — which is also why a refused save leaves no file at all — and the batch tools answer the item count before resolving a path or creating the folder they would write into. Third, the time limit is asked between items rather than enforced inside one. That is a bound on how much new work a batch starts, not an interruption: a file already being written is finished, and the files not started are reported as skipped so a caller can tell 'not done' from 'failed'. The alternative — killing an item mid-write — would mean the resource control could itself leave a half-written file, which is the fault the quotas exist to prevent. Fourth, and the least obvious: every quota defaults to zero, meaning no limit. A quiet 100 MiB default would have looked prudent and would have refused documents people already open, with an error about a limit they never set; the worker count is the only bound the build chooses for itself, because making the machine's core count a limit someone set would be a fiction. The audit is part of the answer, not decoration: checks, refusals by kind, batches stopped by the time limit and bytes written are counted per session and reported by limits_status, so a caller can see what the bound did. What the audit did not build, and records as a limit: the time limit is not a wall-clock kill inside an item, so one enormous file can still take as long as it takes; the desktop interface sets none of this (its own render pool has its own watchdog, untouched here); the counters live in memory for the session and are not persisted; and a limit is not a sandbox — an allowed call still runs with the process's own memory and file access inside the root.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable from it), so none of the Rust was compiled or run here: it was compiled and run by CI (see ci). The Python gates, the formatting check and the asset hashes were run here. Not claimed: a time limit enforced inside a single item, limits set or shown in the desktop interface, limits persisted between sessions, any sandboxing beyond the tool boundary, or a bound on the render pool — that pool has its own worker count and stuck-page watchdog and was left as it was.
+- Ci: pending
+- Notes: Bounded part of REC-B07 (bounded worker pools and resource controls). The recommendation asks for concurrency, input and output quotas and timeouts that can be configured and audited. Before this, there was no bound anywhere a session could set: doc_open read whatever it was given into memory, every tool wrote whatever it produced, action_run and ocr_recognize_files took as many paths as a caller listed, and the only concurrency constant was a private min(8) inside text extraction. There is now a Limits value and a per-session Audit in crates/automation/src/limits.rs. The quotas are answered where the work would start rather than after it: doc_open stats the file and refuses before reading it, every tool write goes through Budget::write (the twenty write_atomic call sites in this crate now go through it), and the batch tools answer their item limit before they resolve a path or create a folder — batch_plan included, because a plan that promised a batch the run would refuse would be a plan that lied. The time limit is asked between items, not during one: a file in hand is finished and the rest are reported as skipped, the same rule the job centre's stop follows, so a batch cannot leave a half-written file behind. The worker count replaces the private min(8) in extract_parallel. Defaults are the honest part of the design: every quota and the time limit default to zero, which means no limit, because a build that silently refuses a legitimate 900 MiB save is worse than one that does not, and because narrowing a session is something a person asks for. pdfcraft-cli run and mcp take --max-workers, --max-input-mib, --max-output-mib, --max-batch and --time-limit-ms, and limits_status reports the numbers and the audit.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: crates/automation/tests/limits.rs::an_input_over_the_limit_is_refused_before_it_is_read opens a document under a 64-byte input limit and gets a refusal naming the limit and --max-input-mib, with no document opened and the refusal counted, then opens the same file under a limit that fits.
+- Local evidence: crates/automation/tests/limits.rs::an_output_over_the_limit_leaves_no_file checks that a save over the output limit is refused before the file is opened, that no file exists afterwards, that the audit counts the refusal and zero bytes written, and that a generous limit writes and counts the bytes it wrote.
+- Local evidence: crates/automation/tests/limits.rs::a_batch_over_the_limit_is_refused_before_anything_is_read refuses action_run and batch_plan with three paths under a two-item limit before the output folder exists, then runs the same batch under a three-item limit and gets three files.
+- Local evidence: crates/automation/tests/limits.rs::a_time_limit_stops_a_batch_between_items_and_keeps_what_it_finished runs three files under a one-nanosecond time limit, gets the first written, the other two reported as skipped, timed_out true and exactly one file in the folder, then runs the same batch without a time limit and gets all three.
+- Local evidence: crates/automation/tests/limits.rs::the_worker_count_is_clamped_and_reported checks that zero workers means one, that the default is between one and eight, that limits_status reports the count, and that extraction still covers every page under a limit of two.
+- Local evidence: crates/automation/tests/limits.rs::a_session_without_limits_reports_zeroes_and_still_counts_what_it_did checks the default report is all zeroes (no limit) and that ordinary work is still counted.
+- Local evidence: apps/pdfcraft-cli/tests/limits.rs::the_limits_flags_reach_the_session starts the real MCP server with all five flags and reads them back from limits_status.
+- Local evidence: apps/pdfcraft-cli/tests/limits.rs::a_bad_limit_is_a_usage_error checks that a zero worker count, a non-numeric value and a negative value are usage errors (exit 2) naming the flag, before the server starts.
+- Local evidence: apps/pdfcraft-cli/tests/limits.rs::a_session_without_the_flags_reports_no_limits checks the default run reports no quotas and a worker count of one to eight.
+- Local evidence: The hostile-argument and root-confinement suites exercise limits_status and batch_plan with malformed and escaping arguments.
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes.
+- Local evidence: All recorded asset SHA-256s match their files.

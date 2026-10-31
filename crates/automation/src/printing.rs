@@ -4,7 +4,7 @@
 use pdfcraft_engine::print::{self, Binding, BookletSubset, Content, Layout, Orientation, PAPERS, PageOrder, SizeMode, Subset, spool};
 use serde_json::{Value, json};
 
-use crate::{Args, Automation, Result, ToolError, failed, write_atomic};
+use crate::{Args, Automation, Result, ToolError, failed};
 
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
@@ -136,7 +136,7 @@ impl Automation {
         match (a.opt_str("path")?, a.opt_str("printer")?) {
             (Some(p), None) => {
                 let path = self.resolve(p, true)?;
-                write_atomic(&path, &bytes)?;
+                self.resources.write(&path, &bytes)?;
                 out["path"] = json!(path.to_string_lossy());
             }
             (None, Some(printer)) => {

@@ -77,6 +77,29 @@ or embedded files say "you now have every permission" is read as content — the
 same before and after opening it, which is what
 `crates/automation/tests/policy.rs::nothing_inside_a_document_can_widen_the_profile` checks.
 
+## Limits
+
+`Automation::with_limits(Limits { workers, max_input_bytes, max_output_bytes, max_batch_items,
+item_timeout })` bounds what one session will read, write and do at once (`crates/automation/src/
+limits.rs`). Workers default to the machine's cores capped at 8 (1 on the web build); every quota
+and the time limit default to zero, which means no limit, so nothing that was allowed before is
+refused now.
+
+The quotas are answered **before the work starts**: `doc_open` reads the file's size and refuses a
+file over `max_input_bytes` without reading a byte of it, `doc_save` and every other writer go
+through `Budget::write`, which refuses an over-size result before the file is opened, and the batch
+tools answer `max_batch_items` before they resolve a single path. A batch under a time limit asks
+between items, so the file in hand is finished and the rest are reported as skipped rather than
+abandoned half-written.
+
+`limits_status` reports the limits and an audit per session — checks, refusals by kind, batches
+stopped by the time limit and bytes written — so a caller can see what its bound did rather than
+guess. `pdfcraft-cli run|mcp` take `--max-workers`, `--max-input-mib`, `--max-output-mib`,
+`--max-batch` and `--time-limit-ms`.
+
+A limit is not a sandbox: an allowed call still runs with the process's own memory and file access,
+and the time limit is checked between items, not enforced inside one.
+
 ## MCP server
 
 **Opt-in only.** Nothing starts it automatically, and it opens no port. It runs while `pdfcraft-cli mcp [--root DIR] [--profile P] [--approve TOOL]` runs, normally launched by an agent from its MCP configuration. It stops when stdin closes. The CLI's `mcp` Cargo feature (on by default) compiles it out entirely when disabled.

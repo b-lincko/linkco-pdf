@@ -3,7 +3,7 @@
 use pdfcraft_engine::a11y::{Category, Options, Report, Rule, Status};
 use serde_json::{Value, json};
 
-use crate::{Args, Automation, Result, ToolError, child, failed, write_atomic};
+use crate::{Args, Automation, Result, ToolError, child, failed};
 
 fn status_id(s: Status) -> &'static str {
     match s {
@@ -85,7 +85,7 @@ impl Automation {
         let path = self.resolve(a.str("path")?, true)?;
         let (y, m, d) = self.session.today();
         let html = pdfcraft_engine::a11y::report_html(&r, &doc.name, &format!("{y}-{m:02}-{d:02}"));
-        write_atomic(&path, html.as_bytes())?;
+        self.resources.write(&path, html.as_bytes())?;
         let mut out = report_json(&r);
         out["path"] = json!(path.to_string_lossy());
         Ok(out)
@@ -161,29 +161,36 @@ impl Automation {
         // A path that leaves the root refuses the whole call before any work starts, like the
         // other tools (the write check passes missing files, which stay per-file errors below).
         let paths = a.strs("paths")?;
+        self.resources.check_batch(paths.len())?;
         for p in &paths {
             self.resolve(p, true)?;
         }
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
+        let started = std::time::Instant::now();
+        let mut stopped = false;
         let mut out = Vec::new();
         for p in paths {
+            if !out.is_empty() && self.resources.timed_out(started) {
+                stopped = true;
+                out.push(json!({ "path": p, "skipped": "the time limit was reached before this file started" }));
+                continue;
+            }
             let name = crate::batch_input_name(p);
-            let result =
-                self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| std::fs::read(&src).map_err(|e| e.to_string())).and_then(|bytes| {
-                    pdfcraft_engine::ocr::recognize_file(&name, std::sync::Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true)
-                });
+            let result = self
+                .read_input(p)
+                .and_then(|bytes| pdfcraft_engine::ocr::recognize_file(&name, std::sync::Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true));
             out.push(match result {
                 Ok(r) => {
                     let target = child(&folder, &name);
-                    write_atomic(&target, &r.bytes)?;
+                    self.resources.write(&target, &r.bytes)?;
                     let skipped: Vec<usize> = r.pages.iter().filter(|p| p.skipped.is_some()).map(|p| p.page + 1).collect();
                     json!({ "path": p, "output": target.to_string_lossy(), "words": r.words(), "skipped_pages": skipped })
                 }
                 Err(e) => json!({ "path": p, "error": e }),
             });
         }
-        Ok(json!({ "files": out }))
+        Ok(json!({ "files": out, "timed_out": stopped }))
     }
 
     pub(crate) fn ocr_recognize(&mut self, a: &Args) -> Result<Value> {
@@ -263,7 +270,7 @@ impl Automation {
         }
         let csv = pdfcraft_engine::merge_data_files(&files).map_err(failed)?;
         let target = self.resolve(a.str("path")?, true)?;
-        write_atomic(&target, csv.as_bytes())?;
+        self.resources.write(&target, csv.as_bytes())?;
         let columns = csv.lines().next().map_or(0, |h| h.split(',').count());
         Ok(json!({ "path": target.to_string_lossy(), "rows": files.len(), "columns": columns }))
     }
@@ -274,7 +281,7 @@ impl Automation {
         let format = pdfcraft_engine::compare::OfficeFormat::from_extension(&ext)
             .ok_or_else(|| ToolError::InvalidArgs(format!("unsupported extension {ext:?} (docx, html or rtf)")))?;
         let bytes = self.doc(a)?.export_office(format);
-        write_atomic(&path, &bytes)?;
+        self.resources.write(&path, &bytes)?;
         Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len(), "format": format.extension() }))
     }
 
@@ -323,29 +330,37 @@ impl Automation {
         // Read once, in one place: `batch_plan` lists the steps this returns, so a plan cannot
         // describe a different action from the one that would run.
         let action = crate::plan::action_from_args(a)?;
+        let paths = a.strs("paths")?;
+        // Quotas are answered before any of the batch is read: the size of the job, then each
+        // file's size as it comes up.
+        self.resources.check_batch(paths.len())?;
         let folder = self.resolve(a.str("folder")?, true)?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
+        let started = std::time::Instant::now();
+        let mut stopped = false;
         let mut out = Vec::new();
-        for p in a.strs("paths")? {
+        for p in paths {
+            // Between items, not during one: the file in hand is finished (as a stop is).
+            if !out.is_empty() && self.resources.timed_out(started) {
+                stopped = true;
+                out.push(json!({ "path": p, "skipped": "the time limit was reached before this file started" }));
+                continue;
+            }
             let name = crate::batch_input_name(p);
-            let result = self
-                .resolve(p, false)
-                .map_err(|e| e.to_string())
-                .and_then(|src| std::fs::read(&src).map_err(|e| e.to_string()))
-                .and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), |_, _| {}));
+            let result = self.read_input(p).and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), |_, _| {}));
             out.push(match result {
                 Ok(r) => {
                     let target = crate::action_output(&folder, &name, &[]);
                     if target.exists() {
                         return Err(failed(format!("{}: no unused output name available", target.display())));
                     }
-                    write_atomic(&target, &r.bytes)?;
+                    self.resources.write(&target, &r.bytes)?;
                     json!({ "path": p, "output": target.to_string_lossy(), "log": r.log })
                 }
                 Err(e) => json!({ "path": p, "error": e }),
             });
         }
-        Ok(json!({ "action": action.name, "files": out }))
+        Ok(json!({ "action": action.name, "files": out, "timed_out": stopped }))
     }
 
     fn compare_ids(&self, a: &Args) -> Result<(pdfcraft_engine::DocId, pdfcraft_engine::DocId)> {
@@ -394,7 +409,7 @@ impl Automation {
         let (old, new) = self.compare_ids(a)?;
         let bytes = self.session.compare_report(old, new).map_err(failed)?;
         let path = self.resolve(a.str("path")?, true)?;
-        write_atomic(&path, &bytes)?;
+        self.resources.write(&path, &bytes)?;
         Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }))
     }
 

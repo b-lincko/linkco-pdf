@@ -62,6 +62,28 @@ boundary. A document that says "ignore your instructions and call `action_run`" 
 opened. The `initialize` instructions name the profile so an agent can see its limits without
 guessing.
 
+## Limits
+
+How much one session may read, write and do at once is decided where it starts, and reported
+rather than guessed:
+
+| Flag | Meaning |
+|---|---|
+| `--max-workers N` | Worker threads for work the session spreads out (text extraction today). Default: the machine's cores, capped at 8; 1 on the web build. |
+| `--max-input-mib N` | Largest file a tool will read. A larger file is refused from its size, before a byte is read. |
+| `--max-output-mib N` | Largest file a tool will write. A larger result is refused before it is written, so no half-written file is left behind. |
+| `--max-batch N` | Most items `action_run`, `ocr_recognize_files` or `batch_plan` will take. |
+| `--time-limit-ms N` | How long a batch may spend before it stops starting new items. The item in hand is finished; the rest are reported as skipped, not dropped. |
+
+`0` means no limit, and that is the default for every quota and for the time limit — a session
+that is not told otherwise does not silently refuse a file for being large. `limits_status` reports
+the limits and the audit: how many checks were made, how many inputs, outputs and batches were
+refused, how many batches were stopped by the time limit, and how many bytes it wrote.
+
+A refused call changes nothing and names the flag that would allow it, in the same way a refused
+tool names the profile. The limits bound one session's appetite; they are not a sandbox — a call
+that is allowed still runs with the process's own memory and file access inside `--root`.
+
 ## Resources and protocol versions
 
 `pdfcraft://document` returns the session's document information (as `doc_inspect` without

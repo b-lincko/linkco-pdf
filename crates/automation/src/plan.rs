@@ -38,6 +38,9 @@ impl Automation {
         if paths.is_empty() {
             return Err(ToolError::InvalidArgs("paths must not be empty: there is nothing to plan".into()));
         }
+        // The batch limit is part of what a plan has to be honest about: a run of this size would
+        // be refused, so the plan is too.
+        self.resources.check_batch(paths.len())?;
         // The folder is resolved as a write target (the plan says where the run would put files),
         // but it is never created: planning leaves the filesystem exactly as it found it.
         let folder = self.resolve(a.str("folder")?, true)?;

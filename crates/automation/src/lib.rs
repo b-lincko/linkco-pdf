@@ -16,6 +16,7 @@ mod comments;
 mod content;
 mod conventions;
 mod forms;
+mod limits;
 mod links;
 #[cfg(feature = "mcp")]
 pub mod mcp;
@@ -36,6 +37,7 @@ use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, 
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
+pub use limits::{Budget, Limits, MIB};
 pub use policy::{Policy, Profile};
 pub use tools::{ToolDef, tools};
 
@@ -100,6 +102,9 @@ pub struct Automation {
     texts: HashMap<DocId, TextCache>,
     /// What this session may do, decided where it was started (`crate::Policy`, REC-B09).
     policy: Policy,
+    /// How much it may read, write and do at once (`crate::Budget`, REC-B07). Shared with the
+    /// workers a batch starts, so one audit covers the whole session.
+    resources: Arc<Budget>,
 }
 
 impl Default for Automation {
@@ -110,7 +115,14 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, renderers: HashMap::new(), texts: HashMap::new(), policy: Policy::default() }
+        Self {
+            session: Session::new(),
+            root: None,
+            renderers: HashMap::new(),
+            texts: HashMap::new(),
+            policy: Policy::default(),
+            resources: Arc::new(Budget::default()),
+        }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -139,8 +151,9 @@ impl Automation {
     /// given, so `/dev/stdout` and the like still work. Returns where the file went.
     pub fn write_output(&self, path: &str, bytes: &[u8]) -> Result<PathBuf> {
         let target = self.resolve(path, true)?;
+        self.resources.check_output(bytes.len())?;
         if self.root.is_some() {
-            write_atomic(&target, bytes)?;
+            self.resources.write(&target, bytes)?;
         } else {
             std::fs::write(&target, bytes).map_err(|e| failed(format!("{path}: {e}")))?;
         }
@@ -331,7 +344,7 @@ impl Automation {
                 // As in the app, a copy that isn't smaller is not written (#490).
                 let written = bytes.len() < before;
                 if written {
-                    write_atomic(&path, &bytes)?;
+                    self.resources.write(&path, &bytes)?;
                 }
                 json!({ "path": path.to_string_lossy(), "written": written, "bytes_before": before, "bytes_after": bytes.len(), "merged_objects": merged })
             }
@@ -395,7 +408,7 @@ impl Automation {
                     if path.extension().is_none() {
                         path.set_extension(ext);
                     }
-                    write_atomic(&path, &bytes)?;
+                    self.resources.write(&path, &bytes)?;
                     json!({ "path": path.to_string_lossy(), "format": ext, "bytes": bytes.len() })
                 } else {
                     use pdfcraft_engine::ImageEdit;
@@ -605,6 +618,7 @@ impl Automation {
             "action_run" => self.action_run(&a)?,
             "batch_plan" => self.batch_plan(&a)?,
             "policy_status" => self.policy_status(&a)?,
+            "limits_status" => self.limits_status(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
             "doc_compare_mark" => self.doc_compare_mark(&a)?,
             "form_set_actions" => self.form_set_actions(&a)?,
@@ -687,6 +701,9 @@ impl Automation {
 
     fn doc_open(&mut self, a: &Args) -> Result<Value> {
         let path = self.resolve(a.str("path")?, false)?;
+        // The input quota is answered from the file's size, before a byte of it is read.
+        let size = std::fs::metadata(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?.len();
+        self.resources.check_input(size)?;
         let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let id = self.session.open(name, Some(path.to_string_lossy().into_owned()), Arc::new(bytes), a.opt_str("password")?).map_err(failed)?;
@@ -722,7 +739,7 @@ impl Automation {
             self.apply(a, Edit::FlattenFillSign)?;
         }
         let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) }.map_err(failed)?;
-        write_atomic(&target, &bytes)?;
+        self.resources.write(&target, &bytes)?;
         let path = target.to_string_lossy().into_owned();
         self.session.mark_saved(id, bytes.clone(), Some(path.clone())).map_err(failed)?;
         Ok(json!({ "path": path, "bytes": bytes.len(), "incremental": !full, "document": summary(self.doc(a)?) }))
@@ -893,7 +910,7 @@ impl Automation {
                 .collect::<Result<_>>()?,
         };
         let (bytes, r) = self.session.optimized_bytes(id, &settings, &discard).map_err(failed)?;
-        write_atomic(&path, &bytes)?;
+        self.resources.write(&path, &bytes)?;
         let o = &r.optimize;
         Ok(json!({
             "path": path.to_string_lossy(),
@@ -1020,7 +1037,7 @@ impl Automation {
         if tool == "doc_export_text" {
             let path = self.resolve(a.str("path")?, true)?;
             let text = ex.text_of(&pages).map_err(failed)?;
-            write_atomic(&path, text.as_bytes())?;
+            self.resources.write(&path, text.as_bytes())?;
             return Ok(json!({ "path": path.to_string_lossy(), "pages": pages.len(), "bytes": text.len() }));
         }
         let folder = self.resolve(a.str("folder")?, true)?;
@@ -1031,7 +1048,7 @@ impl Automation {
             let mut files = Vec::new();
             for (k, img) in out.images.iter().enumerate() {
                 let path = child(&folder, &pdfcraft_engine::export::image_file_name(&stem, img, k + 1));
-                write_atomic(&path, &img.data)?;
+                self.resources.write(&path, &img.data)?;
                 files.push(json!({ "path": path.to_string_lossy(), "page": img.page + 1, "width": img.width, "height": img.height }));
             }
             let skipped: Vec<Value> = out.skipped.iter().map(|(p, r, why)| json!({ "page": p + 1, "object": r.num, "reason": why })).collect();
@@ -1050,7 +1067,7 @@ impl Automation {
         for p in pages {
             let img = ex.image(p, dpi, format).map_err(failed)?;
             let path = child(&folder, &format!("{stem}_page_{}.{}", p + 1, format.extension()));
-            write_atomic(&path, &img)?;
+            self.resources.write(&path, &img)?;
             files.push(path.to_string_lossy().into_owned());
             // A page too large for the renderer at `dpi` is drawn at the most it allows.
             let used = ex.dpi_used(p, dpi);
@@ -1221,7 +1238,7 @@ impl Automation {
         let out = a.opt_str("out")?;
         if let Some(out) = out {
             let path = self.resolve(out, true)?;
-            write_atomic(&path, &bytes)?;
+            self.resources.write(&path, &bytes)?;
             result["path"] = json!(path.to_string_lossy());
         }
         if a.opt_bool("open")?.unwrap_or(out.is_none()) {
@@ -1279,7 +1296,7 @@ impl Automation {
                 Ok((pdfcraft_engine::SourceKind::Pdf, ..)) => json!({ "path": p, "skipped": "already a PDF" }),
                 Ok((_, stem, pdf)) => {
                     let target = unused(&dir, &stem);
-                    write_atomic(&target, &pdf)?;
+                    self.resources.write(&target, &pdf)?;
                     json!({ "path": p, "output": target.to_string_lossy(), "bytes": pdf.len() })
                 }
                 Err(e) => json!({ "path": p, "error": e }),
@@ -1301,7 +1318,7 @@ impl Automation {
             for &p in &pages {
                 let bytes = self.session.extract(id, &[p]).map_err(failed)?;
                 let path = child(&dir, &format!("{stem}-page{}.pdf", p + 1));
-                write_atomic(&path, &bytes)?;
+                self.resources.write(&path, &bytes)?;
                 files.push(path.to_string_lossy().into_owned());
             }
             json!({ "files": files })
@@ -1447,7 +1464,7 @@ impl Automation {
                 unique = format!("{}-{n}.pdf", file.trim_end_matches(".pdf"));
             }
             let path = child(&dir, &unique);
-            write_atomic(&path, bytes)?;
+            self.resources.write(&path, bytes)?;
             files.push(json!({ "path": path.to_string_lossy(), "first_page": first, "last_page": last }));
         }
         Ok(json!({ "files": files }))
@@ -1537,7 +1554,7 @@ impl Automation {
         let mut missing: Vec<usize> = pages.iter().copied().filter(|p| entry.1.get(*p).is_some_and(Option::is_none)).collect();
         missing.sort_unstable();
         missing.dedup();
-        for (p, text) in extract_parallel(&bytes, password, &missing) {
+        for (p, text) in extract_parallel(&bytes, password, &missing, self.resources.limits().workers) {
             let text = Arc::new(text.map_err(|e| failed(format!("page {}: {e}", p + 1)))?);
             if let Some(slot) = entry.1.get_mut(p) {
                 *slot = Some(text);
@@ -1935,7 +1952,12 @@ fn encode_png(width: u32, height: u32, premultiplied: &[u8]) -> Result<Vec<u8>> 
 }
 
 /// Extract the text of `pages` (0-based) with one renderer per worker thread.
-fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[usize]) -> Vec<(usize, std::result::Result<PageText, String>)> {
+fn extract_parallel(
+    bytes: &Arc<Vec<u8>>,
+    password: Option<Arc<str>>,
+    pages: &[usize],
+    workers: usize,
+) -> Vec<(usize, std::result::Result<PageText, String>)> {
     let extract = |r: &mut PageRenderer, p: usize| {
         let out = r.render(RenderRequest { page: p, kind: RequestKind::Text, tile: None, scale: 1.0, tag: 0 });
         match out.error {
@@ -1944,7 +1966,8 @@ fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[u
         }
     };
     let config = RenderConfig { password, ..Default::default() };
-    let workers = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(8) };
+    // The session's own worker limit decides, not the machine: that is the point of the limit.
+    let workers = if cfg!(target_arch = "wasm32") { 1 } else { workers.max(1) };
     // Small jobs aren't worth a second parse of the document.
     if workers == 1 || pages.len() < 8 {
         let mut r = PageRenderer::new(bytes.clone(), config);

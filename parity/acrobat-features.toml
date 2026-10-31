@@ -10109,6 +10109,18 @@ evidence = ["crates/automation/tests/automation.rs::batch_plan_names_the_files_t
 notes = "batch_plan takes the same arguments as the batch writer it plans (an Action Wizard run over files, or OCR into searchable copies) and answers what that call would do, writing nothing: per input, the exact destination the run would pick (including the numbered name it falls back to for a repeated input name), whether a file is already there and would be replaced, the input's size, pages, title and encryption, the steps or changes that would apply, and what cannot be undone; approve holds the call that would carry it out. Partial because the interface's Action Wizard and Recognize Text in Files dialogs do not show this plan before they start, and there is no approval step that can refuse a run."
 
 [[feature]]
+id = "misc.resource-limits"
+title = "Bounded worker pools with configurable, audited input/output quotas and time limits"
+area = "B"
+tier = "P2"
+milestone = "M4"
+status = "partial"
+commands = ["actions.wizard", "ocr.recognize_batch"]
+tools = ["limits_status", "action_run", "ocr_recognize_files", "batch_plan"]
+evidence = ["crates/automation/tests/limits.rs::an_input_over_the_limit_is_refused_before_it_is_read", "crates/automation/tests/limits.rs::an_output_over_the_limit_leaves_no_file", "crates/automation/tests/limits.rs::a_batch_over_the_limit_is_refused_before_anything_is_read", "crates/automation/tests/limits.rs::a_time_limit_stops_a_batch_between_items_and_keeps_what_it_finished", "crates/automation/tests/limits.rs::the_worker_count_is_clamped_and_reported", "apps/pdfcraft-cli/tests/limits.rs::the_limits_flags_reach_the_session"]
+notes = "A session carries a Limits value (workers, input bytes, output bytes, batch items, item time limit) and a per-session audit: workers default to the machine's cores capped at 8 (1 on the web build), every quota and the time limit default to zero, which means no limit. The quotas are answered before the work starts — doc_open from the file's size before reading it, every tool write through Budget::write before the file is opened, the batch tools and batch_plan from the path count before a path is resolved — and a batch under a time limit asks between items, finishing the one in hand and reporting the rest as skipped. Refusals name the CLI flag that would allow them and change nothing; limits_status reports the limits and the audit. Partial because there is no per-tool or per-run override inside the interface, the time limit is checked between items rather than enforced inside one, and the counts are per session in memory rather than persisted."
+
+[[feature]]
 id = "misc.permission-profiles"
 title = "Read-only, project-scoped and destructive permission profiles, and per-action approvals"
 area = "B"

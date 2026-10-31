@@ -918,6 +918,9 @@ pub fn tools() -> Vec<ToolDef> {
         t("policy_status", "What this session may do", "The permission profile this session was started with (read-only, project or destructive), the destructive tools it was started with by name, how many tools it can run, which ones it refuses, and the root. Nothing in an open document can change any of it.")
             .ro()
             .with(schema(json!({}), &[])),
+        t("limits_status", "This session's limits", "The worker count, input and output size limits, batch limit and time limit this session was started with (0 means no limit), and the audit: checks made, inputs, outputs and batches refused, batches stopped by the time limit, and bytes written. A refused call changes nothing.")
+            .ro()
+            .with(schema(json!({}), &[])),
         t("doc_compare", "Compare files", "Compare the text of two open documents: other is the older version, doc the newer. Returns counts and each change (replaced, inserted, deleted) with the old and new text, pages (1-based) and rectangles (points, origin bottom-left).")
             .ro()
             .cmd("doc.compare")

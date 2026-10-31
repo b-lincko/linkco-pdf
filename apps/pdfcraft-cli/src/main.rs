@@ -65,6 +65,8 @@ pdfcraft-cli check  <files or dirs…> [--timeout 20] [--dpi 36] [--json out.jso
 pdfcraft-cli tools                                       automation tools and their JSON Schemas
 pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png]
 pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open\", \"args\": {…}}, …]
+                      [--max-workers N] [--max-input-mib N] [--max-output-mib N] [--max-batch N] [--time-limit-ms N]
+                                                           limits for this session (0 = no limit); limits_status reports them
 ",
     mcp_usage!(),
     "\
@@ -252,6 +254,39 @@ fn values<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
     out
 }
 
+/// A number given to `flag`, checked against `range`; a bad value is a usage error before any file
+/// is touched.
+fn number(args: &[String], flag_name: &str, range: std::ops::RangeInclusive<u64>) -> Result<Option<u64>, CliError> {
+    let Some(value) = flag(args, flag_name) else { return Ok(None) };
+    let n: u64 = value.parse().map_err(|_| usage(format!("{flag_name} {value} is not a number of 0–{}", range.end())))?;
+    if !range.contains(&n) {
+        return Err(usage(format!("{flag_name} {n} is out of range: 0–{}", range.end())));
+    }
+    Ok(Some(n))
+}
+
+/// The session's limits from its flags: workers, input and output size, batch size and a time
+/// limit. Every one is opt-in, so a command that says nothing gets the defaults.
+fn limits(args: &[String]) -> Result<pdfcraft_automation::Limits, CliError> {
+    let mut limits = pdfcraft_automation::Limits::default();
+    if let Some(n) = number(args, "--max-workers", 1..=1024)? {
+        limits.workers = n as usize;
+    }
+    if let Some(n) = number(args, "--max-input-mib", 0..=1_048_576)? {
+        limits.max_input_bytes = n.saturating_mul(pdfcraft_automation::MIB);
+    }
+    if let Some(n) = number(args, "--max-output-mib", 0..=1_048_576)? {
+        limits.max_output_bytes = n.saturating_mul(pdfcraft_automation::MIB);
+    }
+    if let Some(n) = number(args, "--max-batch", 0..=1_000_000)? {
+        limits.max_batch_items = n as usize;
+    }
+    if let Some(n) = number(args, "--time-limit-ms", 0..=86_400_000)? {
+        limits.item_timeout = std::time::Duration::from_millis(n);
+    }
+    Ok(limits)
+}
+
 #[derive(Clone, Copy)]
 struct OptionSpec {
     name: &'static str,
@@ -306,6 +341,11 @@ const RUN_OPTIONS: &[OptionSpec] = &[
     OptionSpec { name: "--root", takes_value: true },
     OptionSpec { name: "--script", takes_value: true },
     OptionSpec { name: "--out", takes_value: true },
+    OptionSpec { name: "--max-workers", takes_value: true },
+    OptionSpec { name: "--max-input-mib", takes_value: true },
+    OptionSpec { name: "--max-output-mib", takes_value: true },
+    OptionSpec { name: "--max-batch", takes_value: true },
+    OptionSpec { name: "--time-limit-ms", takes_value: true },
 ];
 const UI_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--control", takes_value: true }, OptionSpec { name: "--out", takes_value: true }];
 
@@ -315,6 +355,11 @@ const MCP_OPTIONS: &[OptionSpec] = &[
     OptionSpec { name: "--compact", takes_value: false },
     OptionSpec { name: "--profile", takes_value: true },
     OptionSpec { name: "--approve", takes_value: true },
+    OptionSpec { name: "--max-workers", takes_value: true },
+    OptionSpec { name: "--max-input-mib", takes_value: true },
+    OptionSpec { name: "--max-output-mib", takes_value: true },
+    OptionSpec { name: "--max-batch", takes_value: true },
+    OptionSpec { name: "--time-limit-ms", takes_value: true },
 ];
 
 fn positional(args: &[String]) -> Vec<&str> {
@@ -842,7 +887,7 @@ fn run_child(exe: &Path, file: &Path, dpi: &str, timeout: Duration) -> serde_jso
 // ---- automation --------------------------------------------------------------------------------
 
 fn automation(args: &[String]) -> Result<pdfcraft_automation::Automation, CliError> {
-    let a = pdfcraft_automation::Automation::new();
+    let a = pdfcraft_automation::Automation::new().with_limits(limits(args)?);
     match flag(args, "--root") {
         Some(root) => a.with_root(root).map_err(|e| usage(format!("--root {root}: {e}"))),
         None => Ok(a),
