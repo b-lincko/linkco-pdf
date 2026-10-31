@@ -100,6 +100,20 @@ guess. `pdfcraft-cli run|mcp` take `--max-workers`, `--max-input-mib`, `--max-ou
 A limit is not a sandbox: an allowed call still runs with the process's own memory and file access,
 and the time limit is checked between items, not enforced inside one.
 
+## The interface's promises
+
+`crates/automation/src/schema.rs` holds `TOOL_SCHEMA_VERSION` (`major.minor`) and builds the whole
+table as one document (`schema::schema_document()`), which `pdfcraft-cli schema` prints. Within a
+major version changes are additive — a new tool, a new optional argument, a new result field;
+removing a tool, making an optional argument required, or changing what a tool writes to a document
+is a major bump. The MCP server reports the same version in `initialize` and `tools/list`, so the
+three cannot drift.
+
+`ToolError::kind()` gives every failure a stable kind — `usage`, `unsupported`, `refused`,
+`failed` — using the vocabulary the command line uses for its exit codes, and `ToolError::json()`
+returns it with the message. The MCP server returns that object as a failed call's
+`structuredContent.error`. See `docs/api-stability.md`.
+
 ## MCP server
 
 **Opt-in only.** Nothing starts it automatically, and it opens no port. It runs while `pdfcraft-cli mcp [--root DIR] [--profile P] [--approve TOOL]` runs, normally launched by an agent from its MCP configuration. It stops when stdin closes. The CLI's `mcp` Cargo feature (on by default) compiles it out entirely when disabled.

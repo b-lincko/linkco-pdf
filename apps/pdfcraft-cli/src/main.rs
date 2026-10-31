@@ -63,6 +63,8 @@ pdfcraft-cli extract <in.pdf> --pages 1,3,5 --out out.pdf
 pdfcraft-cli split   <in.pdf> (--every N | --before 3,7) [--out-dir DIR]
 pdfcraft-cli check  <files or dirs…> [--timeout 20] [--dpi 36] [--json out.json]
 pdfcraft-cli tools                                       automation tools and their JSON Schemas
+pdfcraft-cli schema                                  the tool table with its version [--schema-version V]
+                                                           asks whether this build speaks V (exit 3 if not)
 pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png]
 pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open\", \"args\": {…}}, …]
                       [--max-workers N] [--max-input-mib N] [--max-output-mib N] [--max-batch N] [--time-limit-ms N]
@@ -99,6 +101,7 @@ fn main() -> ExitCode {
         Some("check") => check(&args[1..]),
         Some("check-one") => check_one(&args[1..]),
         Some("tools") => tools(),
+        Some("schema") => schema(&args[1..]),
         Some("run") => run(&args[1..]),
         Some("ui") => ui(&args[1..]),
         #[cfg(feature = "mcp")]
@@ -909,11 +912,48 @@ fn tool_failure(error: pdfcraft_automation::ToolError) -> CliError {
 }
 
 fn tools() -> Result<(), CliError> {
-    let list: Vec<serde_json::Value> = pdfcraft_automation::tools()
-        .iter()
-        .map(|t| serde_json::json!({ "name": t.name, "description": t.description, "read_only": t.read_only, "command": t.command, "input_schema": t.input_schema }))
-        .collect();
+    let list: Vec<serde_json::Value> = pdfcraft_automation::tools().iter().map(pdfcraft_automation::schema::tool_json).collect();
     stdout_line(format_args!("{}", serde_json::to_string_pretty(&list).unwrap_or_default()))?;
+    Ok(())
+}
+
+/// The options `schema` understands.
+const SCHEMA_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--schema-version", takes_value: true }];
+
+/// `schema`: the whole tool table, as one document with the version that names it (REC-B02).
+///
+/// `--schema-version V` asks a caller's question the other way round: does this build speak the
+/// revision I was written against? It answers `compatible` — whether V has the same major number,
+/// which is what the version promises (see `crates/automation/src/schema.rs`) — and exits 3
+/// (`unsupported`) when it does not, so a script can refuse to start rather than discover the
+/// mismatch halfway through a job.
+fn schema(args: &[String]) -> Result<(), CliError> {
+    validate_options("schema", args, SCHEMA_OPTIONS)?;
+    let mine = pdfcraft_automation::TOOL_SCHEMA_VERSION;
+    let mut document = pdfcraft_automation::schema::schema_document();
+    if let Some(asked) = flag(args, "--schema-version") {
+        if !positional(args).is_empty() {
+            return Err(usage("schema: --schema-version takes no other arguments".into()));
+        }
+        let Some(wanted) = pdfcraft_automation::schema::parse_version(asked) else {
+            return Err(usage(format!("schema: {asked:?} is not a version like {mine}; versions are major.minor")));
+        };
+        let (major, minor) = pdfcraft_automation::schema::parse_version(mine).unwrap_or((0, 0));
+        // The same major: additive changes only, so the caller's expectations still hold.
+        let compatible = wanted.0 == major;
+        document["asked"] = serde_json::json!({ "schema_version": asked, "compatible": compatible });
+        stdout_line(format_args!("{}", serde_json::to_string_pretty(&document).unwrap_or_default()))?;
+        if !compatible {
+            return Err(unsupported(format!(
+                "schema: this build speaks schema {mine}, which is not compatible with {asked} (a different major version)"
+            )));
+        }
+        return Ok(());
+    }
+    if let Some(extra) = positional(args).first() {
+        return Err(usage(format!("schema: unexpected argument {extra:?}")));
+    }
+    stdout_line(format_args!("{}", serde_json::to_string_pretty(&document).unwrap_or_default()))?;
     Ok(())
 }
 

@@ -25,6 +25,7 @@ mod plan;
 mod policy;
 mod printing;
 mod redact;
+pub mod schema;
 mod signing;
 mod tools;
 
@@ -39,6 +40,7 @@ use serde_json::{Value, json};
 
 pub use limits::{Budget, Limits, MIB};
 pub use policy::{Policy, Profile};
+pub use schema::TOOL_SCHEMA_VERSION;
 pub use tools::{ToolDef, tools};
 
 /// One piece of a tool's result.
@@ -62,6 +64,34 @@ pub enum ToolError {
     /// The session's profile does not run this tool. Refused before any argument is read, and
     /// nothing in a document can change that: the profile is set where the session was started.
     Refused(String),
+}
+
+impl ToolError {
+    /// The stable, machine-readable kind of this failure: what a caller checks instead of reading
+    /// the message.
+    ///
+    /// The names are the same vocabulary the command line uses for its exit codes (`usage`,
+    /// `unsupported`, `refused`, `failed`), so one script can act on either without learning two
+    /// sets of words. They are part of the interface: a kind's meaning is never reused for
+    /// something else, and a new kind is an addition, not a rename.
+    ///
+    /// `malformed` — input that is not a document that can be read — is not raised here: the engine
+    /// reports a damaged file as a failure, and the command line decides the kind from the command
+    /// that was running. See `docs/api-stability.md`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::UnknownTool(_) => "unsupported",
+            Self::InvalidArgs(_) => "usage",
+            Self::Failed(_) => "failed",
+            Self::Refused(_) => "refused",
+        }
+    }
+
+    /// The failure as a value a caller can serialise: its kind and its message, nothing inferred
+    /// from prose. The MCP server returns this as a failed call's `structuredContent.error`.
+    pub fn json(&self) -> Value {
+        json!({ "kind": self.kind(), "message": self.to_string() })
+    }
 }
 
 impl std::fmt::Display for ToolError {

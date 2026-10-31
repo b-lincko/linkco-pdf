@@ -10121,6 +10121,18 @@ evidence = ["crates/automation/tests/limits.rs::an_input_over_the_limit_is_refus
 notes = "A session carries a Limits value (workers, input bytes, output bytes, batch items, item time limit) and a per-session audit: workers default to the machine's cores capped at 8 (1 on the web build), every quota and the time limit default to zero, which means no limit. The quotas are answered before the work starts — doc_open from the file's size before reading it, every tool write through Budget::write before the file is opened, the batch tools and batch_plan from the path count before a path is resolved — and a batch under a time limit asks between items, finishing the one in hand and reporting the rest as skipped. Refusals name the CLI flag that would allow them and change nothing; limits_status reports the limits and the audit. Partial because there is no per-tool or per-run override inside the interface, the time limit is checked between items rather than enforced inside one, and the counts are per session in memory rather than persisted."
 
 [[feature]]
+id = "misc.versioned-tool-schemas"
+title = "Versioned tool schemas and structured error kinds a script can branch on"
+area = "N"
+tier = "P1"
+milestone = "M13"
+status = "partial"
+commands = []
+tools = []
+evidence = ["crates/automation/tests/schema.rs::the_document_describes_the_table_it_is_built_from", "crates/automation/tests/schema.rs::every_failure_kind_is_the_one_documented", "apps/pdfcraft-cli/tests/schema.rs::the_schema_document_carries_its_version_and_every_tool", "apps/pdfcraft-cli/tests/schema.rs::a_different_major_version_is_unsupported_and_still_reports_the_table", "apps/pdfcraft-cli/tests/mcp_errors.rs::a_failed_call_carries_its_kind_not_only_its_message"]
+notes = "The tool table has one version (`schema_version`, major.minor) and one document: `pdfcraft-cli schema` prints every tool with its arguments under that version, `--schema-version V` answers whether this build speaks V (exit 3 when the major differs), and the MCP server reports the same number in initialize and tools/list. The rule for bumping it is written down and tested at the major level. Every ToolError carries a stable kind (usage, unsupported, refused, failed — the command line's exit-code vocabulary), and the MCP server returns it as a failed call's structuredContent.error so a client branches on the kind rather than the message. Partial because the engine's own errors are not typed (a damaged document is still `failed` at the tool boundary, `malformed` only on the command line), there is no per-tool schema-version negotiation inside a session, and the desktop interface does not read the version."
+
+[[feature]]
 id = "misc.permission-profiles"
 title = "Read-only, project-scoped and destructive permission profiles, and per-action approvals"
 area = "B"

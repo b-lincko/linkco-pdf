@@ -220,6 +220,15 @@ standard error, `{"error":{"kind":"malformed","exit_code":4,"message":"in.pdf: â
 
 The numbers are stable: a new kind is added with a new code, and an existing code is never reused.
 
+The tool table is versioned too. `pdfcraft-cli schema` prints every tool with its arguments and the
+`schema_version` they belong to, and `--schema-version V` answers whether this build speaks the
+revision a script was written against (exit 3 if it does not). Within one major version changes are
+additive; removing a tool, making an optional argument required or changing what a tool writes to a
+document is a major bump. The MCP server reports the same version in `initialize` and `tools/list`,
+and returns a failed call's stable kind (`usage`, `unsupported`, `refused`, `failed`) as
+`structuredContent.error.kind`, so an agent can branch on the kind rather than the message. The
+promise is written out in [`docs/api-stability.md`](docs/api-stability.md).
+
 ### Driving the Running App (agents and UI automation)
 
 Start the editor with a control file and an agent (or a test script) can see and operate the real interface: the widget tree with labels and positions, clicks, typing, keys, commands, panel layout and screenshots. The control channel is off unless `--control` is given; it then listens only on a random loopback port (this computer only) and requires the token written to the owner-only control file. Keep the control file in a folder only you can write; `pdfcraft-cli ui` refuses a control file that is a symbolic link.

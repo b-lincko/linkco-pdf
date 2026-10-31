@@ -131,12 +131,15 @@ impl McpServer {
                 Ok(json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false, "subscribe": false } },
-                    "serverInfo": { "name": "pdfcraft", "title": "Linkco PDF Editor", "version": env!("CARGO_PKG_VERSION"), "websiteUrl": pdfcraft_engine::links::APP_PAGE },
+                    "serverInfo": { "name": "pdfcraft", "title": "Linkco PDF Editor", "version": env!("CARGO_PKG_VERSION"), "toolSchemaVersion": crate::TOOL_SCHEMA_VERSION, "websiteUrl": pdfcraft_engine::links::APP_PAGE },
                     "instructions": self.instructions(),
                 }))
             }
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": self.tool_list() })),
+            "tools/list" => Ok(json!({
+                "tools": self.tool_list(),
+                "_meta": { "schemaVersion": crate::TOOL_SCHEMA_VERSION },
+            })),
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "tools/call needs a tool name".to_string()))?;
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
@@ -144,19 +147,21 @@ impl McpServer {
                     check_keys(name, &args, &["query", "category", "name"]).map_err(|e| (INVALID_PARAMS, e))?;
                     return Ok(match search_tools(&args, self.automation.policy()) {
                         Ok(found) => call_result(vec![Content::Json(found)]),
-                        Err(message) => tool_error(&message),
+                        Err((kind, message)) => tool_error(kind, &message),
                     });
                 }
                 if self.compact && name == TOOL_CALL {
                     check_keys(name, &args, &["name", "arguments"]).map_err(|e| (INVALID_PARAMS, e))?;
                     let (inner, inner_args) = match unwrap_tool_call(&args) {
                         Ok(pair) => pair,
-                        Err(message) => return Ok(tool_error(&message)),
+                        Err(message) => return Ok(tool_error("usage", &message)),
                     };
                     return Ok(match self.automation.call(&inner, &inner_args) {
                         Ok(content) => tool_content(&inner, content),
-                        Err(ToolError::UnknownTool(t)) => tool_error(&format!("unknown tool {t:?}; use tool_search to find the right name")),
-                        Err(e) => tool_error(&e.to_string()),
+                        Err(ToolError::UnknownTool(t)) => {
+                            tool_error("unsupported", &format!("unknown tool {t:?}; use tool_search to find the right name"))
+                        }
+                        Err(e) => tool_error(e.kind(), &e.to_string()),
                     });
                 }
                 if let Some(def) = crate::tools::find(name) {
@@ -171,7 +176,7 @@ impl McpServer {
                 match self.automation.call(name, &args) {
                     Ok(content) => Ok(tool_content(name, content)),
                     Err(ToolError::UnknownTool(t)) => Err((INVALID_PARAMS, format!("unknown tool {t:?}"))),
-                    Err(e) => Ok(tool_error(&e.to_string())),
+                    Err(e) => Ok(tool_error(e.kind(), &e.to_string())),
                 }
             }
             "resources/list" => Ok(json!({ "resources": self.resource_list() })),
@@ -295,15 +300,19 @@ fn check_keys(tool: &str, args: &Value, allowed: &[&str]) -> Result<(), String> 
 }
 
 /// `tool_search`: filter the tool table by query and category, or describe one tool in full.
-fn search_tools(args: &Value, policy: &crate::Policy) -> Result<Value, String> {
+///
+/// A failure is its stable kind and its message, so a caller can tell a misspelled argument
+/// (`usage`) from a tool it may not see (`refused`) from one that does not exist (`unsupported`).
+fn search_tools(args: &Value, policy: &crate::Policy) -> Result<Value, (&'static str, String)> {
+    let usage = |message: String| ("usage", message);
     if !(args.is_object() || args.is_null()) {
-        return Err(format!("{TOOL_SEARCH} takes an object with optional query, category and name"));
+        return Err(usage(format!("{TOOL_SEARCH} takes an object with optional query, category and name")));
     }
-    check_keys(TOOL_SEARCH, args, &["query", "category", "name"])?;
+    check_keys(TOOL_SEARCH, args, &["query", "category", "name"]).map_err(usage)?;
     let text = |key: &str| match args.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) => Ok(Some(s.trim())),
-        Some(_) => Err(format!("{TOOL_SEARCH}: {key} must be a string")),
+        Some(_) => Err(usage(format!("{TOOL_SEARCH}: {key} must be a string"))),
     };
     let (query, category, name) = (text("query")?, text("category")?, text("name")?);
     // Only the tools this session could actually run: a search that offered a refused tool would
@@ -334,14 +343,19 @@ fn search_tools(args: &Value, policy: &crate::Policy) -> Result<Value, String> {
 }
 
 /// Why `tool_search` has no `name`: either it is not a tool at all, or the profile refuses it.
-fn refused_or_unknown(name: &str, policy: &crate::Policy) -> String {
+/// The kind comes with the message so the caller gets `refused` or `unsupported` rather than one
+/// opaque failure for both.
+fn refused_or_unknown(name: &str, policy: &crate::Policy) -> (&'static str, String) {
     match crate::tools::find(name) {
-        Some(def) => format!(
-            "the {} profile refuses {name} ({}); nothing in a document can widen it",
-            policy.profile().name(),
-            if def.destructive { "it can overwrite a file or remove content" } else { "it writes a file" }
+        Some(def) => (
+            "refused",
+            format!(
+                "the {} profile refuses {name} ({}); nothing in a document can widen it",
+                policy.profile().name(),
+                if def.destructive { "it can overwrite a file or remove content" } else { "it writes a file" }
+            ),
         ),
-        None => format!("unknown tool {name:?}; call {TOOL_SEARCH} without name to list the tools"),
+        None => ("unsupported", format!("unknown tool {name:?}; call {TOOL_SEARCH} without name to list the tools")),
     }
 }
 
@@ -366,7 +380,7 @@ fn unwrap_tool_call(args: &Value) -> Result<(String, Value), String> {
 
 /// Last-resort boundary shared by every tools/call route, including compact dispatch.
 fn guarded_tool(f: impl FnOnce() -> Result<Value, (i64, String)>) -> Result<Value, (i64, String)> {
-    pdfcraft_engine::guard(f).unwrap_or_else(|message| Ok(tool_error(&format!("internal error: {message}"))))
+    pdfcraft_engine::guard(f).unwrap_or_else(|message| Ok(tool_error("failed", &format!("internal error: {message}"))))
 }
 
 fn tool_content(name: &str, content: Vec<Content>) -> Value {
@@ -382,9 +396,16 @@ fn tool_content(name: &str, content: Vec<Content>) -> Value {
     result
 }
 
-/// A failed tool call, as the agent should read it.
-fn tool_error(message: &str) -> Value {
-    json!({ "content": [{ "type": "text", "text": message }], "isError": true })
+/// A failed tool call, as the agent should read it: the message as text, and the same failure as
+/// `structuredContent.error` with its stable kind, so a client can branch on the kind rather than
+/// on the words. `kind` is one of `usage`, `unsupported`, `refused`, `failed` — the vocabulary the
+/// command line uses for its exit codes (see `docs/api-stability.md`).
+fn tool_error(kind: &str, message: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": message }],
+        "structuredContent": { "error": { "kind": kind, "message": message } },
+        "isError": true,
+    })
 }
 
 /// The resource behind a `pdfcraft://` URI.

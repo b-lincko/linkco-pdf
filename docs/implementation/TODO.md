@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B027 · **Active stage:** basic
+**Active component:** B028 · **Active stage:** basic
 
-## Basic (358 records)
+## Basic (359 records)
 
-complete: 27, in_progress: 6, pending: 325
+complete: 27, in_progress: 8, pending: 324
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -45,6 +45,7 @@ complete: 27, in_progress: 6, pending: 325
 | B025 | [x] Say what a destructive batch would write before it writes it | P0 | complete | REC-B03 |
 | B026 | [x] A session may only do what it was started to do | P0 | complete | REC-B09 |
 | B027 | [x] One session cannot eat the machine | P0 | complete | REC-B07 |
+| B028 | [ ] A caller can tell what it is talking to, and what went wrong | P0 | in_progress | REC-B02 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -73,7 +74,7 @@ complete: 27, in_progress: 6, pending: 325
 | REC-A01 | [ ] Keyboard-only complete everyday workflows | P0 | pending | a11y.keyboard-only |
 | REC-A02 | [ ] Screen-reader labels focus and navigation audit | P0 | pending | a11y.app-screen-reader |
 | REC-A08 | [ ] Large targets zoom and non-drag alternatives | P0 | pending | '- |
-| REC-B02 | [ ] Versioned schemas stable exit codes and structured errors | P0 | pending | '- |
+| REC-B02 | [ ] Versioned schemas stable exit codes and structured errors | P0 | in_progress | '- |
 | REC-B03 | [ ] Dry-run and destructive-operation approval plan | P0 | in_progress | '- |
 | REC-B07 | [ ] Bounded worker pools and resource controls | P0 | in_progress | '- |
 | REC-B09 | [ ] MCP permission profiles and per-action approvals | P0 | in_progress | '- |
@@ -1225,3 +1226,29 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41192318649
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41192318635
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41192318640
+
+### B028: A caller can tell what it is talking to, and what went wrong
+
+- Status: **in_progress**; parent(s): REC-B02.
+- Acceptance: The tool table carries one version, printed with the whole table by `pdfcraft-cli schema` and reported identically by the MCP server in `initialize` and `tools/list`; a caller can ask whether the build speaks the revision it was written against and gets an answer it can act on (exit 3 when the major version differs) rather than discovering the mismatch mid-job; the rule for bumping the version is written down and the major number is held by a test; every failure the tools can raise carries one stable kind from the same vocabulary the command line uses for its exit codes, and the MCP server returns that kind as a value (`structuredContent.error.kind`) so a client branches on it instead of parsing the message.
+- Audit: Started from the two halves B015 left open and asked what a version has to be worth. The first decision was that the version is a property of the table, not of a tool or a call: a per-tool version would multiply the things to keep in step, and the unit a caller depends on is the set of tools it can call. The second was that the number must be reported in every place a caller can look — the CLI, `initialize`, `tools/list` — from one constant, so the three cannot disagree; `tools/list` carries it in `_meta` rather than inventing a field on the protocol's own `tools` array. The third was the bump rule: a version with no stated rule is decoration. The module documents two lists (additive changes bump the minor; removing or renaming a tool, making an optional argument required, removing or changing a documented result field, or changing what a tool does to a document bumps the major), and a test holds the major at 1 so that a bump is a decision someone makes rather than a typo. Because the document is built from `tools()` at call time, the count it prints cannot drift from the tools that exist — the audit of B026 had already found one listing path that drifted from the table, so this time the description reads the table itself. Fourth, the compatibility answer: `--schema-version V` compares majors only, because that is exactly what the version promises; a minor difference is compatible in both directions and the document is printed either way so the caller can see which minor it actually got. The failure taxonomy came next, and the audit of it changed the design twice. The first draft reflected the error enum one-to-one, which would have given `unknown tool` and `invalid arguments` their own private names; reusing the command line's `usage`/`unsupported`/`refused`/`failed` instead means a person who has learned the exit codes has learned the kinds. The second draft put the kind only in the text block; the MCP result now carries it as `structuredContent.error`, because a client that has to regex a message has not been given a machine-readable error at all. The audit also found that `tool_search` collapsed 'refused' and 'unknown' into one message, which is the one distinction an agent most needs when a tool is missing from its list; it now returns the kind with the message. What the audit deliberately did not do, and records as a limit: the engine's own errors are not typed, so a damaged document still arrives as `failed` at the tool boundary — typing them would touch every engine return path and is not what this component is for; there is no negotiation inside a session (the version is what the build has, not what the caller asked it to be); and the desktop interface neither reads nor shows the version, because it calls the same library in the same process, where a mismatch cannot arise.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable from it), so none of the Rust was compiled or run here: it was compiled and run by CI (see ci). The Python gates, the formatting check and the asset hashes were run here. Not claimed: typed engine errors (`malformed` stays a command-line kind; a damaged document is `failed` at the tool boundary), per-call or per-session schema negotiation, a persisted schema history (the version is a constant in the source, and the module's documentation is the record of what changed), a frozen snapshot of every past schema, or the desktop interface reading the version.
+- Ci: pending
+- Notes: Bounded part of REC-B02 (versioned schemas, stable exit codes and structured errors), whose exit-code half was B015. What was missing was the other two halves: nothing said which revision of the tool table a build speaks, so a script written against one version had no way to check the one in front of it, and a failure at the tool boundary was prose — an agent could not tell a misspelled argument from a refused profile from a damaged file without reading English. There is now `crates/automation/src/schema.rs` (TOOL_SCHEMA_VERSION, schema_document, tool_json, parse_version) and `ToolError::kind()`/`ToolError::json()`. `pdfcraft-cli schema [--schema-version V]` prints the document; with V it answers `compatible` by major version and exits 3 (`unsupported`) when it is not, printing the document anyway so the caller can see what the build does speak. The MCP server reports the version in `serverInfo.toolSchemaVersion` and `tools/list`'s `_meta.schemaVersion`, and every failed call now carries `structuredContent.error: {kind, message}` — in the direct path, through `tool_call`, and in `tool_search` (which now distinguishes `refused` from `unsupported` instead of returning one message for both). The kinds reuse the command line's vocabulary on purpose: one script can act on an exit code or a tool failure with the same match. `docs/api-stability.md` writes the promise down, including what is explicitly not promised (message text, list order, the number of tools).
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: crates/automation/tests/schema.rs::the_document_describes_the_table_it_is_built_from compares the versioned document with the table itself: same tools in the same order, same read-only and destructive flags, and the identical input schema (one copy, not two).
+- Local evidence: crates/automation/tests/schema.rs::every_tool_is_callable_by_a_name_that_is_unique_and_has_a_schema checks unique lower-case names, an object schema with described properties, and that every required key is described.
+- Local evidence: crates/automation/tests/schema.rs::the_version_is_well_formed_and_still_the_first_major holds the major at 1, so a bump has to be a decision, and checks the version parses.
+- Local evidence: crates/automation/tests/schema.rs::every_failure_kind_is_the_one_documented checks the kind of each ToolError variant against the documented vocabulary, that json() carries the kind and the same message as the display form, and that no two kinds share a name.
+- Local evidence: crates/automation/tests/schema.rs::the_schema_document_is_json_a_client_can_read round-trips the document through text and finds doc_open in it.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_schema_document_carries_its_version_and_every_tool runs the real command and checks the version, the count, and that schema and tools list the same names in the same order.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_same_major_version_is_compatible_and_says_so asks for the current version, its `.0` and a `.99` minor and gets compatible true each time.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::a_different_major_version_is_unsupported_and_still_reports_the_table gets exit 3, the unsupported JSON envelope naming the asked version, and the document with compatible false on stdout.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::a_value_that_is_not_a_version_is_a_usage_error checks four malformed versions: exit 2, no document printed, usage on stderr.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_command_says_what_it_does_not_understand checks an unknown option, an unexpected argument, and that --help names the command and its flag.
+- Local evidence: apps/pdfcraft-cli/tests/mcp_errors.rs::the_server_names_its_schema_version_in_both_places starts the real server and reads the version from initialize and from tools/list's _meta.
+- Local evidence: apps/pdfcraft-cli/tests/mcp_errors.rs::a_failed_call_carries_its_kind_not_only_its_message checks usage for a malformed argument and failed for a missing file, with the text block still present.
+- Local evidence: apps/pdfcraft-cli/tests/mcp_errors.rs::a_refused_tool_says_refused_and_an_unknown_one_says_unsupported checks refused under the read-only profile (with the profile named in the message) and the protocol error for a name that is not a tool.
+- Local evidence: apps/pdfcraft-cli/tests/mcp_errors.rs::the_compact_meta_tools_carry_the_kind_too checks unsupported through tool_call, usage through tool_search, and refused for a tool the profile hides from tool_search.
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes.
+- Local evidence: All recorded asset SHA-256s match their files.

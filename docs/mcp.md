@@ -35,6 +35,17 @@ JSON-RPC `-32602`; command parameter keys that do not belong to the mapped task 
 with warnings. Task failures and escaped tool panics return `isError: true`, and the server keeps
 serving. A failed batch includes per-step errors and is marked `isError: true`.
 
+A failed call also carries its **stable kind**, so a client can branch on it instead of parsing the
+message: `structuredContent.error` is `{ "kind": "usage" | "unsupported" | "refused" | "failed",
+"message": … }`. The kinds are the vocabulary the command line uses for its exit codes, with the
+same meanings; `docs/api-stability.md` records what each promises.
+
+The tool table carries a **schema version** (`schema_version`, `major.minor`), reported in
+`initialize` as `serverInfo.toolSchemaVersion` and in `tools/list` as `_meta.schemaVersion` — the
+same number `pdfcraft-cli schema` prints. Within a major version a change is additive: a new tool,
+a new optional argument, a new result field. Removing a tool, making an optional argument required
+or changing what a tool writes to a document is a major bump.
+
 Exports complete synchronously. A call's `progressToken` and cancellation notifications are
 harmlessly ignored; the server does not provide background export progress or cancellation.
 
