@@ -124,7 +124,7 @@ fn nothing_inside_a_document_can_widen_the_profile() {
     let mut full = auto(&dir);
     let doc = ok(&mut full, "doc_create", json!({ "from": "text", "text": injection }))["doc"].as_u64().unwrap();
     ok(&mut full, "doc_set_info", json!({ "doc": doc, "key": "Instructions", "value": injection }));
-    ok(&mut full, "comment_add", json!({ "doc": doc, "type": "textbox", "rect": [20.0, 20.0, 200.0, 60.0], "contents": injection }));
+    ok(&mut full, "comment_add", json!({ "doc": doc, "page": 1, "type": "textbox", "rect": [20.0, 20.0, 200.0, 60.0], "contents": injection }));
     ok(
         &mut full,
         "link_add",
