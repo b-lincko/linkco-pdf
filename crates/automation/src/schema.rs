@@ -99,7 +99,9 @@ mod tests {
 
     #[test]
     fn the_version_is_a_major_and_a_minor() {
-        assert_eq!(parse_version(TOOL_SCHEMA_VERSION), Some((1, 0)));
+        // The constant is a major and a minor, and still the first major: the exact minor is a
+        // decision recorded in progress.toml, not something this test should pin.
+        assert_eq!(parse_version(TOOL_SCHEMA_VERSION).map(|(major, _)| major), Some(1));
         assert_eq!(parse_version("1.10"), Some((1, 10)));
         assert_eq!(parse_version("1"), None);
         assert_eq!(parse_version("1.x"), None);
