@@ -191,7 +191,7 @@ impl McpServer {
     /// guessing why `tools/list` is short.
     fn instructions(&self) -> String {
         let mut text = if self.compact { format!("{INSTRUCTIONS}{COMPACT_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() };
-        text.push_str(&policy_note(self.automation.policy().profile()));
+        text.push_str(policy_note(self.automation.policy().profile()));
         text
     }
 

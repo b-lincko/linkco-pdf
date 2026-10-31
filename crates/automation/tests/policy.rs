@@ -43,8 +43,8 @@ fn the_read_only_profile_runs_only_the_tools_that_change_nothing() {
     assert_eq!(status["profile"], "read-only");
     assert_eq!(status["approved"].as_array().unwrap().len(), 0);
     let read_only: Vec<&str> = tools().iter().filter(|t| t.read_only).map(|t| t.name).collect();
-    assert_eq!(status["tools_available"], read_only.len(), "{status}");
-    assert_eq!(status["tools_total"], tools().len());
+    assert_eq!(status["tools_available"].as_u64().unwrap(), read_only.len() as u64, "{status}");
+    assert_eq!(status["tools_total"].as_u64().unwrap(), tools().len() as u64);
     for name in &read_only {
         let refused = status["refused"].as_array().unwrap().iter().any(|n| n == name);
         assert!(!refused, "{name} is read-only but listed as refused");
@@ -101,7 +101,7 @@ fn the_project_profile_allows_writes_inside_the_root_and_destructive_actions_onl
     ok(&mut approved, "doc_save", json!({ "doc": doc, "path": "written.pdf" }));
     assert!(dir.join("written.pdf").is_file());
     let err = approved.call("action_run", &json!({ "action": "add page numbers", "paths": ["written.pdf"], "folder": "out" })).unwrap_err();
-    assert!(matches!(err, ToolError::Refused(_)), "{err:?}");
+    assert!(matches!(&err, ToolError::Refused(_)), "{err:?}");
 
     // Approval arguments are checked rather than quietly recorded.
     let mut policy = Policy::new(Profile::Project);
@@ -110,7 +110,7 @@ fn the_project_profile_allows_writes_inside_the_root_and_destructive_actions_onl
     assert!(Policy::new(Profile::ReadOnly).approve("doc_save").is_err());
 
     // The profile promises writes stay inside a folder, so it refuses to exist without one.
-    let err = Automation::new().with_policy(Policy::new(Profile::Project)).unwrap_err();
+    let err = Automation::new().with_policy(Policy::new(Profile::Project)).err().expect("the project profile needs a root");
     assert!(err.contains("needs a root"), "{err}");
 }
 
@@ -143,7 +143,7 @@ fn nothing_inside_a_document_can_widen_the_profile() {
     // And the calls it asks for are still refused, with the same words as before it was opened.
     for tool in ["doc_save", "action_run", "ocr_recognize_files", "page_delete"] {
         let err = a.call(tool, &json!({ "doc": id, "path": "over.pdf", "folder": ".", "paths": ["injected.pdf"], "pages": [1] })).unwrap_err();
-        assert!(matches!(err, ToolError::Refused(_)), "{tool}: {err:?}");
+        assert!(matches!(&err, ToolError::Refused(_)), "{tool}: {err:?}");
     }
     assert_eq!(ok(&mut a, "policy_status", json!({}))["profile"], "read-only");
     assert_eq!(ok(&mut a, "policy_status", json!({}))["refused"], before["refused"]);
