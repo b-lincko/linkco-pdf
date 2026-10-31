@@ -70,6 +70,30 @@ fn fixture_with_thumbnail() -> Vec<u8> {
 }
 
 /// A fresh directory with `a.pdf` (3 pages) and `b.pdf` (2 pages).
+/// The file name a plan put in a JSON string (paths differ by platform, names do not).
+fn file_name(v: &Value) -> String {
+    Path::new(v.as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned()
+}
+
+/// Every file under `dir` with its size, sorted: a plan may add or change nothing in it.
+fn tree(dir: &Path) -> Vec<(PathBuf, u64)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push((path.clone(), std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 fn workdir(test: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("pdfcraft-automation-{test}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -4214,4 +4238,208 @@ fn custom_document_properties_do_not_change_after_an_unrelated_edit() {
     ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Report" }));
     let edited = ok(&mut a, "doc_info", json!({ "doc": doc }))["custom"].clone();
     assert_eq!(edited, opened);
+}
+
+/// `batch_plan` says what a batch would write, writes nothing, and its names are the ones the run
+/// actually picks — including the `(2)` it adds rather than replacing a file (REC-B03).
+#[test]
+fn batch_plan_names_the_files_the_run_would_write_and_writes_nothing() {
+    let dir = workdir("batch-plan");
+    let mut a = auto(&dir);
+    std::fs::create_dir_all(dir.join("results")).unwrap();
+    // A file already sitting where the first result would go: the run renames rather than replaces.
+    std::fs::write(dir.join("results/a.pdf"), b"an older result").unwrap();
+    let before = tree(&dir);
+    let plan = ok(
+        &mut a,
+        "batch_plan",
+        json!({
+            "operation": "action",
+            "steps": [{ "step": "set_title", "arg": "Planned" }],
+            "paths": ["a.pdf", "b.pdf", "missing.pdf"],
+            "folder": "results"
+        }),
+    );
+    // Nothing was written, and the folder the plan names was not created for it.
+    assert_eq!(tree(&dir), before, "planning must not touch the filesystem");
+    assert_eq!(plan["dry_run"], true);
+    assert_eq!(plan["writes"], 0);
+    assert_eq!(plan["folder_exists"], true);
+
+    let targets = plan["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 3);
+    // The destination of each is what the run picks, name for name.
+    assert_eq!(file_name(&targets[0]["output"]), "a (2).pdf", "{}", targets[0]);
+    assert_eq!(targets[0]["replaces"], false, "a (2) is a free name, so nothing is replaced");
+    assert_eq!(file_name(&targets[1]["output"]), "b.pdf", "{}", targets[1]);
+    // What the input is: the counts come from the file, not from a guess.
+    assert_eq!(targets[0]["pages"], 3);
+    assert_eq!(targets[1]["pages"], 2);
+    assert_eq!(targets[0]["bytes"], std::fs::metadata(dir.join("a.pdf")).unwrap().len());
+    // A file that is not there is a per-file error, as it would be for the run.
+    assert!(targets[2]["error"].is_string(), "{}", targets[2]);
+    // The steps that would run over each target.
+    assert_eq!(targets[0]["steps"][0]["step"], "set_title");
+    assert_eq!(plan["irreversible"][0], "writes 2 file(s) into the folder; the inputs in paths are not changed");
+    assert_eq!(plan["replaces"].as_array().unwrap().len(), 0);
+
+    // The approve block is the call that carries the plan out, unchanged.
+    let approve = &plan["approve"];
+    assert_eq!(approve["tool"], "action_run");
+    let run = ok(&mut a, "action_run", approve["args"].clone());
+    assert_eq!(file_name(&run["files"][0]["output"]), "a (2).pdf", "{run}");
+    assert!(run["files"][2]["error"].is_string());
+}
+
+/// The plan of a batch that would replace files says so, by name, and says the old file is gone.
+#[test]
+fn batch_plan_reports_the_files_it_would_replace() {
+    let dir = workdir("batch-plan-replace");
+    let mut a = auto(&dir);
+    std::fs::create_dir_all(dir.join("scanned")).unwrap();
+    std::fs::write(dir.join("scanned/a.pdf"), b"last month's copy").unwrap();
+    let plan = ok(&mut a, "batch_plan", json!({ "operation": "ocr", "paths": ["a.pdf", "b.pdf"], "folder": "scanned", "skip_text_pages": false }));
+    let targets = plan["targets"].as_array().unwrap();
+    // OCR writes under the input's own name, so the file that is there is the one replaced.
+    assert_eq!(file_name(&targets[0]["output"]), "a.pdf");
+    assert_eq!(targets[0]["replaces"], true);
+    assert_eq!(targets[0]["replaces_note"], "a file is already there and would be replaced");
+    assert_eq!(targets[1]["replaces"], false);
+    let replaced = plan["replaces"].as_array().unwrap();
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(file_name(&replaced[0]), "a.pdf");
+    let why: Vec<&str> = plan["irreversible"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert!(why.iter().any(|w| w.contains("cannot be brought back")), "{why:?}");
+    assert!(why.iter().any(|w| w.contains("skip_text_pages")), "{why:?}");
+    // What OCR would change, per target.
+    assert_eq!(targets[0]["changes"].as_array().unwrap().len(), 3);
+    assert_eq!(plan["approve"]["tool"], "ocr_recognize_files");
+    // Still nothing written, and the planted file untouched.
+    assert_eq!(std::fs::read(dir.join("scanned/a.pdf")).unwrap(), b"last month's copy");
+}
+
+/// Every way of asking for a plan that cannot be answered is refused before anything is read.
+#[test]
+fn batch_plan_refuses_what_it_cannot_plan() {
+    let dir = workdir("batch-plan-refusals");
+    let mut a = auto(&dir);
+    for (args, why) in [
+        (json!({ "operation": "print", "paths": ["a.pdf"], "folder": "out" }), "unknown operation"),
+        (json!({ "operation": "action", "paths": [], "folder": "out" }), "nothing to plan"),
+        (json!({ "operation": "action", "paths": ["a.pdf"], "folder": "out" }), "give action or steps"),
+        (json!({ "operation": "action", "action": "fly to the moon", "paths": ["a.pdf"], "folder": "out" }), "no built-in action"),
+        (json!({ "operation": "action", "steps": [{ "step": "fly" }], "paths": ["a.pdf"], "folder": "out" }), "unknown step"),
+        (json!({ "operation": "ocr", "paths": ["a.pdf"], "folder": "out", "language": "tlh" }), "unsupported language"),
+    ] {
+        let err = a.call("batch_plan", &args).unwrap_err().to_string();
+        assert!(err.contains(why), "{args}: {err}");
+    }
+    // A path or folder that leaves the root refuses the plan, before anything is read.
+    for args in [
+        json!({ "operation": "action", "action": "add page numbers", "paths": ["../escape.pdf"], "folder": "out" }),
+        json!({ "operation": "action", "action": "add page numbers", "paths": ["a.pdf"], "folder": "../out" }),
+        json!({ "operation": "ocr", "paths": ["../escape.pdf"], "folder": "out" }),
+    ] {
+        let err = a.call("batch_plan", &args).unwrap_err().to_string();
+        assert!(err.contains("outside the allowed directory"), "{args}: {err}");
+    }
+    // A plan is read-only: the model is told so, and no tool call of a plan writes.
+    let def = tools().into_iter().find(|t| t.name == "batch_plan").expect("batch_plan is registered");
+    assert!(def.read_only && !def.destructive);
+    assert!(!dir.join("out").exists(), "a refused plan created the folder it named");
+}
+
+/// Two inputs with the same file name: the plan promises the numbered name the run gives the second
+/// one, rather than claiming both write the same file (REC-B03).
+#[test]
+fn batch_plan_numbers_a_repeated_input_name_as_the_run_does() {
+    let dir = workdir("batch-plan-repeated-name");
+    std::fs::create_dir_all(dir.join("left")).unwrap();
+    std::fs::create_dir_all(dir.join("right")).unwrap();
+    std::fs::write(dir.join("left/report.pdf"), fixture(1)).unwrap();
+    std::fs::write(dir.join("right/report.pdf"), fixture(2)).unwrap();
+    let mut a = auto(&dir);
+    let args = json!({ "operation": "action", "steps": [{ "step": "set_title", "arg": "Same" }], "paths": ["left/report.pdf", "right/report.pdf"], "folder": "out" });
+    let plan = ok(&mut a, "batch_plan", args);
+    let targets = plan["targets"].as_array().unwrap();
+    assert_eq!(file_name(&targets[0]["output"]), "report.pdf");
+    assert_eq!(file_name(&targets[1]["output"]), "report (2).pdf", "the second input gets the free name");
+    assert_eq!((targets[0]["replaces"].as_bool(), targets[1]["replaces"].as_bool()), (Some(false), Some(false)));
+    let run = ok(&mut a, "action_run", plan["approve"]["args"].clone());
+    assert_eq!(file_name(&run["files"][0]["output"]), "report.pdf");
+    assert_eq!(file_name(&run["files"][1]["output"]), "report (2).pdf", "{run}");
+    // The same inputs planned again now find those two names taken, and say so honestly.
+    let again = ok(
+        &mut a,
+        "batch_plan",
+        json!({ "operation": "action", "action": "add page numbers", "paths": ["left/report.pdf", "right/report.pdf"], "folder": "out" }),
+    );
+    let targets = again["targets"].as_array().unwrap();
+    assert_eq!(file_name(&targets[0]["output"]), "report (3).pdf");
+    assert_eq!(file_name(&targets[1]["output"]), "report (4).pdf");
+    assert_eq!(again["replaces"].as_array().unwrap().len(), 0);
+}
+
+/// OCR writes each result under the input's own name, so a repeated input name is a replacement
+/// inside the batch — the plan names the file that the second result would overwrite.
+#[test]
+fn batch_plan_reports_a_repeated_input_name_in_an_ocr_batch() {
+    let dir = workdir("batch-plan-ocr-repeat");
+    std::fs::create_dir_all(dir.join("one")).unwrap();
+    std::fs::create_dir_all(dir.join("two")).unwrap();
+    std::fs::write(dir.join("one/scan.pdf"), fixture(1)).unwrap();
+    std::fs::write(dir.join("two/scan.pdf"), fixture(2)).unwrap();
+    let mut a = auto(&dir);
+    let plan = ok(&mut a, "batch_plan", json!({ "operation": "ocr", "paths": ["one/scan.pdf", "two/scan.pdf"], "folder": "ocr" }));
+    let targets = plan["targets"].as_array().unwrap();
+    assert_eq!(file_name(&targets[0]["output"]), "scan.pdf");
+    assert_eq!(targets[0]["replaces"], false);
+    assert_eq!(targets[1]["replaces"], true);
+    assert!(targets[1]["replaces_note"].as_str().unwrap().contains("earlier input in this batch"), "{}", targets[1]);
+    assert_eq!(plan["replaces"].as_array().unwrap().len(), 1);
+    assert!(!dir.join("ocr").exists());
+}
+
+/// Every argument of `batch_plan` shot with values of the wrong type: each call answers with a
+/// result or a tool error, and never panics (a panic fails the test).
+#[test]
+fn batch_plan_takes_malformed_arguments_without_panicking() {
+    let dir = workdir("batch-plan-hostile");
+    let mut a = auto(&dir);
+    let good = json!({ "operation": "action", "action": "add page numbers", "paths": ["a.pdf"], "folder": "out" });
+    for (key, value) in [
+        ("operation", json!(null)),
+        ("operation", json!([])),
+        ("operation", json!(7)),
+        ("paths", json!(null)),
+        ("paths", json!("a.pdf")),
+        ("paths", json!([null])),
+        ("paths", json!([7])),
+        ("paths", json!({})),
+        ("folder", json!(null)),
+        ("folder", json!([])),
+        ("folder", json!(1)),
+        ("folder", json!("")),
+        ("action", json!(1)),
+        ("action", json!([])),
+        ("steps", json!("set_title")),
+        ("steps", json!([{}])),
+        ("steps", json!([null])),
+        ("steps", json!({ "step": "set_title" })),
+        ("dpi", json!("high")),
+        ("dpi", json!(-5)),
+        ("dpi", json!(1e9)),
+        ("language", json!(1)),
+        ("language", json!("xx")),
+        ("skip_text_pages", json!("yes")),
+    ] {
+        let mut args = good.clone();
+        args[key] = value.clone();
+        // The result does not matter — an error naming the argument is the point; a panic is not.
+        let _ = a.call("batch_plan", &args);
+    }
+    // And a plan that is wrong in every way at once.
+    let _ = a.call("batch_plan", &json!({ "operation": [], "paths": 7, "folder": {}, "steps": "x" }));
+    let _ = a.call("batch_plan", &json!({}));
+    assert!(!dir.join("out").exists(), "a malformed plan created the folder it named");
 }

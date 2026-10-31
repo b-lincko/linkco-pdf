@@ -20,6 +20,7 @@ mod links;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 mod measure;
+mod plan;
 mod printing;
 mod redact;
 mod signing;
@@ -592,6 +593,7 @@ impl Automation {
             "doc_export_office" => self.doc_export_office(&a)?,
             "pdfa_convert" => self.pdfa_convert(&a)?,
             "action_run" => self.action_run(&a)?,
+            "batch_plan" => self.batch_plan(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
             "doc_compare_mark" => self.doc_compare_mark(&a)?,
             "form_set_actions" => self.form_set_actions(&a)?,
@@ -1968,6 +1970,27 @@ fn child(dir: &Path, name: &str) -> PathBuf {
         safe.insert(0, '_');
     }
     dir.join(safe)
+}
+
+/// The name a batch writes an input under: the input's own file name, or `document.pdf` for a
+/// path that has none. `batch_plan` and the writers it plans both take it from here, so a plan
+/// cannot name a file the run will not write.
+fn batch_input_name(path: &str) -> String {
+    Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into())
+}
+
+/// Where `action_run` writes the result for an input called `name` in `folder`: under the input's
+/// own name, or under the first unused `<stem> (n).pdf` when that name is taken — by a file on
+/// disk, or by an earlier input of the same batch (`taken`). The plan calls this too, with the
+/// names it has already promised, so "the run will not replace anything" and "this is the name it
+/// will use" are the same statement in both.
+fn action_output(folder: &Path, name: &str, taken: &[PathBuf]) -> PathBuf {
+    let first = child(folder, name);
+    if !first.exists() && !taken.contains(&first) {
+        return first;
+    }
+    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+    (2..10_000u32).map(|n| child(folder, &format!("{stem} ({n}).pdf"))).find(|p| !p.exists() && !taken.contains(p)).unwrap_or(first)
 }
 
 /// `<stem>.pdf` in `dir`, or `<stem> (2).pdf` and so on when that name is taken.

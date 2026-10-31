@@ -3,7 +3,7 @@
 use pdfcraft_engine::a11y::{Category, Options, Report, Rule, Status};
 use serde_json::{Value, json};
 
-use crate::{Args, Automation, Result, ToolError, child, failed, unused, write_atomic};
+use crate::{Args, Automation, Result, ToolError, child, failed, write_atomic};
 
 fn status_id(s: Status) -> &'static str {
     match s {
@@ -166,7 +166,7 @@ impl Automation {
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
         let mut out = Vec::new();
         for p in paths {
-            let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into());
+            let name = crate::batch_input_name(p);
             let result =
                 self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| std::fs::read(&src).map_err(|e| e.to_string())).and_then(|bytes| {
                     pdfcraft_engine::ocr::recognize_file(&name, std::sync::Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true)
@@ -317,28 +317,15 @@ impl Automation {
     }
 
     pub(crate) fn action_run(&mut self, a: &Args) -> Result<Value> {
-        use pdfcraft_engine::actions::{Action, Step, builtin, run_on};
-        let action = if let Some(name) = a.opt_str("action")? {
-            builtin()
-                .into_iter()
-                .find(|x| x.name.eq_ignore_ascii_case(name))
-                .ok_or_else(|| ToolError::InvalidArgs(format!("no built-in action {name:?}")))?
-        } else {
-            let items = a.get("steps").and_then(Value::as_array).ok_or_else(|| ToolError::InvalidArgs("give action or steps".into()))?;
-            let steps = items
-                .iter()
-                .map(|it| {
-                    let id = it["step"].as_str().unwrap_or("");
-                    Step::from_id(id, it["arg"].as_str().unwrap_or("")).ok_or_else(|| ToolError::InvalidArgs(format!("unknown step {id:?}")))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Action { name: "Custom".into(), description: String::new(), steps, builtin: false }
-        };
+        use pdfcraft_engine::actions::run_on;
+        // Read once, in one place: `batch_plan` lists the steps this returns, so a plan cannot
+        // describe a different action from the one that would run.
+        let action = crate::plan::action_from_args(a)?;
         let folder = self.resolve(a.str("folder")?, true)?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let mut out = Vec::new();
         for p in a.strs("paths")? {
-            let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into());
+            let name = crate::batch_input_name(p);
             let result = self
                 .resolve(p, false)
                 .map_err(|e| e.to_string())
@@ -346,14 +333,7 @@ impl Automation {
                 .and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), |_, _| {}));
             out.push(match result {
                 Ok(r) => {
-                    let target = child(&folder, &name);
-                    let target = if target.exists() {
-                        let stem =
-                            std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
-                        unused(&folder, &stem)
-                    } else {
-                        target
-                    };
+                    let target = crate::action_output(&folder, &name, &[]);
                     if target.exists() {
                         return Err(failed(format!("{}: no unused output name available", target.display())));
                     }

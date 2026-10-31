@@ -893,6 +893,26 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["paths", "folder"],
             )),
+        t(
+            "batch_plan",
+            "Plan a batch write",
+            "Before running a destructive batch, say what it would do: for each input, the file the run would write into folder (exactly the name the run picks, including a `name (2).pdf` when the name is taken), whether a file is already there and would be replaced, the input's pages, title and size, and what cannot be undone. Writes nothing and creates no folder. operation is action (an Action Wizard run: give action or steps) or ocr (a searchable copy of each file: give dpi, language, skip_text_pages). The answer's approve field holds the exact call that would carry the plan out.",
+        )
+        .ro()
+        .cmd("actions.wizard")
+        .with(schema(
+            json!({
+                "operation": { "type": "string", "enum": ["action", "ocr"], "description": "Which batch to plan." },
+                "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                "folder": { "type": "string" },
+                "action": { "type": "string", "description": "With operation action: a built-in action's name (see action_list)." },
+                "steps": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string" }, "arg": { "type": "string" } }, "required": ["step"] } },
+                "dpi": { "type": "number", "minimum": 72, "maximum": 600, "description": "With operation ocr: the resolution pages would be read at." },
+                "language": { "type": "string", "enum": ["en"], "description": "With operation ocr: the document language." },
+                "skip_text_pages": { "type": "boolean", "description": "With operation ocr: whether pages that already have text are left alone." },
+            }),
+            &["operation", "paths", "folder"],
+        )),
         t("doc_compare", "Compare files", "Compare the text of two open documents: other is the older version, doc the newer. Returns counts and each change (replaced, inserted, deleted) with the old and new text, pages (1-based) and rectangles (points, origin bottom-left).")
             .ro()
             .cmd("doc.compare")

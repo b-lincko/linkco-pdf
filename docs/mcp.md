@@ -12,6 +12,11 @@ commands invoked through the common tools. Logs stay on stderr.
 | `doc_inspect` | `doc?`; one document's info or `{documents: [...]}` for the session |
 | `render_preview` | `doc?`, `page?` (1-based, default 1), `max_side?` (1–4096, default 1024) |
 
+A destructive batch can be inspected first: `batch_plan {operation, paths, folder, …}` answers
+what `action_run` or `ocr_recognize_files` would write — each input's destination, what would be
+replaced, what the input holds and what cannot be undone — writes nothing, and returns the call
+that would carry it out under `approve`. See the [automation guide](../crates/automation/README.md).
+
 All existing task tools remain available. Compact mode lists these five tools alongside its
 existing core set and `tool_search` / `tool_call`. There are no legacy-name aliases. The full
 [automation guide](../crates/automation/README.md) describes the tools, resources, coordinate

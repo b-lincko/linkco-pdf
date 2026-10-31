@@ -65,6 +65,36 @@ or fill colour. Names, rectangles, rotations and captions require the single-fie
 
 Implemented: `initialize` (protocol 2025-06-18, 2025-03-26, 2024-11-05), `ping`, `tools/list` (with `readOnlyHint`/`destructiveHint` annotations), `tools/call` (JSON results also returned as `structuredContent`; images as `image/png`), and `resources/list`, `resources/templates/list` and `resources/read`. The resources expose the open documents read-only: `pdfcraft://doc/{doc}/info` (JSON), `…/text`, `…/page/{page}/text` and `…/page/{page}/image{?dpi}` (PNG, 1–600 dpi). Tool failures come back as `isError: true` results, so the agent can read and recover from them.
 
+## Planning a destructive batch
+
+Two tools write a folder of results from a list of files: `action_run` (an Action Wizard run) and
+`ocr_recognize_files` (a searchable copy of each file). Both are marked destructive, and both
+choose their output names themselves.
+
+`batch_plan {operation, paths, folder, …}` takes the same arguments as the writer it plans —
+`operation: "action"` with `action` or `steps`, `operation: "ocr"` with `dpi`, `language` and
+`skip_text_pages` — and answers what that call would do without writing anything:
+
+* `targets`, one per input: the `output` the run would pick (including the `name (2).pdf` it falls
+  back to), `replaces` and `replaces_note` when a file is already there, and what the input holds —
+  `bytes`, `pages`, `title`, `encrypted`, `repair_notes` — or the `error` the run would hit. For an
+  action each target also carries the `steps` that would run; for OCR, `changes` says what would be
+  added.
+* `replaces`: the files that would be overwritten, by name.
+* `irreversible`: what cannot be undone, in plain sentences.
+* `approve`: `{tool, args}`, the call that would carry the plan out, unchanged.
+
+The destinations are not guessed: `batch_input_name` and `action_output` in `src/lib.rs` are the
+functions the writers call, and `plan::action_from_args` is the parser `action_run` uses, so a plan
+cannot name a file the run would not write or list steps the run would not take. Two inputs with
+the same file name are numbered in the plan exactly as the run numbers them (`report.pdf`, then
+`report (2).pdf`); an OCR batch writes under the input's own name, so a repeated name there is
+reported as a replacement. Planning creates no folder and writes nothing (`read_only` in the tool
+table, which the MCP layer reports as `readOnlyHint`), and a path or folder outside `--root`
+refuses the plan before anything is read. Each input is read at most 32 MiB
+(`plan::PLAN_READ_LIMIT`); a larger one is planned from its size and destination with
+`pages: null`, rather than loaded to count them.
+
 ## Adding a tool
 
 1. Add the engine capability first, with its tests (the tool is a thin adapter).
