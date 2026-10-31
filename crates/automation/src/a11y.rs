@@ -158,19 +158,30 @@ impl Automation {
     pub(crate) fn ocr_recognize_files(&mut self, a: &Args) -> Result<Value> {
         let settings = self.ocr_settings(a)?;
         let folder = self.resolve(a.str("folder")?, true)?;
-        // A path that leaves the root refuses the whole call before any work starts, like the
-        // other tools (the write check passes missing files, which stay per-file errors below).
+        // The list is made once, here, by the code every batch shares: folders are walked, files
+        // are taken once each, and a path that leaves the root refuses the whole call before any
+        // work starts (a missing file inside the root stays a per-file error).
         let paths = a.strs("paths")?;
-        self.resources.check_batch(paths.len())?;
-        for p in &paths {
-            self.resolve(p, true)?;
+        if paths.is_empty() {
+            return Err(ToolError::InvalidArgs("paths must not be empty: there is nothing to do".into()));
         }
+        let mut wanted = crate::folder::Wanted::from_args(a)?;
+        wanted.output = Some(folder.clone());
+        let expanded = self.expand(&paths, &wanted)?;
+        self.resources.check_batch(expanded.count())?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
-        for p in paths {
+        for item in &expanded.items {
+            let p = match item {
+                crate::folder::Item::File(p) => p.as_str(),
+                crate::folder::Item::Broken(p, why) => {
+                    out.push(json!({ "path": p, "error": why }));
+                    continue;
+                }
+            };
             if !out.is_empty() && !stopped && self.resources.timed_out(started) {
                 stopped = true;
             }
@@ -192,7 +203,7 @@ impl Automation {
                 Err(e) => json!({ "path": p, "error": e }),
             });
         }
-        Ok(json!({ "files": out, "timed_out": stopped }))
+        Ok(json!({ "files": out, "skipped": expanded.skipped, "timed_out": stopped }))
     }
 
     pub(crate) fn ocr_recognize(&mut self, a: &Args) -> Result<Value> {
@@ -333,15 +344,30 @@ impl Automation {
         // describe a different action from the one that would run.
         let action = crate::plan::action_from_args(a)?;
         let paths = a.strs("paths")?;
+        if paths.is_empty() {
+            return Err(ToolError::InvalidArgs("paths must not be empty: there is nothing to do".into()));
+        }
+        let folder = self.resolve(a.str("folder")?, true)?;
+        // The list is made once, by the code every batch shares (see `folder.rs`): a folder is
+        // walked, the output folder is left out, and a file reached twice is processed once.
+        let mut wanted = crate::folder::Wanted::from_args(a)?;
+        wanted.output = Some(folder.clone());
+        let expanded = self.expand(&paths, &wanted)?;
         // Quotas are answered before any of the batch is read: the size of the job, then each
         // file's size as it comes up.
-        self.resources.check_batch(paths.len())?;
-        let folder = self.resolve(a.str("folder")?, true)?;
+        self.resources.check_batch(expanded.count())?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
-        for p in paths {
+        for item in &expanded.items {
+            let p = match item {
+                crate::folder::Item::File(p) => p.as_str(),
+                crate::folder::Item::Broken(p, why) => {
+                    out.push(json!({ "path": p, "error": why }));
+                    continue;
+                }
+            };
             // Between items, not during one: the file in hand is finished (as a stop is). Asked
             // once per batch, so the audit counts batches stopped rather than files skipped.
             if !out.is_empty() && !stopped && self.resources.timed_out(started) {
@@ -365,7 +391,7 @@ impl Automation {
                 Err(e) => json!({ "path": p, "error": e }),
             });
         }
-        Ok(json!({ "action": action.name, "files": out, "timed_out": stopped }))
+        Ok(json!({ "action": action.name, "files": out, "skipped": expanded.skipped, "timed_out": stopped }))
     }
 
     fn compare_ids(&self, a: &Args) -> Result<(pdfcraft_engine::DocId, pdfcraft_engine::DocId)> {

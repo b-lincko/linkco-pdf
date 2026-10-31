@@ -70,6 +70,43 @@ fn comment_ref(mut extra: Value) -> Value {
     extra
 }
 
+/// The arguments that say which files a batch covers. Every tool that walks a list of paths takes
+/// them, and they mean the same thing in all of them because one function reads them
+/// (`crate::folder`): a folder may be given instead of files, names can be excluded, and the same
+/// file is never taken twice.
+fn batch_walk() -> Value {
+    json!({
+        "exclude": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Patterns to leave out, matched against each file's name and its path below the folder it was found in: `*` is any run of characters, `?` is one. e.g. [\"*.draft.pdf\", \"scans/*\"].",
+        },
+        "include_hidden": { "type": "boolean", "description": "Take names that start with a dot (default false)." },
+        "depth": { "type": "integer", "minimum": 1, "maximum": 32, "description": "How deep to walk a folder (default 32; 1 takes its own files and no subfolder's)." },
+        "follow_links": { "type": "boolean", "description": "Take a link to a file (default true). A link to a folder is never followed, so a link cannot make a loop." },
+    })
+}
+
+/// `props` with the batch walk arguments added, for a tool that takes a list of paths.
+fn with_batch_walk(mut props: Value) -> Value {
+    if let (Some(obj), Some(extra)) = (props.as_object_mut(), batch_walk().as_object().cloned()) {
+        for (k, v) in extra {
+            obj.insert(k, v);
+        }
+    }
+    props
+}
+
+/// The `paths` argument of a batch tool: files, folders, or a mixture.
+fn batch_paths() -> Value {
+    json!({
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1,
+        "description": "Files or folders. A folder is walked (see depth, exclude and include_hidden) and the files found in it are processed in name order; a file given by name is processed as it is. A file that appears twice, by any route, is processed once.",
+    })
+}
+
 fn schema(props: Value, required: &[&str]) -> Value {
     json!({ "type": "object", "properties": props, "required": required, "additionalProperties": false })
 }
@@ -883,16 +920,16 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("actions.wizard")
             .with(schema(json!({}), &[])),
-        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. Returns each file's step log or error.")
+        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log or error.")
             .destructive()
             .cmd("actions.wizard")
             .with(schema(
-                json!({
+                with_batch_walk(json!({
                     "action": { "type": "string" },
                     "steps": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string" }, "arg": { "type": "string" } }, "required": ["step"] } },
-                    "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "paths": batch_paths(),
                     "folder": { "type": "string" },
-                }),
+                })),
                 &["paths", "folder"],
             )),
         t(
@@ -903,16 +940,16 @@ pub fn tools() -> Vec<ToolDef> {
         .ro()
         .cmd("actions.wizard")
         .with(schema(
-            json!({
+            with_batch_walk(json!({
                 "operation": { "type": "string", "enum": ["action", "ocr"], "description": "Which batch to plan." },
-                "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                "paths": batch_paths(),
                 "folder": { "type": "string" },
                 "action": { "type": "string", "description": "With operation action: a built-in action's name (see action_list)." },
                 "steps": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string" }, "arg": { "type": "string" } }, "required": ["step"] } },
                 "dpi": { "type": "number", "minimum": 72, "maximum": 600, "description": "With operation ocr: the resolution pages would be read at." },
                 "language": { "type": "string", "enum": ["en"], "description": "With operation ocr: the document language." },
                 "skip_text_pages": { "type": "boolean", "description": "With operation ocr: whether pages that already have text are left alone." },
-            }),
+            })),
             &["operation", "paths", "folder"],
         )),
         t("policy_status", "What this session may do", "The permission profile this session was started with (read-only, project or destructive), the destructive tools it was started with by name, how many tools it can run, which ones it refuses, and the root. Nothing in an open document can change any of it.")
@@ -962,18 +999,31 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
-        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). Returns, per file, the output path, word count and skipped pages, or the error.")
+        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error.")
             .destructive()
             .cmd("ocr.recognize_batch")
             .with(schema(
-                json!({
-                    "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                with_batch_walk(json!({
+                    "paths": batch_paths(),
                     "folder": { "type": "string" },
                     "dpi": { "type": "number", "minimum": 72, "maximum": 600 },
                     "language": { "type": "string", "enum": ["en"] },
-                }),
+                })),
                 &["paths", "folder"],
             )),
+        t(
+            "batch_expand",
+            "List the files a batch would run over",
+            "The list a batch tool would process, before it processes anything: give the same paths, exclude, include_hidden, depth and follow_links you would give action_run or ocr_recognize_files and it walks the folders, leaves out what the rules leave out, and names every file once. Writes nothing. Files that cannot be read are reported too, so nothing in the answer is a surprise later.",
+        )
+        .ro()
+        .with(schema(
+            with_batch_walk(json!({
+                "paths": batch_paths(),
+                "folder": { "type": "string", "description": "The folder a run would write into, left out of the walk so a run never processes what an earlier run wrote." },
+            })),
+            &["paths"],
+        )),
         t("ocr_status", "OCR status", "Whether text recognition is available (its models are installed: release packages include them; a source build fetches them with `cargo xtask models`; PDFCRAFT_MODELS overrides), where it looks for them, and the languages it reads.")
             .ro()
             .cmd("ocr.recognize")

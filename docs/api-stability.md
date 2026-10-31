@@ -25,8 +25,8 @@ The version is bumped like this:
 Ask the build whether it speaks your revision:
 
 ```
-$ pdfcraft-cli schema --schema-version 1.1
-{ "schema_version": "1.1", "asked": { "schema_version": "1.1", "compatible": true }, … }
+$ pdfcraft-cli schema --schema-version 1.2
+{ "schema_version": "1.2", "asked": { "schema_version": "1.2", "compatible": true }, … }
 ```
 
 A different major version is not compatible, and the command exits **3** (`unsupported`) while

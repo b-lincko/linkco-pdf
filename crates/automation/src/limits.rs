@@ -26,6 +26,17 @@ use crate::{Args, Automation, Result, ToolError, write_atomic};
 /// One mebibyte, the unit the quotas are set in.
 pub const MIB: u64 = 1 << 20;
 
+/// The deepest a folder is walked in a batch, unless the caller says less (REC-B04). A limit rather
+/// than a promise about trees: it is what stops a job from walking a mounted share by accident.
+pub const MAX_DEPTH: usize = 32;
+
+/// The most files one folder walk will list. A folder over it is refused, not truncated: a batch
+/// that silently stopped halfway would be worse than one that was never started.
+pub const MAX_FILES: usize = 10_000;
+
+/// The most entries one `exclude` list may hold, so a plan cannot carry a pattern per file.
+pub const MAX_EXCLUDES: usize = 100;
+
 /// What a session may do at once, and how big a thing it may move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {

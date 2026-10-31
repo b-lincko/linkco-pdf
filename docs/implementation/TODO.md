@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B029 · **Active stage:** basic
+**Active component:** B030 · **Active stage:** basic
 
-## Basic (360 records)
+## Basic (361 records)
 
-complete: 30, in_progress: 7, pending: 323
+complete: 30, in_progress: 9, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -47,6 +47,7 @@ complete: 30, in_progress: 7, pending: 323
 | B027 | [x] One session cannot eat the machine | P0 | complete | REC-B07 |
 | B028 | [x] A caller can tell what it is talking to, and what went wrong | P0 | complete | REC-B02 |
 | B029 | [x] Every tool shows a call that works, and the call survives a save | P0 | complete | REC-B01 |
+| B030 | [ ] A folder becomes a list of files once | P0 | in_progress | REC-B04 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -234,7 +235,7 @@ complete: 30, in_progress: 7, pending: 323
 | REC-A09 | [ ] PDF/UA-1 and PDF/UA-2 validation adapters | P1 | pending | optimize.pdfua-validate |
 | REC-A10 | [ ] Translation quality and non-Latin font coverage gates | P1 | pending | misc.prefs-language |
 | REC-B01 | [x] Complete tool coverage for shipped GUI workflows | P1 | complete | misc.cli-completeness |
-| REC-B04 | [ ] Folder watch and recursive batch workflows | P1 | pending | misc.batch-processing |
+| REC-B04 | [ ] Folder watch and recursive batch workflows | P1 | in_progress | misc.batch-processing |
 | REC-B05 | [ ] Portable workflow presets and action library | P1 | pending | misc.action-wizard-manage misc.custom-commands |
 | REC-B06 | [ ] Checkpoint resume retry and idempotency | P1 | pending | '- |
 | REC-B10 | [ ] Machine-readable validation and evidence artifacts | P1 | pending | '- |
@@ -1280,3 +1281,25 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216657755
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216658031
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216658508
+
+### B030: A folder becomes a list of files once
+
+- Status: **in_progress**; parent(s): REC-B04.
+- Acceptance: A batch tool takes files or folders in `paths`; a folder is walked to a stated depth, with exclusion patterns, leaving out dot-names unless asked and leaving out the folder the run writes into; the same file reached twice — two spellings of one path, two overlapping folders, a link — appears once and the repeat is reported; a link to a folder is never followed, so a link cannot make a loop; what is left out is reported with a reason; and the plan, the preview and the run all describe the same list, because one function makes it.
+- Audit: Started from REC-B04's done-when — loops, exclusions and duplicate events must not cause duplicate destructive processing — and from the two tools that could do that damage today. Three decisions. First, the guarantee has to be made once, before the destructive tool sees the list: a check inside the loop would have to be repeated in both writers, and the second copy is the one that goes stale. So expansion is a function, and every path in (two writers, the plan, the preview) goes through it. Second, the list a caller gets back must be the list the run uses: `batch_expand` reports the same expansion without writing, `batch_plan` plans it, and the plan's `approve` block now names the *files* the plan was made from rather than the original folder — approving is not a re-walk that could find something else, which was the honest gap in B028's shape before this. Third, what is not done must be refused rather than approximated: a folder over MAX_FILES is refused (a truncated batch that looks complete is worse than no batch), a depth over MAX_DEPTH is clamped and the clamp is in the schema, an empty exclude pattern is an error because it would silently match nothing, and a link to a folder is refused by rule so there is no counter to get wrong. The audit also looked for the ways a walk leaks or hangs: every file goes through `resolve`, so a link out of the root is refused with the same message as any other outside path; a junction is caught by canonicalising each folder and refusing one already walked or outside the root; and `batch_expand` is `read_only`, with a test that the filesystem is unchanged after it. What the audit found and fixed while writing the tests: a duplicate would have changed the *name* of an output (the second `a.pdf` would become `a (2).pdf`), which is precisely the duplicate destructive processing the record is about; and the plan's `approve` args had to carry broken paths as well as files, or a run approved from a plan would report fewer errors than the plan described. Not done, and said so in the record rather than implied: no watcher (a thread and a queue belong to the process that watches, and the app has neither), no resume of a batch interrupted by a crash, and no coordination between two jobs started at once.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable from it), so none of the Rust was compiled or run here: it was compiled and run by CI (see ci). The Python gates and the formatting check were run here. The two link tests run on Unix only, by construction (a Windows junction cannot be made in a test without administrator rights); the Windows behaviour they guard — a junction being walked twice or leaving the root — is covered by canonicalising every folder and refusing one already walked or outside the root, but no test exercises a real junction. Not claimed: watching a folder, resuming an interrupted batch, and coordinating two jobs that run at once.
+- Ci: pending
+- Notes: Bounded part of REC-B04 (folder watch and recursive batch workflows), whose done-when is that file loops, exclusions and duplicate events cannot cause duplicate destructive processing. The half that was missing was the folder: `action_run` and `ocr_recognize_files` took a list of files and nothing else, and nothing stopped the same file being listed twice — a destructive tool would process it twice and overwrite its own output. There is now crates/automation/src/folder.rs: `Wanted` (the arguments, read once), `Expanded` (the list, in the caller's order) and one `expand` that both batch writers, `batch_plan` and the new read-only `batch_expand` call, so the plan, the preview and the run cannot disagree about which files a job covers. Folders are walked in name order to a depth, `*`/`?` patterns exclude by name or by the path below the folder, dot-names are left out unless `include_hidden`, the output folder is left out, links to folders are never followed (a loop is impossible rather than merely unlikely), a folder already walked is not walked again (what a Windows junction would otherwise do), and a file is keyed by its resolved path so two spellings or two routes are one entry. What was left out and why is in the answer as `skipped`, on the plan as well as the run. The limits that bound it live in limits.rs with the others: MAX_DEPTH 32, MAX_FILES 10000 (a folder over it is refused, not truncated), MAX_EXCLUDES 100.
+- Local evidence: cargo fmt --all -- --check passes.
+- Local evidence: crates/automation/tests/batch_folder.rs::a_folder_is_walked_in_name_order_and_says_what_it_left_out walks a tree of three folders, asserts the exact file list, the folder count, and a reason for the excluded file and the hidden one, then takes the hidden one when asked.
+- Local evidence: crates/automation/tests/batch_folder.rs::the_same_file_reached_twice_is_in_the_batch_once gives one file three times (folder, name, name with `..`) and gets one entry, in the folder's place, with the repeat reported.
+- Local evidence: crates/automation/tests/batch_folder.rs::depth_stops_where_it_is_told_to holds depth 1 and 2 to the exact lists, and refuses depth 0.
+- Local evidence: crates/automation/tests/batch_folder.rs::the_folder_a_run_writes_into_is_not_part_of_its_input shows an earlier output listed without a folder argument and left out with one.
+- Local evidence: crates/automation/tests/batch_folder.rs::expanding_writes_nothing compares the whole tree before and after.
+- Local evidence: crates/automation/tests/batch_folder.rs::a_plan_and_a_run_cover_the_same_files_and_approving_writes_exactly_them asserts the plan's targets, the approve block naming those files, the run covering them, and every planned output existing.
+- Local evidence: crates/automation/tests/batch_folder.rs::a_run_processes_a_file_once_even_when_the_list_names_it_twice gets three files written from a list naming one of them three times.
+- Local evidence: crates/automation/tests/batch_folder.rs::a_folder_with_more_files_than_the_batch_limit_is_refused_before_anything_is_written refuses the run and the plan and leaves the tree unchanged.
+- Local evidence: crates/automation/tests/batch_folder.rs::a_file_that_is_not_there_is_still_a_per_file_error_in_order keeps a missing file where it was in the list.
+- Local evidence: crates/automation/tests/batch_folder.rs::a_link_to_a_folder_cannot_make_a_loop and ::a_link_out_of_the_root_is_not_walked_or_listed cover the two ways a link could bite (Unix).
+- Local evidence: crates/automation/src/folder.rs::tests checks the pattern matcher (* and ? spans) and the path spelling below a folder.
+- Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes.

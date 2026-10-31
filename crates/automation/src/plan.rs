@@ -22,6 +22,7 @@ use std::sync::Arc;
 use pdfcraft_engine::actions::{Action, Step, builtin};
 use serde_json::{Value, json};
 
+use crate::folder::{Expanded, Item};
 use crate::{Args, Automation, Result, ToolError, action_output, batch_input_name, child};
 
 /// The most of an input `batch_plan` reads to describe it: 32 MiB, the cap the interface uses to
@@ -38,33 +39,42 @@ impl Automation {
         if paths.is_empty() {
             return Err(ToolError::InvalidArgs("paths must not be empty: there is nothing to plan".into()));
         }
-        // The batch limit is part of what a plan has to be honest about: a run of this size would
-        // be refused, so the plan is too.
-        self.resources.check_batch(paths.len())?;
         // The folder is resolved as a write target (the plan says where the run would put files),
         // but it is never created: planning leaves the filesystem exactly as it found it.
         let folder = self.resolve(a.str("folder")?, true)?;
-        // A path that leaves the root refuses the plan: `ocr_recognize_files` refuses the whole call
-        // for one, and a plan that described a batch that cannot be run would be no better than one
-        // that described it wrongly.
-        for p in &paths {
-            self.resolve(p, true)?;
-        }
+        // The list is the one the run would make, from the same code: folders walked, exclusions
+        // applied, each file once, the output folder left out. A path that leaves the root refuses
+        // the plan, because it would refuse the run.
+        let mut wanted = crate::folder::Wanted::from_args(a)?;
+        wanted.output = Some(folder.clone());
+        let expanded = self.expand(&paths, &wanted)?;
+        // The batch limit is part of what a plan has to be honest about: a run of this size would
+        // be refused, so the plan is too.
+        self.resources.check_batch(expanded.count())?;
         match operation {
-            "action" => self.plan_action(a, &paths, &folder),
-            "ocr" => self.plan_ocr(a, &paths, &folder),
+            "action" => self.plan_action(a, &expanded, &folder),
+            "ocr" => self.plan_ocr(a, &expanded, &folder),
             other => Err(ToolError::InvalidArgs(format!("unknown operation {other:?} (action, ocr)"))),
         }
     }
 
-    fn plan_action(&mut self, a: &Args, paths: &[&str], folder: &Path) -> Result<Value> {
+    fn plan_action(&mut self, a: &Args, expanded: &Expanded, folder: &Path) -> Result<Value> {
         let action = action_from_args(a)?;
         let steps: Vec<Value> = action.steps.iter().map(|s| json!({ "step": s.id(), "label": s.label(), "arg": s.arg() })).collect();
         let mut targets = Vec::new();
         // The names already promised in this plan: the run writes them in order, so a second input
         // with the same file name gets the next free `(n)`, exactly as it would after the first.
         let mut promised: Vec<std::path::PathBuf> = Vec::new();
-        for &p in paths {
+        for item in &expanded.items {
+            let p = match item {
+                Item::File(p) => p.as_str(),
+                // A path the run would fail on is a target too, with the error it would give: a
+                // plan that silently dropped it would be describing a different batch.
+                Item::Broken(p, why) => {
+                    targets.push(json!({ "path": p, "error": why }));
+                    continue;
+                }
+            };
             let name = batch_input_name(p);
             let output = action_output(folder, &name, &promised);
             promised.push(output.clone());
@@ -73,21 +83,30 @@ impl Automation {
             t["steps"] = Value::Array(steps.clone());
             targets.push(t);
         }
-        let mut args = json!({ "paths": paths, "folder": a.str("folder")? });
+        // Approving is not a re-typing: the arguments are the files this plan was made from, by
+        // name, so the run covers exactly the list that was planned even if the folder changes.
+        let mut args = json!({ "paths": expanded.approve_paths(), "folder": a.str("folder")? });
         match a.opt_str("action")? {
             Some(name) => args["action"] = json!(name),
             None => args["steps"] = a.get("steps").cloned().unwrap_or(Value::Null),
         }
-        Ok(plan_json("action", "action_run", folder, targets, args))
+        Ok(plan_json("action", "action_run", folder, targets, args, &expanded.skipped))
     }
 
-    fn plan_ocr(&mut self, a: &Args, paths: &[&str], folder: &Path) -> Result<Value> {
+    fn plan_ocr(&mut self, a: &Args, expanded: &Expanded, folder: &Path) -> Result<Value> {
         let settings = self.ocr_settings(a)?;
         let mut targets = Vec::new();
         // `ocr_recognize_files` writes each result under the input's own name, so a name that is
         // already in the folder — or that an earlier input of the same batch writes — is replaced.
         let mut promised: Vec<std::path::PathBuf> = Vec::new();
-        for &p in paths {
+        for item in &expanded.items {
+            let p = match item {
+                Item::File(p) => p.as_str(),
+                Item::Broken(p, why) => {
+                    targets.push(json!({ "path": p, "error": why }));
+                    continue;
+                }
+            };
             let name = batch_input_name(p);
             let output = child(folder, &name);
             promised.push(output.clone());
@@ -107,7 +126,7 @@ impl Automation {
             ]);
             targets.push(t);
         }
-        let mut args = json!({ "paths": paths, "folder": a.str("folder")? });
+        let mut args = json!({ "paths": expanded.approve_paths(), "folder": a.str("folder")? });
         for (key, value) in
             [("dpi", a.get("dpi").cloned()), ("language", a.get("language").cloned()), ("skip_text_pages", a.get("skip_text_pages").cloned())]
         {
@@ -115,7 +134,7 @@ impl Automation {
                 args[key] = v;
             }
         }
-        Ok(plan_json("ocr", "ocr_recognize_files", folder, targets, args))
+        Ok(plan_json("ocr", "ocr_recognize_files", folder, targets, args, &expanded.skipped))
     }
 
     /// One input as the run would see it: where its result goes, whether that file is already
@@ -201,7 +220,7 @@ fn describe(path: &Path) -> std::result::Result<Value, String> {
 
 /// The plan itself: what would be written, what would be replaced, what cannot be undone, and the
 /// call that would do it.
-fn plan_json(operation: &str, tool: &str, folder: &Path, targets: Vec<Value>, approve_args: Value) -> Value {
+fn plan_json(operation: &str, tool: &str, folder: &Path, targets: Vec<Value>, approve_args: Value, skipped: &[Value]) -> Value {
     let replaced: Vec<Value> =
         targets.iter().filter(|t| t.get("replaces").and_then(Value::as_bool).unwrap_or(false)).map(|t| t["output"].clone()).collect();
     let writable = targets.iter().filter(|t| t.get("error").is_none()).count();
@@ -224,6 +243,8 @@ fn plan_json(operation: &str, tool: &str, folder: &Path, targets: Vec<Value>, ap
         "folder": folder.to_string_lossy(),
         "folder_exists": folder.exists(),
         "targets": targets,
+        // What the run would leave out, and why: the other half of "what this batch covers".
+        "skipped": skipped,
         "replaces": replaced,
         "irreversible": irreversible,
         // The call that would carry this out, unchanged, so approving is not a re-typing.

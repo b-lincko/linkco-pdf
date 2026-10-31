@@ -39,9 +39,11 @@ use crate::tools::{ToolDef, tools};
 /// caller. See the module documentation for the two lists.
 ///
 /// 1.1 added the worked example a document-changing tool carries inside its schema
-/// (`input_schema.examples`): additive, ignored by a caller that does not know it, and documented in
-/// `docs/api-stability.md` as the kind of change that bumps the minor version rather than the major.
-pub const TOOL_SCHEMA_VERSION: &str = "1.1";
+/// (`input_schema.examples`), and 1.2 the arguments that let a batch take folders (`depth`,
+/// `exclude`, `include_hidden`, `follow_links`) plus the `batch_expand` tool that reports what they
+/// would cover. Both are additive — an optional argument and a new tool — so the minor moves and a
+/// caller written for 1.0 keeps working, which is what `docs/api-stability.md` promises.
+pub const TOOL_SCHEMA_VERSION: &str = "1.2";
 
 /// The whole table as one document, with the version that names it.
 ///

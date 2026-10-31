@@ -16,6 +16,7 @@ mod comments;
 mod content;
 mod conventions;
 pub mod examples;
+mod folder;
 mod forms;
 mod limits;
 mod links;
@@ -39,7 +40,7 @@ use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, 
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
-pub use limits::{Budget, Limits, MIB};
+pub use limits::{Budget, Limits, MAX_DEPTH, MAX_EXCLUDES, MAX_FILES, MIB};
 pub use policy::{Policy, Profile};
 pub use schema::TOOL_SCHEMA_VERSION;
 pub use tools::{ToolDef, tools};
@@ -648,6 +649,7 @@ impl Automation {
             "pdfa_convert" => self.pdfa_convert(&a)?,
             "action_run" => self.action_run(&a)?,
             "batch_plan" => self.batch_plan(&a)?,
+            "batch_expand" => self.batch_expand(&a)?,
             "policy_status" => self.policy_status(&a)?,
             "limits_status" => self.limits_status(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
