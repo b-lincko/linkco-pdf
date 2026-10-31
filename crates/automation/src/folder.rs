@@ -303,12 +303,12 @@ impl Automation {
                         continue;
                     }
                 };
-                if let Some(root) = &self.root {
-                    if !real.starts_with(root) {
-                        let shown = emit(given, &here);
-                        out.skip(&shown, format!("{shown} is outside the allowed directory {}", root.display()));
-                        continue;
-                    }
+                if let Some(root) = &self.root
+                    && !real.starts_with(root)
+                {
+                    let shown = emit(given, &here);
+                    out.skip(&shown, format!("{shown} is outside the allowed directory {}", root.display()));
+                    continue;
                 }
                 if !walked.insert(real) {
                     out.skip(&emit(given, &here), "a folder already walked in this batch (a link or junction to it)");
@@ -358,11 +358,11 @@ impl Automation {
         // One key per file, whatever spelling found it: the resolved path, made absolute where the
         // session is not confined so two spellings of one file still meet.
         let key = resolved.canonicalize().or_else(|_| path.canonicalize()).unwrap_or(resolved);
-        if let Some(output) = &wanted.output {
-            if key.starts_with(output) {
-                out.skip(shown, format!("inside the output folder {}, so a run would process what it wrote", output.display()));
-                return Ok(());
-            }
+        if let Some(output) = &wanted.output
+            && key.starts_with(output)
+        {
+            out.skip(shown, format!("inside the output folder {}, so a run would process what it wrote", output.display()));
+            return Ok(());
         }
         if let Some(first) = seen.get(&key) {
             out.skip(shown, format!("already in this batch: it is the same file as {first}"));
