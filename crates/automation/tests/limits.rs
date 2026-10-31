@@ -158,7 +158,7 @@ fn the_worker_count_is_clamped_and_reported() {
     let a = auto(&dir).with_limits(Limits { workers: 0, ..Default::default() });
     // Zero workers is a mistake, not a limit: it means the one thread the work can always use.
     assert_eq!(a.resources().limits().workers, 1);
-    assert!(Limits::default().workers >= 1 && Limits::default().workers <= 8);
+    assert!((1..=8).contains(&Limits::default().workers));
 
     let mut a = auto(&dir).with_limits(Limits { workers: 2, ..Default::default() });
     let status = ok(&mut a, "limits_status", json!({}));

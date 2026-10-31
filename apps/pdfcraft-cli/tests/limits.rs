@@ -59,5 +59,5 @@ fn a_session_without_the_flags_reports_no_limits() {
     let status: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(status["limits"]["max_input_bytes"].as_u64(), Some(0), "{status}");
     let workers = status["limits"]["workers"].as_u64().unwrap();
-    assert!(workers >= 1 && workers <= 8, "{status}");
+    assert!((1..=8).contains(&workers), "{status}");
 }
