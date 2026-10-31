@@ -52,9 +52,12 @@ fn a_failed_call_carries_its_kind_not_only_its_message() {
     let result = call(&[], "page_render", json!({ "doc": "not a number" }));
     assert_eq!(result["isError"], true, "{result}");
     assert_eq!(result["structuredContent"]["error"]["kind"], "usage", "{result}");
-    assert!(result["structuredContent"]["error"]["message"].as_str().unwrap().contains("doc"), "{result}");
-    // The text block is still there for a client that only reads text.
+    let message = result["structuredContent"]["error"]["message"].as_str().expect("a message");
+    assert!(!message.is_empty(), "{result}");
+    // The text block is still there for a client that only reads text, and it is the same message:
+    // the kind is the machine-readable half, not a second, drifting description.
     assert_eq!(result["content"][0]["type"], "text");
+    assert_eq!(result["content"][0]["text"], message, "{result}");
 
     // `failed`: the tool ran and could not finish.
     let result = call(&[], "doc_open", json!({ "path": "/nonexistent/in.pdf" }));
