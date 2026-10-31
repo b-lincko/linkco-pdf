@@ -45,7 +45,8 @@ pub fn example(tool: &str) -> Option<Value> {
         // Annotations a reader makes.
         "comment_add" => json!({ "doc": 1, "page": 1, "type": "note", "at": [40, 40], "contents": "Checked" }),
         "link_add" => json!({ "doc": 1, "page": 1, "rect": [10, 10, 100, 40], "url": "https://example.com" }),
-        "redact_mark" => json!({ "doc": 1, "page": 1, "rect": [15, 140, 120, 180] }),
+        // The rect is clear of the text, so the pages still read as they did (see roundtrip.rs).
+        "redact_mark" => json!({ "doc": 1, "page": 1, "rect": [10, 200, 190, 280] }),
         // Forms and text.
         "form_add_field" => json!({ "doc": 1, "page": 1, "type": "text", "rect": [20, 20, 180, 44], "name": "email" }),
         "text_edit" => json!({ "doc": 1, "page": 1, "line": 1, "text": "Edited line" }),
@@ -161,11 +162,17 @@ mod tests {
 
     #[test]
     fn a_tool_has_an_example_or_a_reason_never_both() {
-        for (name, reason) in [("page_rotate", None), ("doc_save", Some("files")), ("ocr_recognize", Some("models")), ("not_a_tool", None)] {
-            let has = example(name).is_some();
-            let why = why_not(name);
-            assert_eq!(has, reason.is_none(), "{name}");
-            assert_eq!(why.is_some(), reason.is_some(), "{name}");
+        // (tool, has an example, has a reason). A read-only tool and a name that is not a tool at
+        // all have neither; nothing may have both.
+        for (name, wants_example, wants_reason) in [
+            ("page_rotate", true, false),
+            ("doc_save", false, true),
+            ("ocr_recognize", false, true),
+            ("doc_open", false, false),
+            ("not_a_tool", false, false),
+        ] {
+            assert_eq!(example(name).is_some(), wants_example, "{name}: example");
+            assert_eq!(why_not(name).is_some(), wants_reason, "{name}: reason");
         }
     }
 
@@ -174,7 +181,9 @@ mod tests {
         // Every example is a complete call on document 1: an object, and nothing outside the tool's
         // own arguments.
         for tool in ["page_rotate", "doc_set_info", "comment_add", "form_add_field", "doc_protect"] {
-            let e = example(tool).unwrap_or_else(|| panic!("{tool} has no example"));
+            let e = example(tool);
+            assert!(e.is_some(), "{tool} has no example");
+            let e = e.unwrap_or(Value::Null);
             assert!(e.is_object(), "{tool}: {e}");
             assert_eq!(e["doc"], 1, "{tool}: {e}");
         }

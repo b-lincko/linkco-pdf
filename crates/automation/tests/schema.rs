@@ -17,8 +17,10 @@ fn the_document_describes_the_table_it_is_built_from() {
         assert_eq!(entry["name"], def.name);
         assert_eq!(entry["read_only"], def.read_only);
         assert_eq!(entry["destructive"], def.destructive);
-        // The schema in the document is the schema the tool actually takes: one copy, not two.
-        assert_eq!(entry["input_schema"], def.input_schema, "{}", def.name);
+        // The schema in the document is the schema the tool actually takes, plus the worked
+        // example a document-changing tool carries: one copy, not two.
+        assert_eq!(entry["input_schema"], schema::schema_with_example(def), "{}", def.name);
+        assert_eq!(entry["input_schema"]["properties"], def.input_schema["properties"], "{}", def.name);
     }
 }
 

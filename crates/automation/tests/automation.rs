@@ -837,7 +837,9 @@ fn mcp_compact_tool_search_filters_by_query_and_category() {
     assert_eq!(one["name"], "page_rotate");
     assert_eq!(one["input_schema"]["type"], "object");
     let def = tools().into_iter().find(|t| t.name == "page_rotate").unwrap();
-    assert_eq!(one["input_schema"], def.input_schema);
+    // The published schema is the tool's own, with its worked example (REC-B01).
+    assert_eq!(one["input_schema"], pdfcraft_automation::schema::schema_with_example(&def));
+    assert_eq!(one["input_schema"]["examples"][0]["degrees"], 90);
     assert_eq!(one["description"], def.description);
 
     // Bad arguments are tool errors.

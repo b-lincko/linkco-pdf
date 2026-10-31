@@ -72,7 +72,7 @@ fn page_text(a: &mut Automation, doc: u64) -> Vec<String> {
         .as_array()
         .unwrap()
         .iter()
-        .map(|p| p["text"].as_str().unwrap_or_default().to_string())
+        .map(|p| p["text"].as_str().unwrap_or_default().trim().to_string())
         .collect()
 }
 
@@ -131,16 +131,15 @@ fn check_against_schema(tool: &str, args: &Value) -> Result<(), String> {
         if !matches {
             return Err(format!("{tool}: {key} is {value}, but the schema says {kind}"));
         }
-        if let (Some(min), Some(n)) = (spec["minimum"].as_i64(), value.as_i64())
-            && n < min
-        {
-            return Err(format!("{tool}: {key} is {n}, under the schema's minimum of {min}"));
+        if let (Some(min), Some(n)) = (spec["minimum"].as_i64(), value.as_i64()) {
+            if n < min {
+                return Err(format!("{tool}: {key} is {n}, under the schema's minimum of {min}"));
+            }
         }
-        if let Some(allowed) = spec["enum"].as_array()
-            && let Some(s) = value.as_str()
-            && !allowed.iter().any(|a| a.as_str() == Some(s))
-        {
-            return Err(format!("{tool}: {key} is {s:?}, which is not one of the schema's values"));
+        if let (Some(allowed), Some(s)) = (spec["enum"].as_array(), value.as_str()) {
+            if !allowed.iter().any(|a| a.as_str() == Some(s)) {
+                return Err(format!("{tool}: {key} is {s:?}, which is not one of the schema's values"));
+            }
         }
     }
     for required in schema["required"].as_array().into_iter().flatten() {
@@ -228,6 +227,12 @@ fn check(tool: &str, a: &mut Automation, doc: u64) -> Result<(), String> {
                 Err(format!("{tool}: {pages:?}"))
             }
         }
+        "redact_mark" => {
+            // The mark was saved with the file: applying it now works, and the box was drawn
+            // clear of the text, so the page still reads as it did.
+            ok(a, "redact_apply", serde_json::json!({ "doc": doc }));
+            expect(&["Page 1", "Page 2", "Page 3"])
+        }
         "js_set_document_script" => {
             let scripts = ok(a, "js_document_scripts", serde_json::json!({ "doc": doc }));
             let found = scripts["scripts"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "hello"));
@@ -273,8 +278,11 @@ fn every_example_survives_a_save_and_a_reopen() {
         // A session that has never seen this document: it only has the file.
         let mut b = auto(&dir);
         // An encrypted document needs its password; that is the point of protecting it.
-        let opened = b.call("doc_open", &serde_json::json!({ "path": "out.pdf", "password": "secret" }));
-        let reopened = match opened {
+        let mut open = serde_json::json!({ "path": "out.pdf" });
+        if tool == "doc_protect" {
+            open["password"] = serde_json::json!("secret");
+        }
+        let reopened = match b.call("doc_open", &open) {
             Ok(mut c) => match c.remove(0) {
                 Content::Json(v) => v["doc"].as_u64().unwrap(),
                 other => panic!("{tool}: {other:?}"),
