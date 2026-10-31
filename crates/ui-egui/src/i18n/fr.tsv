@@ -2211,4 +2211,33 @@ key	Space	Espace
 	Driver: {driver}	Pilote : {driver}
 	Printer status: {status}. Check the printer's connection before printing.	État de l'imprimante : {status}. Vérifiez la connexion de l'imprimante avant d'imprimer.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Aucune imprimante n'a été trouvée. Allumez l'imprimante et connectez-la, puis sélectionnez « Vérifier à nouveau ». Vous pouvez toujours enregistrer comme PDF.
+	Print both sides	Recto verso
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Imprime sur les deux faces de la feuille, en la retournant sur son grand côté, si l'imprimante le peut.
+	Printing on both sides of the sheet. Click to print on one side only.	Impression sur les deux faces de la feuille. Cliquez pour n'imprimer que sur une face.
+	Match page at 100%	Adapter le papier à la page à 100 %
+	Print at 100% on the paper of the same size, leaving the page range alone.	Imprime à 100 % sur un papier de la même taille, sans modifier la plage de pages.
+	PDF page: {w} × {h} in	Page du PDF : {w} × {h} po
+	PDF scale: {scale}%	Échelle PDF : {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	L'échelle à laquelle la page est dessinée ; un pilote d'imprimante peut encore remplacer le papier ou réduire le travail.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	« Découper et empiler » imprime des feuilles recto seul. Choisissez un autre ordre de pages pour imprimer recto verso.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Rogne chaque page à sa zone imprimée, la redresse et l’ajuste à la feuille sans la déformer. Une étiquette par feuille.
+	Turn upside down (180°)	Retourner (180°)
+	the name is not a plain file name	le nom n'est pas un simple nom de fichier
 	Developer: {name}	Développeur : {name}
+	Overwrite	Écraser
+	Save As…	Enregistrer sous…
+	“{name}” changed on disk while you were working on it.	« {name} » a changé sur le disque pendant que vous y travailliez.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Enregistrer par-dessus remplacerait la version écrite par un autre programme. Enregistrez une copie si vous avez besoin des deux.
+	“{name}” was moved or renamed to “{found}”.	« {name} » a été déplacé ou renommé en « {found} ».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	« {name} » n’est plus dans « {path} » ; il a été déplacé vers un autre dossier ou supprimé.
+	Tried {n} times. Zoom or rotate the page to try again.	Essayé {n} fois. Zoomez ou faites pivoter la page pour réessayer.
+	On disk: {n} pages, written {when}.	Sur le disque : {n} pages, écrit {when}.
+	On disk: written {when}.	Sur le disque : écrit {when}.
+	The version on disk is too large to compare here.	La version sur le disque est trop volumineuse pour être comparée ici.
+	“{name}” could not be opened to compare it.	« {name} » n’a pas pu être ouvert pour la comparaison.
+	{name} (on disk)	{name} (sur le disque)
+	Recognize Text in Files	Reconnaître le texte dans les fichiers
+	 (stopped after {done} of {total})	 (arrêté après {done} sur {total})
+	file {d} of {t}	Fichier {d} sur {t}
+	Export stopped after {done} of {total} files	Exportation arrêtée après {done} fichiers sur {total}
+	and {n} more	et {n} de plus

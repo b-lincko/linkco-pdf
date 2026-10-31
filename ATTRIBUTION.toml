@@ -19,7 +19,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Simplified Chinese UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "4dde1daca81896172ffd18efd98695b6ff4bdbc39c28d24e170fa11265b92bd2"
+sha256 = "ddc6345ceadedbeada188b15fad870d41ba827a4b1147052006712235f5d6aa4"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/zh-hant.tsv"
@@ -30,7 +30,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Traditional Chinese UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "3df97248506aa6accd8333a2a669cf1abd16b195dbd82f4bc0a71568598a4e0d"
+sha256 = "5ab9376a138f0dcbcb8af5ae5f7b3612596dfebd4b14acb4505d9872793b69c6"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/cs.tsv"
@@ -41,7 +41,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Czech UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "97c47ef1aea495b54e28c8e4f69ed389e148b5d1eaeb4d0d8f25679a0a27d606"
+sha256 = "43fd3d102d5acc2249a3560d5f0e56a5c05239272ab91d750bc6b1e960c11a75"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/pt-br.tsv"
@@ -52,7 +52,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Brazilian Portuguese UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "c4303c99bc726a9be70e824a8a7e72ff967ea5eb6d879364070f8c9477cdb810"
+sha256 = "1c93e6b621e7d3e17fcf3a7da04a47520ea5813ed468358cfbab1f78879081ab"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/es.tsv"
@@ -63,7 +63,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Spanish UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "3be7a081d6872ab2301a9736a73b9e1be001e1c2575bf0dde2f9ff8f96c284e7"
+sha256 = "903d9dc3590de6c524d998b7bafb6a08e5806b08c40c9c377091c9d9936d9c54"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/fr.tsv"
@@ -74,7 +74,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "French UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "60175b34af3f9897115d986f7d99fe61c3bebd5e669fb7e201fa60596f0627cd"
+sha256 = "c1429bcd3bf25bede6b17af326c7e614d847eb186cf0dc44b1936562fe42cec7"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/de.tsv"
@@ -85,7 +85,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "German UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "2f9118999724cf73c9090fe77895b2de7a64a958bb411545013092259eadde62"
+sha256 = "02d0f0e98db33f4a20a5b2056bc801ea0b8178de85bb23fa2cfe50f1e287fad9"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/te.tsv"
@@ -96,7 +96,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Telugu UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "22a4299fb495b08a2dbfa8d1a9a6d859393eb17920a19ac9f2f2991a7e403e38"
+sha256 = "e72944ed99ac604625e0ebd39f0fc8d22e3d868f79bd1e3b8e1ca5977e9e13ae"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/it.tsv"
@@ -107,7 +107,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Italian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "b81ed4354ed1407c88a6f328930344606403669e611f438145f191ee6daa2b09"
+sha256 = "5b065ec47d0310cb5eb9f84c206efa50b110bd15637f4c35af103790be1d03bb"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/pl.tsv"
@@ -118,7 +118,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Polish UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "e75c77c765be9e6e540b41e3348c34f80795bc04359c80905ef1abe8973d5aa0"
+sha256 = "28c46fef9585178775641b6dbcdeb1c1e10cb43d24fb76a422af14926807a5bc"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/ru.tsv"
@@ -129,7 +129,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Russian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "df21eb7872744204f8f524da306ebe167beae217a31596cd6567efd185be2f7b"
+sha256 = "6d166159643ae399127a13c4c5bc37d68532d6621e341597bd886cb242429c75"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/hu.tsv"
@@ -140,7 +140,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Hungarian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "356984898aa28c599475812f98c72e5dcfdc11f0f6209bee5d1c856132d08da1"
+sha256 = "804f5fdf8bf13d530fe5083582ad76284110850bf44356a3a0ec0f3d8c9d23dd"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/bg.tsv"
@@ -151,7 +151,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Bulgarian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "1d94245d2b5870210338b081c81eecd2419e6b8628df04ed5d44e9a05fd42deb"
+sha256 = "61f30bc8416aeb3787a33d852115ee7f5294a77c44338c0c9a48e7ea09190746"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/ja.tsv"
@@ -162,7 +162,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Japanese UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "615b78085eb6528792b9ef18297c609b877dc0afc9414885aa932e3fc99a21c3"
+sha256 = "ae4e05566781907402fba96051ea9cbf43f39786d33bd98ea56d0c16f88025ef"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/uk.tsv"
@@ -173,7 +173,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Ukrainian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "ee0fe6b1a9986e1b05923e1dbdd9dcb692e3b1b2f44d58e2cf8b33049714d418"
+sha256 = "efebd89decd5bcbe8724185edbc407e39ea0082ce8c24240e38420189b19d9d8"
 
 [[asset]]
 path = "crates/ui-egui/src/i18n/ar.tsv"
@@ -184,7 +184,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Arabic UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "55770128ea97d0052e88541b8015e78cb0030c11fe31489f7bdc564eadb40ba4"
+sha256 = "3cb074235763c78a48a8c90420d3f1fbf563a68c013a931a8db98101a1d679c7"
 
 [[asset]]
 path = "assets/icons/accessibility.svg"
@@ -3040,30 +3040,30 @@ usage = "Showcase PDF (cargo xtask demo-pdf)"
 sha256 = "acd98e64795781b2058f07b18475e0ecee2a0fe2b42a49e2f9e37d0d6bf66ce6"
 
 [[fetched]]
-file = "text-detection.rten"
-url = "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten"
+file = "text-detection.onnx"
+url = "https://huggingface.co/robertknight/ocrs/resolve/main/text-detection-ssfbcj81.onnx"
 title = "Ocrs text detection model"
 author = "Robert Knight (ocrs-models; trained on HierText, CC-BY-SA-4.0)"
-source = "https://github.com/robertknight/ocrs-models (the models ocrs downloads; model card: https://huggingface.co/robertknight/ocrs, cc-by-sa-4.0)"
+source = "https://huggingface.co/robertknight/ocrs (the model card ocrs publishes: text-detection-ssfbcj81.onnx, saved here as text-detection.onnx; upstream's download script takes the same model from ocrs-models.s3-accelerate.amazonaws.com, which was browning out its files on 2026-10-27, robertknight/ocrs#282, so the pinned sha256 is the model card's own LFS content hash)"
 licence = "CC-BY-SA-4.0"
 licence_url = "https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt"
 licence_sha256 = "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
 kind = "model"
 usage = "Scan & OCR: finds words on page images (cargo xtask models)"
-sha256 = "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca"
+sha256 = "c15df092060abe9417929b04eaf552b98946e15144036b3c83b09a3bf4d5d5a7"
 
 [[fetched]]
-file = "text-recognition.rten"
-url = "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten"
+file = "text-recognition.onnx"
+url = "https://huggingface.co/robertknight/ocrs/resolve/main/text-rec-checkpoint-s52qdbqt.onnx"
 title = "Ocrs text recognition model"
 author = "Robert Knight (ocrs-models; trained on HierText, CC-BY-SA-4.0)"
-source = "https://github.com/robertknight/ocrs-models (the models ocrs downloads; model card: https://huggingface.co/robertknight/ocrs, cc-by-sa-4.0)"
+source = "https://huggingface.co/robertknight/ocrs (the model card ocrs publishes: text-rec-checkpoint-s52qdbqt.onnx, saved here as text-recognition.onnx; upstream's download script takes the same model from ocrs-models.s3-accelerate.amazonaws.com, which was browning out its files on 2026-10-27, robertknight/ocrs#282, so the pinned sha256 is the model card's own LFS content hash)"
 licence = "CC-BY-SA-4.0"
 licence_url = "https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt"
 licence_sha256 = "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
 kind = "model"
 usage = "Scan & OCR: reads the words it finds (cargo xtask models)"
-sha256 = "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e"
+sha256 = "3774cdfe8ba082a17c181d5ab0698f3ff2fd0def07cd2b9134faec9b1a191919"
 
 [[build_input]]
 name = "craft-fonts"
@@ -3075,3 +3075,25 @@ licence = "OFL-1.1"
 attribution = "https://github.com/storytold/craft-fonts/blob/main/ATTRIBUTION.md"
 kind = "font"
 usage = "Japanese fallback in the interface (BIZ UDPGothic first) and Japanese glyphs in edited PDF text (Shippori Mincho); Arabic interface text, file names and document titles (Noto Sans Arabic); the web build embeds only BIZ UDPGothic Regular and Noto Sans Arabic. The checkout also holds Noto Sans CJK SC, which crates/fonts/build.rs never embeds (AGENTS.md §1.1)"
+
+[[asset]]
+path = "crates/sign/tests/data/chain-legacy.p12"
+title = "Legacy PKCS #12 test certificate chain"
+author = "PdfCraft contributors"
+source = "Contributor-original: re-export of crates/sign/tests/data/chain.p12 using OpenSSL 3; recipe in crates/sign/tests/data/README.md"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "test-data"
+usage = "Test-only keys, password test; ignored macOS Keychain issuer-chain regression test"
+sha256 = "b9fa1b58459ee79a9ff9334d690492e3495cea5cb16ec98de37e52f31d64d7b4"
+
+[[asset]]
+path = "docs/research/pdf-product-strategy-2026-10-25/Linkco-PDF-Product-Strategy.xlsx"
+title = "Linkco PDF product strategy and feature inventory - 25 October 2026"
+author = "Linkco PDF contributors"
+source = "Contributor-original research synthesis and inventory; generated by docs/research/scripts/build_product_inventory.py from repository baseline 1d7f56366160011e5bf9e370646bf1b45ba5fc79 and the dated research inputs; references are citations only, no third-party artwork or embedded fonts"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "document"
+usage = "Filterable research recommendations, baseline gaps and source register; documentation only, not shipped in the application"
+sha256 = "57140f2390406209e938bc86d2d306c6024992bf280d5eb4ed48d1ea5723ebf0"

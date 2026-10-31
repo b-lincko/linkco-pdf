@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use pdfcraft_cos::{Dict, Document, ObjRef, Object};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString};
 
 use crate::{INHERITABLE, OrganizeError, pages_root, rebuild, walk};
 
@@ -445,6 +445,13 @@ fn register_layers(dst: &mut Document, src: &Document, ocgs: &[(ObjRef, ObjRef)]
 }
 
 /// Add top-level fields to the destination's `/AcroForm /Fields` (creating the form if needed).
+///
+/// A field's fully-qualified name is its `/T` below the fields above it, and two fields with the
+/// same fully-qualified name are *one* field to every reader (ISO 32000-2 §12.7.3.2): combining
+/// two files that both have a field called `name` would otherwise give one value that both
+/// widgets show, so each incoming name the form already uses gets " (2)", " (3)"… the way
+/// duplicate attachment names do. A field whose name is free keeps it untouched, which is what
+/// makes a single-file extract, split or page move byte-identical.
 fn register_fields(dst: &mut Document, fields: &[ObjRef]) -> Result<(), OrganizeError> {
     if fields.is_empty() {
         return Ok(());
@@ -457,10 +464,20 @@ fn register_fields(dst: &mut Document, fields: &[ObjRef]) -> Result<(), Organize
         _ => (None, Dict::new()),
     };
     let mut list = form.get(b"Fields").map(|f| dst.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
+    let mut taken: Vec<String> = list.iter().filter_map(|f| field_name(dst, f)).collect();
     for f in fields {
-        if !list.contains(&Object::Ref(*f)) {
-            list.push(Object::Ref(*f));
+        let field = Object::Ref(*f);
+        if list.contains(&field) {
+            continue;
         }
+        if let Some(name) = field_name(dst, &field) {
+            let unique = unique_field_name(&taken, &name);
+            if unique != name {
+                rename_field(dst, *f, &unique)?;
+            }
+            taken.push(unique);
+        }
+        list.push(field);
     }
     form.set(b"Fields".to_vec(), Object::Array(list));
     match form_ref {
@@ -470,6 +487,40 @@ fn register_fields(dst: &mut Document, fields: &[ObjRef]) -> Result<(), Organize
             dst.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Ref(r)))?;
         }
     }
+    Ok(())
+}
+
+/// A field's `/T` as it is stored, if it has one: a widget that is its own field, or a field with
+/// no name at all, has none.
+fn field_string(doc: &Document, field: &Object) -> Option<PdfString> {
+    let d = doc.resolve(field);
+    let t = d.as_dict()?.get(b"T").cloned()?;
+    doc.resolve(&t).as_string().cloned()
+}
+
+/// A field's `T` as text — the name readers compare, whatever the string's encoding.
+fn field_name(doc: &Document, field: &Object) -> Option<String> {
+    field_string(doc, field).map(|s| s.to_text())
+}
+
+/// `name`, or `name (2)`, `name (3)`… — the first name `taken` does not already hold. Each round
+/// makes a name no earlier round made and `taken` is finite, so this stops.
+fn unique_field_name(taken: &[String], name: &str) -> String {
+    let mut candidate = name.to_string();
+    let mut n = 1usize;
+    while taken.contains(&candidate) {
+        n += 1;
+        candidate = format!("{name} ({n})");
+    }
+    candidate
+}
+
+/// Give a field a new `/T`, keeping how the old one was written (a hex string stays hex).
+fn rename_field(dst: &mut Document, field: ObjRef, name: &str) -> Result<(), OrganizeError> {
+    let hex = field_string(dst, &Object::Ref(field)).is_some_and(|s| s.hex);
+    let mut value = PdfString::text(name);
+    value.hex = hex;
+    dst.update_dict(field, |d| d.set(b"T".to_vec(), Object::String(value)))?;
     Ok(())
 }
 

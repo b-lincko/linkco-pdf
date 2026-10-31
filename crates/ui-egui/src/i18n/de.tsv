@@ -2211,4 +2211,33 @@ key	Space	Leertaste
 	Driver: {driver}	Treiber: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Druckerstatus: {status}. Prüfen Sie vor dem Drucken die Verbindung zum Drucker.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Es wurden keine Drucker gefunden. Schalten Sie den Drucker ein, schließen Sie ihn an und wählen Sie dann „Erneut prüfen“. Sie können weiterhin als PDF speichern.
+	Print both sides	Beidseitig drucken
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Auf beiden Seiten des Blatts drucken, über die lange Kante gewendet, wenn der Drucker es kann.
+	Printing on both sides of the sheet. Click to print on one side only.	Druck auf beiden Seiten des Blatts. Zum Drucken auf nur einer Seite klicken.
+	Match page at 100%	Papier an Seite anpassen, 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Mit 100 % auf Papier gleicher Größe drucken, ohne den Seitenbereich zu ändern.
+	PDF page: {w} × {h} in	PDF-Seite: {w} × {h} Zoll
+	PDF scale: {scale}%	PDF-Maßstab: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Der Maßstab, in dem die Seite gezeichnet wird; ein Druckertreiber kann trotzdem Papier ersetzen oder den Auftrag verkleinern.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	„Schneiden und Stapeln“ druckt einseitige Blätter. Wählen Sie eine andere Seitenreihenfolge, um beidseitig zu drucken.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Schneidet jede Seite auf ihren bedruckten Bereich zu, richtet sie auf und passt sie ohne Verzerrung an das Blatt an. Ein Etikett pro Blatt.
+	Turn upside down (180°)	Auf den Kopf drehen (180°)
+	the name is not a plain file name	der Name ist kein einfacher Dateiname
 	Developer: {name}	Entwickler: {name}
+	Overwrite	Überschreiben
+	Save As…	Speichern unter…
+	“{name}” changed on disk while you were working on it.	„{name}“ wurde auf dem Datenträger geändert, während Sie daran gearbeitet haben.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Beim Darüberspeichern würde die von einem anderen Programm geschriebene Fassung ersetzt. Speichern Sie eine Kopie, wenn Sie beide brauchen.
+	“{name}” was moved or renamed to “{found}”.	„{name}“ wurde verschoben oder umbenannt in „{found}“.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ befindet sich nicht mehr unter „{path}“; die Datei wurde in einen anderen Ordner verschoben oder gelöscht.
+	Tried {n} times. Zoom or rotate the page to try again.	{n} Versuche. Zoomen oder drehen Sie die Seite, um es erneut zu versuchen.
+	On disk: {n} pages, written {when}.	Auf dem Datenträger: {n} Seiten, geschrieben {when}.
+	On disk: written {when}.	Auf dem Datenträger: geschrieben {when}.
+	The version on disk is too large to compare here.	Die Fassung auf dem Datenträger ist zu groß, um sie hier zu vergleichen.
+	“{name}” could not be opened to compare it.	„{name}“ konnte zum Vergleich nicht geöffnet werden.
+	{name} (on disk)	{name} (auf dem Datenträger)
+	Recognize Text in Files	Text in Dateien erkennen
+	 (stopped after {done} of {total})	 (angehalten nach {done} von {total})
+	file {d} of {t}	Datei {d} von {t}
+	Export stopped after {done} of {total} files	Export nach {done} von {total} Dateien angehalten
+	and {n} more	und {n} weitere

@@ -106,8 +106,8 @@ milestone = "M1"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/filters/src/lib.rs::chain_three_filters_with_predictor", "crates/filters/src/lzw.rs::spec_example", "crates/filters/src/predictor.rs::png_hand_vectors"]
-notes = ""
+evidence = ["crates/filters/src/lib.rs::chain_three_filters_with_predictor", "crates/filters/src/lzw.rs::spec_example", "crates/filters/src/predictor.rs::png_hand_vectors", "crates/filters/src/lib.rs::raw_flate_fallback_preserves_output_limits", "crates/cos/src/object.rs::raw_flate_fallback_streams_preserve_the_caller_limit"]
+notes = "Raw-deflate fallback preserves output limits in strict and tolerant decoding, including misleading zlib headers. Image codecs remain outside this general-purpose filter implementation."
 
 [[feature]]
 id = "core.image-filters"
@@ -274,8 +274,20 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.save"]
 tools = ["doc_save"]
-evidence = ["crates/ui-egui/tests/editing.rs::save_writes_an_incremental_update_and_clears_dirty", "crates/engine/src/tests.rs::save_is_incremental_stamps_mod_date_and_rebases", "crates/organize/src/tests.rs::successive_incremental_saves_stack_revisions", "crates/automation/src/lib.rs::staging_never_writes_through_a_file_planted_at_its_name", "crates/ui-egui/src/editing.rs::saving_never_writes_through_a_file_planted_at_the_staging_name"]
-notes = "The atomic write stages to a new, randomly named file created with create_new, so a file or link planted at the staging path is never written through (desktop app, automation and CLI)."
+evidence = ["crates/ui-egui/tests/editing.rs::save_writes_an_incremental_update_and_clears_dirty", "crates/engine/src/tests.rs::save_is_incremental_stamps_mod_date_and_rebases", "crates/organize/src/tests.rs::successive_incremental_saves_stack_revisions", "crates/automation/src/lib.rs::staging_never_writes_through_a_file_planted_at_its_name", "crates/ui-egui/src/editing.rs::saving_never_writes_through_a_file_planted_at_the_staging_name", "crates/platform/src/staging.rs::a_staging_name_cannot_traverse_out_of_its_directory", "crates/platform/src/staging.rs::invalid_names_are_rejected_before_using_a_suffix_or_touching_the_filesystem", "crates/platform/src/staging.rs::ordinary_native_filenames_still_stage_beside_the_target", "crates/platform/src/staging.rs::windows_paths_and_alternate_streams_are_not_staging_names", "crates/platform/src/staging.rs::staging_permissions_are_private_from_creation", "crates/automation/tests/automation.rs::atomic_outputs_do_not_widen_private_unix_permissions", "crates/ui-egui/src/editing.rs::atomic_desktop_saves_do_not_widen_private_permissions", "crates/automation/src/lib.rs::a_partial_disk_full_write_never_replaces_the_target", "crates/automation/src/lib.rs::a_denied_rename_keeps_original_bytes_and_cleans_staging", "crates/ui-egui/src/editing.rs::a_partial_disk_full_write_never_replaces_the_target", "crates/ui-egui/src/editing.rs::a_denied_rename_keeps_original_bytes_and_cleans_staging", "crates/automation/src/lib.rs::process_kill_preserves_atomic_save_boundary_and_retry", "crates/ui-egui/src/editing.rs::process_kill_preserves_atomic_save_boundary_and_retry"]
+notes = "The atomic write stages to a new, randomly named file created with create_new, so a file or link planted at the staging path is never written through (desktop app, automation and CLI). The shared staging helper rejects non-filename paths before truncation or filesystem access, and rejects alternate streams on Windows. Unix staging requests owner-only 0600 at creation, subject to umask, and retains it after replacement rather than copying broader permissions/ACLs; Windows ACL behavior is unchanged. Deterministic operation faults cover partial-write and rename errors in both callers; these are not physical disk-full or process-kill tests. Test children are killed at partial-write, pre-rename and post-rename barriers, with target-byte and safe-retry checks; this is not application restart recovery or power-loss testing. This is not a full parent-directory race sandbox or a power-loss durability guarantee."
+
+[[feature]]
+id = "core.save-conflict"
+title = "Notice a file changed on disk and decide before overwriting it"
+area = "A"
+tier = "P0"
+milestone = "M1"
+status = "partial"
+commands = ["file.save", "file.save_as"]
+tools = []
+evidence = ["crates/ui-egui/src/conflict.rs::a_stamp_taken_from_memory_matches_the_file_it_came_from", "crates/ui-egui/src/conflict.rs::different_bytes_of_the_same_length_are_a_change", "crates/ui-egui/src/conflict.rs::the_version_on_disk_is_described_by_its_pages_and_size", "crates/ui-egui/src/conflict.rs::a_version_that_cannot_be_parsed_is_still_described_by_what_the_filesystem_knows", "crates/ui-egui/src/conflict.rs::reading_a_file_stops_at_the_cap_rather_than_loading_it", "crates/ui-egui/src/disk_watch.rs::another_program_writing_the_file_is_reported_as_changed", "crates/ui-egui/src/disk_watch.rs::a_renamed_file_is_found_by_its_identity", "crates/ui-egui/tests/conflict.rs::an_external_change_blocks_the_save_until_the_user_overwrites", "crates/ui-egui/tests/conflict.rs::cancelling_keeps_the_other_version_and_the_next_save_asks_again", "crates/ui-egui/tests/conflict.rs::an_idle_document_reports_that_its_file_changed_on_disk", "crates/ui-egui/tests/conflict.rs::the_other_version_can_be_compared_before_anything_is_written", "crates/ui-egui/src/editing.rs::the_other_version_opens_under_a_name_that_names_it", "crates/ui-egui/tests/control.rs::a_file_that_changed_on_disk_is_reported_with_the_held_save"]
+notes = "An in-place save is held back when the file's bytes differ from what the app loaded or last wrote (a 64-bit content stamp over the whole file, not a timestamp), and the prompt offers Compare, Save As, Overwrite or Cancel; the other version's page count and modification time are read from the file, and Compare opens it as a pathless document and runs the existing compare with it as the older version. Open documents are also polled every 3 s (contents confirmed every 60 s) and a rewritten, renamed or deleted file is reported once per new situation. Reading either the facts or the bytes for a comparison is capped at 32 MiB. Partial because the command line's `edit --out` writes with std::fs::write and checks nothing, the web build has no local path, the rename notice needs Unix metadata, and the prompt's wording and options are not verified against Acrobat's own dialog"
 
 [[feature]]
 id = "core.save-as-full-rewrite"
@@ -526,8 +538,8 @@ milestone = "M4"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/engine/src/tests.rs::autosave_snapshots_only_changed_documents", "crates/ui-egui/tests/recovery.rs::saving_or_closing_clears_the_entry_and_nothing_is_written_for_clean_documents"]
-notes = ""
+evidence = ["crates/engine/src/tests.rs::autosave_snapshots_only_changed_documents", "crates/engine/src/tests.rs::an_unacknowledged_autosave_remains_retryable_without_another_edit", "crates/engine/src/tests.rs::a_stale_autosave_acknowledgement_cannot_suppress_newer_work", "crates/engine/src/tests.rs::autosave_acknowledgements_are_per_document", "crates/ui-egui/tests/recovery.rs::saving_or_closing_clears_the_entry_and_nothing_is_written_for_clean_documents", "crates/ui-egui/tests/recovery.rs::failed_autosaves_retry_without_an_edit_and_recover_in_a_fresh_app", "crates/ui-egui/tests/recovery.rs::a_failed_metadata_write_keeps_the_autosave_pending"]
+notes = "Recovery snapshots remain pending until both PDF and metadata writes succeed; failures can retry without another edit. Revision-specific acknowledgement rejects stale snapshots and never marks user work saved. The two store files are still replaced separately; transactional pair recovery, orphan cleanup, physical disk-full/power-loss and web recovery are not claimed."
 
 [[feature]]
 id = "core.crash-recovery"
@@ -538,8 +550,8 @@ milestone = "M4"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/recovery.rs::a_crashed_session_is_offered_and_recovered_unsaved", "crates/ui-egui/tests/recovery.rs::discarding_removes_the_autosaves", "crates/engine/src/tests.rs::recovered_documents_reopen_unsaved_at_their_original_path"]
-notes = ""
+evidence = ["crates/ui-egui/src/recovery.rs::invalid_recovery_keys_are_rejected_before_writing_or_creating_the_store", "crates/ui-egui/src/recovery.rs::reads_reject_escape_keys_before_probing_a_target", "crates/ui-egui/src/recovery.rs::removal_ignores_escape_keys_and_preserves_outside_files", "crates/ui-egui/src/recovery.rs::listing_and_clearing_reject_escape_keys_and_mismatched_metadata", "crates/ui-egui/src/recovery.rs::a_metadata_alias_cannot_impersonate_a_valid_entry", "crates/ui-egui/tests/recovery.rs::forged_recovery_keys_cannot_redirect_recovery_or_discard_outside_the_store", "crates/ui-egui/tests/recovery.rs::a_crashed_session_is_offered_and_recovered_unsaved", "crates/ui-egui/tests/recovery.rs::discarding_removes_the_autosaves", "crates/engine/src/tests.rs::recovered_documents_reopen_unsaved_at_their_original_path"]
+notes = "Recovery keys are validated before key-derived filesystem access, and discovered metadata must name its own filename key. Generated and normal Unicode keys remain supported. This is lexical validation, not metadata/original-path authentication, a symlink/parent-race sandbox or a transactional PDF/JSON pair."
 
 [[feature]]
 id = "core.encrypted-autosave"
@@ -794,8 +806,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::missing_page_and_garbage_input_fail_gracefully", "crates/render/src/raster.rs::scale_is_clamped_for_huge_pages", "crates/render/src/raster.rs::watchdog_skips_a_stuck_page_and_keeps_rendering"]
-notes = ""
+evidence = ["crates/render/src/raster.rs::missing_page_and_garbage_input_fail_gracefully", "crates/render/src/raster.rs::scale_is_clamped_for_huge_pages", "crates/render/src/raster.rs::watchdog_skips_a_stuck_page_and_keeps_rendering", "crates/ui-egui/src/canvas.rs::a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change", "crates/ui-egui/src/canvas.rs::a_refused_page_is_retried_twice_then_waits_for_a_new_demand", "crates/automation/tests/automation.rs::a_failed_export_leaves_the_document_open_and_usable"]
+notes = "a page the renderer refuses says why on the page and is retried twice (after 1 s and 4 s) before it waits for the view to change; an edit, a rotation or a zoom tries again, and the page reports how often it was tried; only that page is reported, and neighbours, thumbnails, print previews and other documents keep drawing. A failed export reports why and leaves the document open and unchanged; a page that comes back through a retry shows itself again instead of keeping its card"
 
 [[feature]]
 id = "view.render-priority"
@@ -1070,8 +1082,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.read_mode"]
 tools = []
-evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented"]
-notes = ""
+evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented", "crates/ui-egui/tests/ui.rs::the_mode_bar_has_no_read_tab"]
+notes = "View ▸ Read mode (and the Read mode workspace) hides the panes and tool chrome. The mode bar has no Read tab, as in Acrobat, where reading is the viewer with no tool in use: its tabs are All tools, Edit, Convert and E-Sign"
 
 [[feature]]
 id = "view.full-screen"
@@ -1538,8 +1550,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["edit.snapshot"]
 tools = ["page_render"]
-evidence = ["crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot"]
-notes = "copies the area at the current zoom to the clipboard as an image"
+evidence = ["crates/ui-egui/tests/viewer.rs::marquee_zoom_and_snapshot", "crates/ui-egui/src/zoom_snap.rs::a_snapshot_is_rendered_at_the_scale_the_page_is_drawn_at", "crates/ui-egui/src/zoom_snap.rs::a_large_area_is_copied_at_a_lower_scale_rather_than_cropped", "crates/ui-egui/src/zoom_snap.rs::a_snapshot_never_goes_below_half_a_pixel_per_point"]
+notes = "copies the area at the scale the page is drawn on screen, so the image holds one pixel per screen pixel and is never resampled (it used to hold three quarters, which made every copy soft); a selection larger than the renderer's 4096-pixel tile is copied whole at a lower scale rather than cropped"
 
 [[feature]]
 id = "view.rulers"
@@ -1754,8 +1766,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/editing.rs::restricted_documents_show_a_notice_and_block_page_changes"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::restricted_documents_show_a_notice_and_block_page_changes", "crates/ui-egui/tests/editing.rs::a_secured_form_shows_its_form_notice_and_its_security"]
+notes = "On a secured form, the security sentence follows the form's notice instead of replacing it, which keeps Highlight fields."
 
 [[feature]]
 id = "view.pdfa-view-mode"
@@ -1819,7 +1831,7 @@ status = "partial"
 commands = ["edit.edit_text"]
 tools = ["text_lines", "text_paragraphs", "text_edit"]
 evidence = ["crates/edit/src/tests.rs::paragraphs_are_found_and_rewrapped", "crates/edit/src/tests.rs::text_lines_are_found_and_replaced_in_place", "crates/ui-egui/tests/editing.rs::editing_existing_text_in_place", "crates/automation/tests/automation.rs::editing_existing_text_through_tools", "crates/edit/src/tests.rs::a_line_whose_operator_starts_the_next_stream_can_be_edited", "crates/automation/tests/automation.rs::a_line_split_across_content_streams_is_listed_and_edited"]
-notes = "click a paragraph box and retype it in place (font reused or Helvetica substituted, colour and spacing kept, rewrapped); a page's /Contents pieces are parsed joined, so a line whose operands and operator sit in different pieces is listed and edited (lines and paragraphs still don't join across pieces; Edit image still parses each piece alone); drag a box to move it or its right-edge handle to rewrap it (edit.text-move-resize); per-character formatting changes are next"
+notes = "click a paragraph box and retype it in place (font reused or Helvetica substituted, colour and spacing kept, rewrapped); a page's /Contents pieces are parsed joined, so a line whose operands and operator sit in different pieces is listed and edited (lines and paragraphs still don't join across pieces; Edit image parses its pieces joined too (#3294)); drag a box to move it or its right-edge handle to rewrap it (edit.text-move-resize); per-character formatting changes are next"
 
 [[feature]]
 id = "edit.text-reflow"
@@ -2034,7 +2046,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text", "edit.image"]
 tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
 notes = "existing page images (right-click ▸ Replace Image) and added images: the new picture is drawn in the same place"
 
 [[feature]]
@@ -2058,7 +2070,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
 notes = "existing raster images and grouped Form artwork: rotate either way about the centre, flip horizontally or vertically (a q/cm/Q wrapper); Forms stay intact as groups; added images too"
 
 [[feature]]
@@ -2070,7 +2082,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::form_artwork_edits_only_the_selected_placement", "crates/ui-egui/tests/editing.rs::editing_existing_form_artwork_on_the_page", "crates/automation/tests/automation.rs::editing_form_artwork_through_tools", "crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+evidence = ["crates/edit/src/tests.rs::form_artwork_edits_only_the_selected_placement", "crates/ui-egui/tests/editing.rs::editing_existing_form_artwork_on_the_page", "crates/automation/tests/automation.rs::editing_form_artwork_through_tools", "crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
 notes = "existing raster images and grouped Form artwork: select, drag to move, drag a corner to resize keeping proportions; Delete removes one placement. Forms include their nested content as a group; individual internal elements and inline images are not supported. See docs/editing-images.md; added images too"
 
 [[feature]]
@@ -2082,7 +2094,7 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["image_save"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/create/src/tests.rs::images_export_as_jpeg_unchanged_and_others_as_png"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/edit/src/tests.rs::an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/create/src/tests.rs::images_export_as_jpeg_unchanged_and_others_as_png"]
 notes = "right-click an image ▸ Save Image As: JPEG unchanged, others PNG"
 
 [[feature]]
@@ -2770,8 +2782,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.duplicate"]
 tools = ["page_duplicate"]
-evidence = ["crates/ui-egui/tests/pageboxes.rs::duplicate_pages_copies_the_current_page", "crates/organize/src/tests.rs::duplicate_pages_inserts_copies_after_the_last"]
-notes = "copies share fonts and images with the originals"
+evidence = ["crates/ui-egui/tests/pageboxes.rs::duplicate_pages_copies_the_current_page", "crates/ui-egui/tests/editing.rs::dragging_with_the_copy_modifier_copies_the_pages_into_the_gap", "crates/organize/src/tests.rs::duplicate_pages_inserts_copies_after_the_last", "crates/organize/src/tests.rs::duplicate_pages_at_inserts_the_copies_there", "crates/automation/tests/automation.rs::page_duplicate_at_inserts_the_copies_there"]
+notes = "copies share fonts and images with the originals; Ctrl-drag (Option on macOS) in the page grid drops the copies at the gap instead of moving the pages, with a \"+\" badge and the copies selected (#2997); page_duplicate takes `at` for where the first copy goes (left out: after the last of them)"
 
 [[feature]]
 id = "organize.reverse-pages"
@@ -2779,11 +2791,11 @@ title = "Reverse page order"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["page.reverse"]
+tools = ["page_reverse"]
+evidence = ["crates/organize/src/tests.rs::reverse_pages_reorders", "crates/organize/src/tests.rs::cannot_reverse_missing_or_fewer_than_two_pages", "crates/automation/tests/automation.rs::reversing_pages_through_tools", "crates/ui-egui/tests/editing.rs::reverse_pages_reverses_the_selection_or_else_the_whole_document"]
+notes = "Organize Pages ▸ More ▸ Reverse pages, or the command palette: two or more selected pages swap among their own positions, otherwise the whole document reverses. One undo step. Not yet: an entry in the page thumbnails' right-click menu"
 
 [[feature]]
 id = "organize.cut-copy-paste-pages"
@@ -2830,8 +2842,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.organize"]
 tools = []
-evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn"]
-notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. Missing: a slider as in Acrobat; the size is per document view and not remembered between sessions; the Pages side panel has no size control."
+evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn", "crates/ui-egui/tests/editing.rs::page_grid_size_is_remembered_for_every_document_and_restart"]
+notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. As in Acrobat, the size last chosen is one for every document and kept in the settings across restarts (also set by --grid-zoom). Missing: a slider as in Acrobat; the Pages side panel has no size control."
 
 [[feature]]
 id = "organize.split-every-n"
@@ -3055,11 +3067,16 @@ title = "Rename or merge colliding field names when combining"
 area = "D"
 tier = "P1"
 milestone = "M4"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_combine"]
+evidence = [
+    "crates/organize/src/tests.rs::fields_with_the_same_name_stay_apart_when_documents_are_combined",
+    "crates/organize/src/tests.rs::a_combined_name_skips_the_suffixes_the_form_already_uses",
+    "crates/organize/src/tests.rs::one_document_keeps_every_field_name_as_it_was",
+    "crates/organize/src/tests.rs::a_non_ascii_field_name_is_renamed_without_losing_its_encoding",
+]
+notes = "Combining renames a field whose name the merged form already uses (\"name\", then \"name (2)\", \"name (3)\"…), so two files' fields keep their own values instead of becoming one field to a reader. Choosing the new name, or merging the fields into one, in the interface is not implemented."
 
 [[feature]]
 id = "organize.struct-tree-merge"
@@ -3427,11 +3444,11 @@ title = "Custom document properties"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info", "doc_set_info"]
+evidence = ["crates/organize/src/tests.rs::custom_document_properties_are_listed_set_removed_and_their_names_checked", "crates/organize/src/tests.rs::custom_document_properties_drop_padding_before_the_cap", "crates/render/src/inspect.rs::custom_document_properties_are_listed_apart_from_the_standard_ones", "crates/automation/tests/automation.rs::custom_document_properties_are_set_listed_and_cleared_through_the_tools", "crates/automation/tests/automation.rs::custom_document_properties_do_not_change_after_an_unrelated_edit"]
+notes = "Through the tools: doc_set_info sets or clears an /Info entry under any name the spec does not use (names checked as Acrobat does: no standard name, no empty name, no spaces or delimiters, at most 127 bytes), and doc_info lists them under custom, apart from the standard entries. Not yet: the Custom tab in Document Properties, and mirroring them into XMP (pdfx:) as Acrobat does"
 
 [[feature]]
 id = "organize.xmp-editor"
@@ -3758,8 +3775,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.attach"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::files_attach_as_comments", "crates/ui-egui/tests/comments.rs::attaching_a_file_as_a_comment", "crates/automation/tests/automation.rs::drawing_comments_through_tools"]
-notes = "push pin, paperclip, graph or tag icon; the file is embedded and listed in the Attachments panel"
+evidence = ["crates/annot/src/tests.rs::files_attach_as_comments", "crates/ui-egui/tests/comments.rs::attaching_a_file_as_a_comment", "crates/ui-egui/tests/comments.rs::an_attachment_comment_opens_its_file_from_the_page_menu", "crates/ui-egui/tests/comments.rs::an_attachment_comment_opens_its_file_from_the_card_menu", "crates/automation/tests/automation.rs::drawing_comments_through_tools"]
+notes = "push pin, paperclip, graph or tag icon; the file is embedded and listed in the Attachments panel. The comment's menu, on the page and in the Comments panel, saves the file or opens a PDF in a new tab (#2565)"
 
 [[feature]]
 id = "comment.record-audio"
@@ -4338,8 +4355,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::highlight_fields_tints_the_field_area", "crates/ui-egui/tests/view.rs::required_radio_buttons_get_a_round_red_border", "crates/ui-egui/tests/view.rs::field_highlighting_is_remembered"]
-notes = "remembered for the next document and session; required fields get a red border (round for radio buttons); the tint is drawn over the field, where Acrobat paints the highlight colour behind it"
+evidence = ["crates/ui-egui/tests/view.rs::highlight_fields_tints_the_field_area", "crates/ui-egui/tests/view.rs::required_radio_buttons_get_a_round_red_border", "crates/ui-egui/tests/view.rs::field_highlighting_is_remembered", "crates/ui-egui/tests/editing.rs::a_secured_form_shows_its_form_notice_and_its_security"]
+notes = "offered on secured forms too; remembered for the next document and session; required fields get a red border (round for radio buttons); the tint is drawn over the field, where Acrobat paints the highlight colour behind it"
 
 [[feature]]
 id = "form.field-appearance-display"
@@ -4566,8 +4583,8 @@ milestone = "M6"
 status = "shipped"
 commands = []
 tools = ["form_fill"]
-evidence = ["crates/ui-egui/tests/forms.rs::date_fields_offer_a_calendar"]
-notes = "a month calendar under date fields; the pick is written in the field's own date format"
+evidence = ["crates/ui-egui/tests/forms.rs::date_fields_offer_a_calendar", "crates/ui-egui/tests/forms.rs::the_calendar_follows_a_complete_date_typed_while_it_is_open"]
+notes = "a month calendar under date fields; the pick is written in the field's own date format; it opens on the field's date and moves to a whole date typed while it is open, staying on the month its arrows turned to otherwise"
 
 [[feature]]
 id = "form.auto-complete"
@@ -4626,8 +4643,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.import_data"]
 tools = ["doc_import_data"]
-evidence = ["crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/xfdf/src/tests.rs::fdf_round_trips_values_and_comments", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text"]
-notes = "XFDF, FDF; values go through formats and validation; read-only fields take data"
+evidence = ["crates/xfdf/src/tests.rs::xfdf_import_keeps_text_around_xml_comments_and_instructions", "crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/xfdf/src/tests.rs::fdf_round_trips_values_and_comments", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text"]
+notes = "XFDF, FDF; XFDF text survives XML comments and processing instructions; values go through formats and validation; read-only fields take data"
 
 [[feature]]
 id = "form.export-data"
@@ -4650,8 +4667,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.export_data", "form.import_data"]
 tools = ["doc_export_data", "doc_import_data"]
-evidence = ["crates/xfdf/src/tests.rs::form_data_as_xml_csv_and_text", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text"]
-notes = "Acrobat's XML (xfdf:original), CSV, tab-delimited"
+evidence = ["crates/xfdf/src/tests.rs::form_data_as_xml_csv_and_text", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xml_form_import_preserves_text_around_comments_and_instructions"]
+notes = "Acrobat's XML (xfdf:original), CSV, tab-delimited; Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Nested-element and XFA interpretation remain outside this flat exchange format."
 
 [[feature]]
 id = "form.merge-to-spreadsheet"
@@ -4866,8 +4883,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props"]
-evidence = ["crates/forms/src/tests.rs::properties_rename_and_delete", "crates/automation/tests/automation.rs::preparing_a_form_through_tools", "crates/forms/src/tests.rs::options_tab_flags_alignment_and_defaults", "crates/ui-egui/tests/prepare.rs::options_tab_sets_flags_alignment_and_defaults", "crates/automation/tests/form_bulk.rs::bulk_options_apply_per_field_and_refuse_an_invalid_comb_atomically"]
-notes = "text: alignment, default, multi-line, scroll, rich text flag, limit, password, file selection, spell check, comb; choices: items, default, sort, custom text, multiple selection, commit immediately; check boxes and radios: checked by default, radios in unison. Shared GUI offers applicable text/choice flags, alignment, text limits and check styles; choices/defaults remain individual GUI edits"
+evidence = ["crates/forms/src/tests.rs::button_caption_preserves_other_widgets_and_shared_dictionaries", "crates/ui-egui/tests/prepare.rs::button_label_is_editable_without_renaming_the_field", "crates/automation/tests/button_caption.rs::button_caption_can_be_changed_after_creation", "crates/forms/src/tests.rs::button_caption_rejects_wrong_type_and_index_before_mutation", "crates/forms/src/tests.rs::properties_rename_and_delete", "crates/automation/tests/automation.rs::preparing_a_form_through_tools", "crates/forms/src/tests.rs::options_tab_flags_alignment_and_defaults", "crates/ui-egui/tests/prepare.rs::options_tab_sets_flags_alignment_and_defaults", "crates/automation/tests/form_bulk.rs::bulk_options_apply_per_field_and_refuse_an_invalid_comb_atomically"]
+notes = "push buttons: per-widget normal label independent of the field name, including clearing and save/reopen; icon-only layout and existing Helvetica limits retained, rollover/down labels and icon layout editing remain unavailable; text: alignment, default, multi-line, scroll, rich text flag, limit, password, file selection, spell check, comb; choices: items, default, sort, custom text, multiple selection, commit immediately; check boxes and radios: checked by default, radios in unison. Shared GUI offers applicable text/choice flags, alignment, text limits and check styles; choices/defaults remain individual GUI edits"
 
 [[feature]]
 id = "form.props-actions"
@@ -5034,8 +5051,8 @@ milestone = "M6"
 status = "partial"
 commands = ["form.detect", "form.prepare"]
 tools = ["form_detect_fields"]
-evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
-notes = "Underscore runs, rules, empty boxes and small squares (check boxes); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Not yet: comb boxes, tables of cells, scanned forms (needs OCR first), radio groups."
+evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/forms/src/tests.rs::detection_makes_a_row_of_touching_cells_one_comb_field", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/engine/src/tests.rs::detecting_comb_boxes_adds_one_comb_field_per_row", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/automation/tests/automation.rs::detecting_comb_boxes_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
+notes = "Underscore runs, rules, empty boxes, small squares (check boxes) and rows of two or more touching cells of one size (one comb text field per row, the comb flag set and the character limit the number of cells; drawn forms only); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Not yet: comb rows read from a scan, tables of cells, scanned forms (needs OCR first), radio groups."
 
 [[feature]]
 id = "form.auto-name-fields"
@@ -5626,8 +5643,14 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.apply"]
 tools = ["redact_apply"]
-evidence = ["crates/ui-egui/tests/redact.rs::marking_applying_and_clearing", "crates/engine/src/tests.rs::redaction_marks_apply_for_good_and_undo", "crates/automation/tests/automation.rs::redacting_through_tools"]
-notes = "confirmation; one undo step; next save is a full rewrite"
+evidence = [
+    "crates/ui-egui/tests/redact.rs::marking_applying_and_clearing",
+    "crates/engine/src/tests.rs::redaction_marks_apply_for_good_and_undo",
+    "crates/automation/tests/automation.rs::redacting_through_tools",
+    "crates/redact/src/tests.rs::a_redacted_page_keeps_no_picture_or_private_copy_of_itself",
+    "crates/automation/tests/automation.rs::redaction_takes_the_page_thumbnail_with_it",
+]
+notes = "confirmation; one undo step; next save is a full rewrite, so the revision that still holds the content leaves the file; a redacted page also loses its thumbnail (a picture of the page before) and its /PieceInfo (the producing application's private data)"
 
 [[feature]]
 id = "protect.redact-glyph-removal"
@@ -6910,8 +6933,8 @@ milestone = "M10"
 status = "partial"
 commands = ["export.docx"]
 tools = ["doc_export_office"]
-evidence = ["crates/export/src/lib.rs::docx_is_a_word_package", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/engine/src/tests.rs::exporting_office_files_keeps_text_colour", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::word_opens_text_with_control_characters_and_long_pages", "crates/engine/src/tests.rs::exporting_office_files_keeps_images", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
-notes = "Flowing Word document: paragraphs, Heading 1/2 from larger text, bold/italic, text colour (fill as sRGB; gray/CMYK converted naively, colour spaces via cs/sc read as black), images inline, page breaks, and detected tables with spans/empty cells; checked with macOS textutil and opened in Microsoft Word (Windows). Characters XML forbids are dropped; the page size stays within Word's 22 in. Not yet: columns, fonts, colour per run within a paragraph, exact layout mode."
+evidence = ["crates/export/src/lib.rs::docx_is_a_word_package", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/engine/src/tests.rs::exporting_office_files_keeps_text_colour", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::a_link_inside_a_sentence_is_not_a_table_column", "crates/export/src/lib.rs::sentences_that_run_on_into_links_are_not_a_table", "crates/export/src/lib.rs::a_superscript_beside_a_number_keeps_its_table", "crates/export/src/lib.rs::word_opens_text_with_control_characters_and_long_pages", "crates/engine/src/tests.rs::exporting_office_files_keeps_images", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
+notes = "Flowing Word document: paragraphs, Heading 1/2 from larger text, bold/italic, text colour (fill as sRGB; gray/CMYK converted naively, colour spaces via cs/sc read as black), images inline, page breaks, and detected tables with spans/empty cells (a row whose blocks run on into each other, such as a link inside a sentence or a superscript, or overlap as a paragraph's lines do, is text and not a table row, #2806); checked with macOS textutil and opened in Microsoft Word (Windows). Characters XML forbids are dropped; the page size stays within Word's 22 in. Not yet: columns, fonts, colour per run within a paragraph, exact layout mode."
 
 [[feature]]
 id = "create.export-rtf"
@@ -7006,8 +7029,8 @@ milestone = "M10"
 status = "partial"
 commands = ["export.html"]
 tools = ["doc_export_office"]
-evidence = ["crates/export/src/lib.rs::html_has_headings_paragraphs_and_images_in_order", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
-notes = "Single HTML file with headings, paragraphs (with text colour), inline images, and detected tables with spans/empty cells. Not yet: multi-page folder output, CSS from fonts."
+evidence = ["crates/export/src/lib.rs::html_has_headings_paragraphs_and_images_in_order", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::a_link_inside_a_sentence_is_not_a_table_column", "crates/export/src/lib.rs::sentences_that_run_on_into_links_are_not_a_table", "crates/export/src/lib.rs::a_superscript_beside_a_number_keeps_its_table", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
+notes = "Single HTML file with headings, paragraphs (with text colour), inline images, and detected tables with spans/empty cells (a row whose blocks run on into each other, such as a link inside a sentence or a superscript, or overlap as a paragraph's lines do, is text and not a table row, #2806). Not yet: multi-page folder output, CSS from fonts."
 
 [[feature]]
 id = "create.export-text"
@@ -7914,8 +7937,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::size_modes"]
-notes = "fit, actual size, shrink oversized, custom %"
+evidence = ["crates/print/src/tests.rs::size_modes", "crates/print/src/tests.rs::architectural_sheets_preserve_full_scale", "crates/automation/tests/automation.rs::architectural_and_iso_papers_through_tools", "crates/ui-egui/tests/print.rs::architectural_page_can_be_matched_at_100_percent"]
+notes = "fit, actual size, shrink oversized, custom %; ARCH A/B/C/D/E1/E, ANSI C/D/E, ISO A0/A1/A2 and A6 presets; Match page at 100% matches the current page to a standard sheet. PDF scale shows the previewed source-to-sheet transform, not calibrated physical output; driver substitution/scaling remains possible"
 
 [[feature]]
 id = "print.paper-source-by-size"
@@ -7938,8 +7961,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::the_windows_job_is_the_environment_of_the_print_script", "crates/print/src/tests.rs::the_print_script_renders_the_job_and_reaches_the_spooler"]
-notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting"
+evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::the_windows_job_is_the_environment_of_the_print_script", "crates/print/src/tests.rs::the_print_script_renders_the_job_and_reaches_the_spooler", "crates/ui-egui/tests/print.rs::the_preview_switches_two_sided_printing_on_and_off"]
+notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting; the preview's \"Print both sides\" button switches it on and off (flip on long edge), and stays off for cut and stack"
 
 [[feature]]
 id = "print.n-up"
@@ -9229,9 +9252,9 @@ tier = "P1"
 milestone = "M13"
 status = "partial"
 commands = ["actions.wizard", "ocr.recognize_batch"]
-tools = ["action_run", "ocr_recognize_files"]
-evidence = ["crates/automation/tests/automation.rs::actions_through_tools", "crates/ui-egui/tests/actions.rs::run_and_create_actions"]
-notes = "Actions and OCR run over chosen files; whole folders (with subfolders) not yet."
+tools = ["action_run", "ocr_recognize_files", "batch_expand", "batch_plan"]
+evidence = ["crates/automation/tests/automation.rs::actions_through_tools", "crates/automation/tests/batch_folder.rs::a_folder_is_walked_in_name_order_and_says_what_it_left_out", "crates/automation/tests/batch_folder.rs::the_same_file_reached_twice_is_in_the_batch_once", "crates/automation/tests/batch_folder.rs::a_plan_and_a_run_cover_the_same_files_and_approving_writes_exactly_them", "crates/ui-egui/tests/actions.rs::run_and_create_actions"]
+notes = "Actions and OCR run over chosen files and over whole folders with their subfolders, with exclusion patterns, and each file once however it was reached; a folder is not watched for changes yet, and a batch over a folder is not resumed after a crash."
 
 [[feature]]
 id = "misc.action-prompt-steps"
@@ -9350,7 +9373,7 @@ milestone = "M13"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools"]
+evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools", "crates/automation/tests/roundtrip.rs::every_document_changing_tool_is_exempled_or_explained", "crates/automation/tests/roundtrip.rs::every_example_matches_the_schema_it_sits_in", "crates/automation/tests/roundtrip.rs::every_example_survives_a_save_and_a_reopen"]
 notes = "tools grow as features land"
 
 [[feature]]
@@ -9374,7 +9397,7 @@ milestone = "M13"
 status = "shipped"
 commands = []
 tools = ["command_list"]
-evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools"]
+evidence = ["crates/automation/tests/automation.rs::command_list_reports_enablement_and_tools", "crates/automation/tests/roundtrip.rs::every_document_changing_tool_is_exempled_or_explained", "crates/automation/tests/roundtrip.rs::every_example_matches_the_schema_it_sits_in", "crates/automation/tests/roundtrip.rs::every_example_survives_a_save_and_a_reopen"]
 notes = ""
 
 [[feature]]
@@ -10060,3 +10083,63 @@ commands = []
 tools = []
 evidence = []
 notes = ""
+
+[[feature]]
+id = "misc.cancellable-jobs"
+title = "See and stop background jobs (optimize, recognize, action, export)"
+area = "N"
+tier = "P0"
+milestone = "M3"
+status = "partial"
+commands = ["optimize.reduce", "optimize.advanced", "ocr.recognize", "ocr.recognize_batch", "actions.wizard", "actions.distribution", "actions.optimize_scans", "export.image", "export.text", "export.all_images"]
+tools = []
+evidence = ["crates/ui-egui/src/jobs.rs::a_stop_request_is_shared_idempotent_and_never_goes_back", "crates/ui-egui/src/jobs.rs::the_centre_lists_what_is_running_and_forgets_what_finished", "crates/ui-egui/src/jobs.rs::a_batch_stops_before_the_next_item_and_keeps_what_it_finished", "crates/ui-egui/src/jobs.rs::a_batch_stopped_before_it_starts_touches_nothing", "crates/ui-egui/src/jobs.rs::a_batch_records_each_failure_and_carries_on", "crates/ui-egui/src/jobs.rs::a_stop_that_arrives_after_the_last_item_is_not_a_cancellation", "crates/ui-egui/src/jobs.rs::progress_is_reported_before_each_item", "crates/ui-egui/src/optimize_ui.rs::the_progress_card_shows_the_stage_and_cancels", "crates/ui-egui/tests/ui.rs::the_jobs_card_lists_each_job_and_shows_which_one_is_stopping", "crates/ui-egui/tests/control.rs::jobs_are_listed_and_stopped_one_at_a_time", "crates/ui-egui/src/export_ui.rs::a_stop_between_pages_keeps_the_page_in_hand_and_starts_no_other", "crates/ui-egui/src/export_ui.rs::a_stop_before_the_first_page_writes_nothing"]
+notes = "One card at the bottom of the window names each running job (up to three, further ones counted), says what it is doing and how far it has got, and offers a Cancel that stops that job alone; the same list is on the agent control channel as ui.state jobs, and ui.jobs with {\"cancel\": id} stops one. A stop is cooperative and answered between items: the item in hand finishes and its file is written whole or not at all, no further item starts, and the row says Cancelling… until the worker reports. Covered here: Reduce File Size and the PDF Optimizer, Recognize Text on one document and on a folder of files, running an action over files, and exporting images, text and embedded images. Partial because print jobs and the Word, HTML and RTF conversions still run on the interface thread and cannot be stopped, jobs are not queued (each kind runs one at a time), and the card's wording and placement are not verified against Acrobat's own progress dialogs"
+
+[[feature]]
+id = "misc.batch-plan"
+title = "Inspect what a destructive batch would write before running it"
+area = "N"
+tier = "P0"
+milestone = "M3"
+status = "partial"
+commands = ["actions.wizard", "ocr.recognize_batch"]
+tools = ["batch_plan"]
+evidence = ["crates/automation/tests/automation.rs::batch_plan_names_the_files_the_run_would_write_and_writes_nothing", "crates/automation/tests/automation.rs::batch_plan_reports_the_files_it_would_replace", "crates/automation/tests/automation.rs::batch_plan_refuses_what_it_cannot_plan", "crates/automation/tests/automation.rs::batch_plan_numbers_a_repeated_input_name_as_the_run_does", "crates/automation/tests/automation.rs::batch_plan_reports_a_repeated_input_name_in_an_ocr_batch", "crates/automation/tests/automation.rs::batch_plan_takes_malformed_arguments_without_panicking", "crates/automation/tests/hostile_args.rs::no_tool_panics_on_hostile_arguments", "crates/automation/tests/hostile_args.rs::no_tool_escapes_the_root"]
+notes = "batch_plan takes the same arguments as the batch writer it plans (an Action Wizard run over files, or OCR into searchable copies) and answers what that call would do, writing nothing: per input, the exact destination the run would pick (including the numbered name it falls back to for a repeated input name), whether a file is already there and would be replaced, the input's size, pages, title and encryption, the steps or changes that would apply, and what cannot be undone; approve holds the call that would carry it out. Partial because the interface's Action Wizard and Recognize Text in Files dialogs do not show this plan before they start, and there is no approval step that can refuse a run."
+
+[[feature]]
+id = "misc.resource-limits"
+title = "Bounded worker pools with configurable, audited input/output quotas and time limits"
+area = "B"
+tier = "P2"
+milestone = "M4"
+status = "partial"
+commands = ["actions.wizard", "ocr.recognize_batch"]
+tools = ["limits_status", "action_run", "ocr_recognize_files", "batch_plan"]
+evidence = ["crates/automation/tests/limits.rs::an_input_over_the_limit_is_refused_before_it_is_read", "crates/automation/tests/limits.rs::an_output_over_the_limit_leaves_no_file", "crates/automation/tests/limits.rs::a_batch_over_the_limit_is_refused_before_anything_is_read", "crates/automation/tests/limits.rs::a_time_limit_stops_a_batch_between_items_and_keeps_what_it_finished", "crates/automation/tests/limits.rs::the_worker_count_is_clamped_and_reported", "apps/pdfcraft-cli/tests/limits.rs::the_limits_flags_reach_the_session"]
+notes = "A session carries a Limits value (workers, input bytes, output bytes, batch items, item time limit) and a per-session audit: workers default to the machine's cores capped at 8 (1 on the web build), every quota and the time limit default to zero, which means no limit. The quotas are answered before the work starts — doc_open from the file's size before reading it, every tool write through Budget::write before the file is opened, the batch tools and batch_plan from the path count before a path is resolved — and a batch under a time limit asks between items, finishing the one in hand and reporting the rest as skipped. Refusals name the CLI flag that would allow them and change nothing; limits_status reports the limits and the audit. Partial because there is no per-tool or per-run override inside the interface, the time limit is checked between items rather than enforced inside one, and the counts are per session in memory rather than persisted."
+
+[[feature]]
+id = "misc.versioned-tool-schemas"
+title = "Versioned tool schemas and structured error kinds a script can branch on"
+area = "N"
+tier = "P1"
+milestone = "M13"
+status = "partial"
+commands = []
+tools = []
+evidence = ["crates/automation/tests/schema.rs::the_document_describes_the_table_it_is_built_from", "crates/automation/tests/schema.rs::every_failure_kind_is_the_one_documented", "apps/pdfcraft-cli/tests/schema.rs::the_schema_document_carries_its_version_and_every_tool", "apps/pdfcraft-cli/tests/schema.rs::a_different_major_version_is_unsupported_and_still_reports_the_table", "apps/pdfcraft-cli/tests/mcp_errors.rs::a_failed_call_carries_its_kind_not_only_its_message"]
+notes = "The tool table has one version (`schema_version`, major.minor) and one document: `pdfcraft-cli schema` prints every tool with its arguments under that version, `--schema-version V` answers whether this build speaks V (exit 3 when the major differs), and the MCP server reports the same number in initialize and tools/list. The rule for bumping it is written down and tested at the major level. Every ToolError carries a stable kind (usage, unsupported, refused, failed — the command line's exit-code vocabulary), and the MCP server returns it as a failed call's structuredContent.error so a client branches on the kind rather than the message. Partial because the engine's own errors are not typed (a damaged document is still `failed` at the tool boundary, `malformed` only on the command line), there is no per-tool schema-version negotiation inside a session, and the desktop interface does not read the version."
+
+[[feature]]
+id = "misc.permission-profiles"
+title = "Read-only, project-scoped and destructive permission profiles, and per-action approvals"
+area = "B"
+tier = "P0"
+milestone = "M3"
+status = "partial"
+commands = ["actions.wizard", "file.save"]
+tools = ["policy_status", "batch_plan"]
+evidence = ["crates/automation/tests/policy.rs::the_read_only_profile_runs_only_the_tools_that_change_nothing", "crates/automation/tests/policy.rs::the_project_profile_allows_writes_inside_the_root_and_destructive_actions_only_by_name", "crates/automation/tests/policy.rs::nothing_inside_a_document_can_widen_the_profile", "crates/automation/tests/policy.rs::the_tool_table_marks_the_batch_writers_destructive", "crates/automation/tests/automation.rs::file_writing_tools_are_not_read_only", "apps/pdfcraft-cli/tests/mcp_profile.rs::the_read_only_profile_lists_and_runs_only_tools_that_change_nothing", "apps/pdfcraft-cli/tests/mcp_profile.rs::the_project_profile_needs_a_root_and_approves_destructive_tools_by_name", "apps/pdfcraft-cli/tests/mcp_profile.rs::an_unknown_profile_is_a_usage_error"]
+notes = "The session's profile is set where it starts (`--profile read-only|project|destructive`, with `--approve TOOL` for a project session) and checked in Automation::call before the arguments are read: a read-only session runs only tools that change nothing, a project session writes only inside its root and runs a destructive tool only when it was started with that tool by name, and the default destructive profile keeps every earlier behaviour. Refusals name the profile, what the tool would do and what would allow it; the MCP server lists and searches only what the policy allows, and policy_status reports it. Partial because approval is the start-up list rather than an interactive yes/no, the profile is not shown or changed in the desktop interface, and pdfcraft-cli run has no profile flag."

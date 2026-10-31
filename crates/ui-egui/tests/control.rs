@@ -106,26 +106,28 @@ fn control_resize_reports_observed_dimensions_and_rejects_invalid_sizes() {
 #[test]
 fn control_focus_traverses_real_widgets_and_keyboard_activates() {
     let (mut h, c) = harness();
-    ok(&mut h, &c, "ui.focus", json!({"label": "Read"}));
-    let read = ok(&mut h, &c, "ui.inspect", json!({"query": "Read", "role": "Button"}));
-    assert_eq!(read["widgets"][0]["focused"], true, "{read}");
-    assert_eq!(read["widgets"][0]["focusable"], true);
+    ok(&mut h, &c, "ui.focus", json!({"label": "Convert"}));
+    let convert = ok(&mut h, &c, "ui.inspect", json!({"query": "Convert", "role": "Button"}));
+    let focused =
+        |found: &serde_json::Value, label: &str| found["widgets"].as_array().unwrap().iter().any(|w| w["label"] == label && w["focused"] == true);
+    assert!(focused(&convert, "Convert"), "{convert}");
+    assert!(convert["widgets"].as_array().unwrap().iter().any(|w| w["label"] == "Convert" && w["focusable"] == true));
     ok(&mut h, &c, "ui.key", json!({"key": "Tab"}));
-    let edit = ok(&mut h, &c, "ui.inspect", json!({"query": "Edit", "role": "Button"}));
-    assert!(edit["widgets"].as_array().unwrap().iter().any(|w| w["label"] == "Edit" && w["focused"] == true), "{edit}");
+    let sign = ok(&mut h, &c, "ui.inspect", json!({"query": "E-Sign", "role": "Button"}));
+    assert!(focused(&sign, "E-Sign"), "{sign}");
     ok(&mut h, &c, "ui.key", json!({"key": "Tab", "modifiers": ["shift"]}));
-    let read = ok(&mut h, &c, "ui.inspect", json!({"query": "Read", "role": "Button"}));
-    assert_eq!(read["widgets"][0]["focused"], true);
+    let convert = ok(&mut h, &c, "ui.inspect", json!({"query": "Convert", "role": "Button"}));
+    assert!(focused(&convert, "Convert"), "{convert}");
     ok(&mut h, &c, "ui.key", json!({"key": "Enter"}));
     let state = ok(&mut h, &c, "ui.state", json!({}));
-    assert_eq!(state["mode"], "Read");
+    assert_eq!(state["mode"], "Convert");
     assert_eq!(state["documents"][0]["dirty"], false);
 }
 
 #[test]
 fn control_button_focus_preserves_document_undo_redo_shortcuts() {
     let (mut h, c) = harness_pages(2);
-    ok(&mut h, &c, "ui.focus", json!({"label": "Read"}));
+    ok(&mut h, &c, "ui.focus", json!({"label": "Convert"}));
     ok(&mut h, &c, "ui.key", json!({"key": "Enter"}));
     ok(&mut h, &c, "ui.click", json!({"label": "All tools"}));
     assert!(h.ctx.egui_wants_keyboard_input());
@@ -163,9 +165,9 @@ fn control_focus_rejects_missing_ambiguous_disabled_and_nonfocusable_targets() {
         json!({"label": "does not exist"}),
         json!({"id": "not a number"}),
         json!({"id": 0}),
-        json!({"id": 1, "label": "Read"}),
+        json!({"id": 1, "label": "Convert"}),
         json!({"label": false}),
-        json!({"label": "Read", "force": true}),
+        json!({"label": "Convert", "force": true}),
         json!([]),
     ] {
         assert!(call(&mut h, &c, "ui.focus", params).is_err());
@@ -173,9 +175,9 @@ fn control_focus_rejects_missing_ambiguous_disabled_and_nonfocusable_targets() {
     let widgets = ok(&mut h, &c, "ui.inspect", json!({}));
     let nonfocusable = widgets["widgets"].as_array().unwrap().iter().find(|w| w["focusable"] == false).unwrap();
     assert!(call(&mut h, &c, "ui.focus", json!({"id": nonfocusable["id"]})).is_err());
-    let read = widgets["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Read").unwrap();
-    ok(&mut h, &c, "ui.focus", json!({"id": read["id"]}));
-    assert_eq!(ok(&mut h, &c, "ui.inspect", json!({"query": "Read", "role": "Button"}))["widgets"][0]["focused"], true);
+    let convert = widgets["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert").unwrap();
+    ok(&mut h, &c, "ui.focus", json!({"id": convert["id"]}));
+    assert_eq!(ok(&mut h, &c, "ui.inspect", json!({"query": "Convert", "role": "Button"}))["widgets"][0]["focused"], true);
     // Home has no active document, so its document-only toolbar controls are disabled.
     ok(&mut h, &c, "ui.click", json!({"label": "Home"}));
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["home"], true);
@@ -686,13 +688,57 @@ fn state_and_view_options() {
     assert!(call(&mut h, &c, "ui.set", json!({ "key": "panel", "value": "nonsense" })).is_err());
 }
 
+/// An agent can see that a file changed on disk and that a save was held back, with what the
+/// other version holds — the same facts the prompt shows a person.
+#[test]
+fn a_file_that_changed_on_disk_is_reported_with_the_held_save() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-control-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+
+    let slot: Arc<Mutex<Option<ControlClient>>> = Arc::default();
+    let s = slot.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        *s.lock().unwrap() = Some(app.attach_control(&cc.egui_ctx));
+        app
+    });
+    h.run_steps(2);
+    let c = slot.lock().unwrap().take().unwrap();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    assert!(h.state_mut().check_disk_now().is_empty(), "an untouched file is quiet");
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"][0]["disk"], Value::Null);
+
+    // Another program replaces the file: the channel says so, and the file is left alone.
+    std::fs::write(&path, fixture(3)).unwrap();
+    assert_eq!(h.state_mut().check_disk_now().len(), 1);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"][0]["disk"]["state"], "changed");
+    assert_eq!(std::fs::read(&path).unwrap(), fixture(3));
+
+    // A save is held back, and the channel reports what the other version holds.
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::DeletePages { pages: vec![0] }));
+    assert!(!h.state_mut().save_active(pdfcraft_ui_egui::SaveTarget::InPlace), "the save is held back");
+    h.run_steps(2);
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let conflict = &state["save_conflict"];
+    assert_eq!(conflict["name"], "work.pdf");
+    assert_eq!(conflict["disk_pages"], 3, "the other version's pages, read from the file: {state}");
+    assert_eq!(conflict["disk_bytes"], fixture(3).len() as u64);
+    assert_eq!(std::fs::read(&path).unwrap(), fixture(3), "nothing was written");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn japanese_controls_and_search_keep_command_ids() {
     let (mut h, c) = harness();
     ok(&mut h, &c, "ui.set", json!({ "key": "language", "value": "ja" }));
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["language"], "ja");
-    ok(&mut h, &c, "ui.click", json!({ "label": "閲覧" }));
-    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Read");
+    ok(&mut h, &c, "ui.click", json!({ "label": "変換" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Convert");
 
     ok(&mut h, &c, "ui.command", json!({ "id": "app.preferences" }));
     let prefs = ok(&mut h, &c, "ui.inspect", json!({ "query": "表示言語" }));
@@ -717,8 +763,8 @@ fn japanese_controls_and_search_keep_command_ids() {
 fn german_preferences_and_search_keep_command_ids() {
     let (mut h, c) = harness();
     ok(&mut h, &c, "ui.set", json!({ "key": "language", "value": "de" }));
-    ok(&mut h, &c, "ui.click", json!({ "label": "Lesen" }));
-    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Read");
+    ok(&mut h, &c, "ui.click", json!({ "label": "Konvertieren" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Convert");
     ok(&mut h, &c, "ui.command", json!({ "id": "app.preferences" }));
     let prefs = ok(&mut h, &c, "ui.inspect", json!({ "query": "Sprache der Oberfläche" }));
     assert!(prefs["count"].as_u64().unwrap() > 0, "{prefs}");
@@ -909,23 +955,24 @@ fn simplified_chinese_signature_prompts_and_errors_keep_document_state() {
 #[test]
 fn inspect_and_click_by_label_and_id() {
     let (mut h, c) = harness();
-    let found = ok(&mut h, &c, "ui.inspect", json!({ "query": "read" }));
-    let read = found["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Read" && w["clickable"] == true).cloned().expect("a Read tab");
-    let rect = read["rect"].as_array().unwrap();
+    let found = ok(&mut h, &c, "ui.inspect", json!({ "query": "convert" }));
+    let convert =
+        found["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "Convert" && w["clickable"] == true).cloned().expect("a Convert tab");
+    let rect = convert["rect"].as_array().unwrap();
     assert!(rect[2].as_f64().unwrap() > rect[0].as_f64().unwrap());
 
-    ok(&mut h, &c, "ui.click", json!({ "label": "Read" }));
-    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Read");
+    ok(&mut h, &c, "ui.click", json!({ "label": "Convert" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Convert");
 
     let all = ok(&mut h, &c, "ui.inspect", json!({ "query": "all tools" }));
     let id = all["widgets"].as_array().unwrap().iter().find(|w| w["label"] == "All tools" && w["clickable"] == true).unwrap()["id"].clone();
     ok(&mut h, &c, "ui.click", json!({ "id": id }));
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "AllTools");
 
-    // Clicking a point works too (here: the Read tab's centre).
+    // Clicking a point works too (here: the Convert tab's centre).
     let [x0, y0, x1, y1] = [0, 1, 2, 3].map(|i| rect[i].as_f64().unwrap());
     ok(&mut h, &c, "ui.click", json!({ "x": (x0 + x1) / 2.0, "y": (y0 + y1) / 2.0 }));
-    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Read");
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Convert");
 
     let err = call(&mut h, &c, "ui.click", json!({ "label": "No such button" })).unwrap_err();
     assert!(err.contains("no enabled clickable widget"), "{err}");
@@ -1120,6 +1167,7 @@ fn control_default_workspace_and_session_override() {
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Edit");
     ok(&mut h, &c, "ui.set", json!({"key": "mode", "value": "read"}));
     h.state_mut().open_bytes("another.pdf", None, fixture(1)).unwrap();
+    // Read mode was entered by command here, not by the mode-bar tab that is gone.
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["mode"], "Read");
 }
 
@@ -1410,4 +1458,49 @@ fn read_mode_retains_existing_rail_click_to_close_policy() {
     h.run_steps(3);
     assert_eq!(h.state().right, None);
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Read);
+}
+
+/// Every background job is on the control channel, and `ui.jobs` stops one of them the same way
+/// the card's Cancel button does.
+#[test]
+fn jobs_are_listed_and_stopped_one_at_a_time() {
+    let (mut h, c) = harness();
+    // Two jobs as the workers register them (an optimization and an export).
+    let (optimize, optimize_stop) = h.state_mut().jobs.begin(pdfcraft_ui_egui::jobs::Kind::Optimize, "Optimize PDF…".into(), 10);
+    let (export, export_stop) = h.state_mut().jobs.begin(pdfcraft_ui_egui::jobs::Kind::Export, "Export to Image".into(), 4);
+    h.state_mut().jobs.stage(optimize, "Optimizing… image 4 of 10", 0.3);
+    h.run_steps(2);
+
+    // The state carries the same list the card draws.
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let jobs = state["jobs"].as_array().expect("jobs is a list").clone();
+    assert_eq!(jobs.len(), 2, "{state}");
+    assert_eq!(jobs[0]["kind"], "optimize");
+    assert_eq!(jobs[0]["label"], "Optimize PDF…");
+    assert_eq!(jobs[0]["stage"], "Optimizing… image 4 of 10");
+    assert_eq!(jobs[0]["done"], 0);
+    assert_eq!(jobs[0]["total"], 10);
+    assert_eq!(jobs[1]["kind"], "export");
+    assert_eq!(jobs[1]["stopping"], false);
+
+    // An agent reads the same list with ui.jobs.
+    let listed = ok(&mut h, &c, "ui.jobs", json!({}));
+    assert_eq!(listed.as_array().map(Vec::len), Some(2), "{listed}");
+
+    // Stopping one leaves the other running, and says only that the request was taken.
+    let stopped = ok(&mut h, &c, "ui.jobs", json!({"cancel": export.0 }));
+    assert_eq!(stopped[1]["stopping"], true, "{stopped}");
+    assert_eq!(stopped[0]["stopping"], false, "{stopped}");
+    assert!(export_stop.is_cancelled(), "the export's worker is asked to stop");
+    assert!(!optimize_stop.is_cancelled(), "the optimization's worker is not");
+
+    // Asking again is harmless; a job that is gone is an error, not a silent nothing.
+    assert!(ok(&mut h, &c, "ui.jobs", json!({"cancel": export.0}))[1]["stopping"].as_bool().unwrap());
+    let err = call(&mut h, &c, "ui.jobs", json!({"cancel": 9999})).expect_err("no such job");
+    assert!(err.contains("no running job 9999"), "{err}");
+    let err = call(&mut h, &c, "ui.jobs", json!({"cancel": "one"})).expect_err("not an id");
+    assert!(err.contains("cancel must be a job id"), "{err}");
+    let err = call(&mut h, &c, "ui.jobs", json!({"cancel": optimize.0, "id": 3})).expect_err("stray parameter");
+    assert!(err.contains("unknown parameter"), "{err}");
+    assert!(!optimize_stop.is_cancelled(), "a refused request stops nothing");
 }

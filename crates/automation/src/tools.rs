@@ -70,6 +70,43 @@ fn comment_ref(mut extra: Value) -> Value {
     extra
 }
 
+/// The arguments that say which files a batch covers. Every tool that walks a list of paths takes
+/// them, and they mean the same thing in all of them because one function reads them
+/// (`crate::folder`): a folder may be given instead of files, names can be excluded, and the same
+/// file is never taken twice.
+fn batch_walk() -> Value {
+    json!({
+        "exclude": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Patterns to leave out, matched against each file's name and its path below the folder it was found in: `*` is any run of characters, `?` is one. e.g. [\"*.draft.pdf\", \"scans/*\"].",
+        },
+        "include_hidden": { "type": "boolean", "description": "Take names that start with a dot (default false)." },
+        "depth": { "type": "integer", "minimum": 1, "maximum": 32, "description": "How deep to walk a folder (default 32; 1 takes its own files and no subfolder's)." },
+        "follow_links": { "type": "boolean", "description": "Take a link to a file (default true). A link to a folder is never followed, so a link cannot make a loop." },
+    })
+}
+
+/// `props` with the batch walk arguments added, for a tool that takes a list of paths.
+fn with_batch_walk(mut props: Value) -> Value {
+    if let (Some(obj), Some(extra)) = (props.as_object_mut(), batch_walk().as_object().cloned()) {
+        for (k, v) in extra {
+            obj.insert(k, v);
+        }
+    }
+    props
+}
+
+/// The `paths` argument of a batch tool: files, folders, or a mixture.
+fn batch_paths() -> Value {
+    json!({
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1,
+        "description": "Files or folders. A folder is walked (see depth, exclude and include_hidden) and the files found in it are processed in name order; a file given by name is processed as it is. A file that appears twice, by any route, is processed once.",
+    })
+}
+
 fn schema(props: Value, required: &[&str]) -> Value {
     json!({ "type": "object", "properties": props, "required": required, "additionalProperties": false })
 }
@@ -119,6 +156,7 @@ pub fn tools() -> Vec<ToolDef> {
     let open = json!({ "type": "boolean", "description": "Also open the result as a new document (default: only when out is omitted)." });
     vec![
         t("doc_open", "Open a PDF", "Open a PDF file and return its document id, page count and whether it can be edited.")
+            .ro()
             .cmd("file.open")
             .with(schema(json!({ "path": { "type": "string" }, "password": { "type": "string", "description": "User or owner password for encrypted files." } }), &["path"])),
         t("doc_list", "List open documents", "List the open documents with their ids, page counts and unsaved state.").ro().with(schema(json!({}), &[])),
@@ -145,7 +183,7 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
-        t("doc_set_info", "Set document metadata", "Set a document information entry such as Title, Author, Subject or Keywords. Undoable.")
+        t("doc_set_info", "Set document metadata", "Set a document information entry such as Title, Author, Subject or Keywords, or a custom property under any other name (no spaces, delimiters, / or #; at most 127 bytes; doc_info lists them under custom). An empty value removes it. Undoable.")
             .with(schema(json!({ "doc": doc(), "key": { "type": "string" }, "value": { "type": "string" } }), &["doc", "key", "value"])),
         t("page_render", "Render a page", "Render one page to a PNG image (default 96 dpi, at most 600).")
             .ro()
@@ -190,6 +228,9 @@ pub fn tools() -> Vec<ToolDef> {
             json!({ "doc": doc(), "pages": pages("to move"), "to": { "type": "integer", "minimum": 1 } }),
             &["doc", "pages", "to"],
         )),
+        t("page_reverse", "Reverse pages", "Reverse the order of pages among the positions they occupy: the listed pages (at least two), or the whole document when pages is omitted. Undoable.")
+            .cmd("page.reverse")
+            .with(schema(json!({ "doc": doc(), "pages": pages("to reverse (default: all)") }), &["doc"])),
         t("page_insert_blank", "Insert a blank page", "Insert a blank page so it becomes page `at`. Size defaults to the neighbouring page. Undoable.")
             .cmd("page.insert_blank")
             .with(schema(
@@ -205,7 +246,7 @@ pub fn tools() -> Vec<ToolDef> {
                 json!({ "doc": doc(), "pages": pages("to extract"), "out": save_out.clone(), "open": open.clone(), "separate": { "type": "boolean" }, "out_dir": { "type": "string" }, "delete": { "type": "boolean" } }),
                 &["doc", "pages"],
             )),
-        t("doc_combine", "Combine files", "Combine PDFs, in order, into one (bookmarks are kept under one entry per file). pages optionally chooses each file's pages, in step with paths: a range such as \"1-3, 6\" or null for all pages. passwords, also in step with paths, opens encrypted files (the open password, or the permissions password where a file's security doesn't allow copying pages; null for none). The result is not encrypted. Passwords are never echoed back. groups, also in step with paths, splits a file around others: entries with the same number (they must name the same path) are one file, copied once, so it keeps one bookmark at its first page, its links and its form fields; null for a file of its own. A group uses its first entry's password.")
+        t("doc_combine", "Combine files", "Combine PDFs, in order, into one (bookmarks are kept under one entry per file). pages optionally chooses each file's pages, in step with paths: a range such as \"1-3, 6\" or null for all pages. passwords, also in step with paths, opens encrypted files (the open password, or the permissions password where a file's security doesn't allow copying pages; null for none). The result is not encrypted. Passwords are never echoed back. groups, also in step with paths, splits a file around others: entries with the same number (they must name the same path) are one file, copied once, so it keeps one bookmark at its first page, its links and its form fields; null for a file of its own. A group uses its first entry's password. A form field whose name another file already uses keeps its value under a renamed field (\"name (2)\", \"name (3)\"…), because two fields with one name are one field to a reader.")
             .cmd("page.combine")
             .with(schema(
                 json!({
@@ -283,7 +324,7 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc", "from", "to"],
         )),
-        t("form_fields", "List form fields", "Every interactive form field: name, type (text, checkbox, radio, combo, list, button, signature), value, options, page, rect (top-left-origin points) and rotation (0, 90, 180 or 270 degrees counterclockwise), read-only and required flags.")
+        t("form_fields", "List form fields", "Every interactive form field: name, type (text, checkbox, radio, combo, list, button, signature), value, options, page, rect (top-left-origin points) and rotation (0, 90, 180 or 270 degrees counterclockwise), read-only and required flags. Push buttons include caption (first widget's normal label) and captions [{widget, caption}] for all widgets (1-based).")
             .ro()
             .with(schema(json!({ "doc": doc() }), &["doc"])),
         t(
@@ -336,7 +377,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "form_set_props",
             "Field properties",
-            "Change field properties: give field for one field, or fields for a list of unique field names (1–1000). A bulk change is atomic and one Undo step; an invalid or locked field leaves every field unchanged. Only the given properties change, and partial appearance changes preserve each field's other colours and font. name (rename), rect (position) and rotation require a single field. General and Options: tooltip, read_only, required, multiline, max_length (0 = no limit), options (combo/list items), font_size (0 = auto), format, validate, calculate (Acrobat's native AF rules). Options: align (left, center, right), default (Reset form's value; check boxes/radio buttons use their on state, \"\" for off), flags { scroll, rich_text, password, file_select, spell_check, comb (needs max_length), sort, editable, multi_select, commit_immediately }, check_style (check boxes/radio buttons: check, circle, cross, diamond, square, star). rotation is 0, 90, 180 or 270 degrees counterclockwise and swaps width/height when the axis changes. Undoable.",
+            "Change field properties: give field for one field, or fields for a list of unique field names (1–1000). A bulk change is atomic and one Undo step; an invalid or locked field leaves every field unchanged. Only the given properties change, and partial appearance changes preserve each field's other colours and font. name (rename), rect (position), rotation and caption require a single field. caption changes one push-button normal label (widget: 1-based index, default 1); an empty string clears it. Other widgets and icon-only layouts are preserved. General and Options: tooltip, read_only, required, multiline, max_length (0 = no limit), options (combo/list items), font_size (0 = auto), format, validate, calculate (Acrobat's native AF rules). Options: align (left, center, right), default (Reset form's value; check boxes/radio buttons use their on state, \"\" for off), flags { scroll, rich_text, password, file_select, spell_check, comb (needs max_length), sort, editable, multi_select, commit_immediately }, check_style (check boxes/radio buttons: check, circle, cross, diamond, square, star). rotation is 0, 90, 180 or 270 degrees counterclockwise and swaps width/height when the axis changes. Undoable.",
         )
         .with({
             let mut input = schema(
@@ -359,6 +400,8 @@ pub fn tools() -> Vec<ToolDef> {
                 "font_size": { "type": "number", "minimum": 0 },
                 "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "Move/resize: points from the top-left of the displayed page." },
                 "rotation": { "type": "integer", "enum": [0, 90, 180, 270], "description": "Widget rotation in degrees, counterclockwise. Changing between horizontal and vertical swaps the rectangle around its center." },
+                "caption": { "type": "string", "description": "Normal push-button label; an empty string clears it. Requires a single field." },
+                "widget": { "type": "integer", "minimum": 1, "description": "Widget whose caption changes (1-based, default 1). Requires caption. See form_fields.captions." },
                 "appearance": { "type": "object", "description": "Appearance tab: border, fill, text_color (#RRGGBB, a name or \"none\"), width (0–12 points; 1 thin, 2 medium, 3 thick), style (solid, dashed, beveled, inset, underline), font (helvetica, times, courier)." },
                 "format": { "description": "Format tab: {\"type\": \"number\", \"decimals\": 2, \"currency\": \"$\", \"separator\": 0-4, \"negative\": 0-3}, {\"type\": \"percent\"}, {\"type\": \"date\"|\"time\", \"pattern\": \"mm/dd/yyyy\"}, {\"type\": \"zip\"|\"zip4\"|\"phone\"|\"ssn\"}, {\"type\": \"mask\", \"mask\": \"AA-9999\"}, or \"none\"." },
                 "validate": { "description": "Validate tab: {\"min\": 0, \"max\": 100} (either may be left out) or \"none\"." },
@@ -442,7 +485,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "doc_print",
             "Print",
-            "Print with Acrobat's Print dialog options, or save the print-ready PDF. pages: a range such as \"1-3, 6, 9-\" (page labels allowed; default all); subset odd/even; reverse. layout: fit (default), actual, shrink, custom (scale %), multiple (per_sheet 2/4/6/9/16, order, border, auto_rotate; cut-stack order arranges single-sided sheets for cutting into piles and stacking left to right, top to bottom, keeping sheet order within each pile; duplex must be off), booklet (booklet_subset both/front/back, binding left/right), poster (scale %, overlap pt, cut_marks). orientation auto/portrait/landscape; comments_forms document / document-and-markups (default) / document-and-stamps / form-fields-only; paper Letter/Legal/Tabloid/A3/A4/A5. Then path (save) or printer (a name or \"default\") with copies, collate, duplex off/long-edge/short-edge, grayscale, and options (driver options from printer_options, CUPS).",
+            "Print with Acrobat's Print dialog options, or save the print-ready PDF. pages: a range such as \"1-3, 6, 9-\" (page labels allowed; default all); subset odd/even; reverse. layout: fit (default), actual, shrink, custom (scale %), multiple (per_sheet 2/4/6/9/16, order, border, auto_rotate; cut-stack order arranges single-sided sheets for cutting into piles and stacking left to right, top to bottom, keeping sheet order within each pile; duplex must be off), booklet (booklet_subset both/front/back, binding left/right), poster (scale %, overlap pt, cut_marks). orientation auto/portrait/landscape; comments_forms document / document-and-markups (default) / document-and-stamps / form-fields-only; paper Letter/Legal/Tabloid, ARCH A/B/C/D/E1/E, ANSI C/D/E, A0/A1/A2/A3/A4/A5/A6, or US #10 Envelope (short names or full preset labels); use layout actual for 100% in the print-ready PDF; printer drivers may still substitute paper or scale. Then path (save) or printer (a name or \"default\") with copies, collate, duplex off/long-edge/short-edge, grayscale, and options (driver options from printer_options, CUPS).",
         )
         .with(schema(
             json!({
@@ -725,9 +768,9 @@ pub fn tools() -> Vec<ToolDef> {
         t("page_replace", "Replace pages", "Replace the content of pages with pages of another PDF (same count). Links, comments, form fields and bookmarks on the original pages stay, as in Acrobat. Undoable.")
             .cmd("page.replace")
             .with(schema(json!({ "doc": doc(), "pages": pages("to replace"), "path": path_arg(), "from_pages": pages("of the other file, in order (default: its first pages)") }), &["doc", "pages", "path"])),
-        t("page_duplicate", "Duplicate pages", "Insert copies of pages after the last of them (fonts and images are shared, not copied). Undoable.")
+        t("page_duplicate", "Duplicate pages", "Insert copies of pages so the first copy becomes page `at`, or after the last of them when `at` is left out (fonts and images are shared, not copied). Undoable.")
             .cmd("page.duplicate")
-            .with(schema(json!({ "doc": doc(), "pages": pages("to duplicate") }), &["doc", "pages"])),
+            .with(schema(json!({ "doc": doc(), "pages": pages("to duplicate"), "at": { "type": "integer", "minimum": 1 } }), &["doc", "pages"])),
         t(
             "page_set_box",
             "Set page boxes / crop",
@@ -877,17 +920,44 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("actions.wizard")
             .with(schema(json!({}), &[])),
-        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. Returns each file's step log or error.")
+        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log or error.")
+            .destructive()
             .cmd("actions.wizard")
             .with(schema(
-                json!({
+                with_batch_walk(json!({
                     "action": { "type": "string" },
                     "steps": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string" }, "arg": { "type": "string" } }, "required": ["step"] } },
-                    "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "paths": batch_paths(),
                     "folder": { "type": "string" },
-                }),
+                })),
                 &["paths", "folder"],
             )),
+        t(
+            "batch_plan",
+            "Plan a batch write",
+            "Before running a destructive batch, say what it would do: for each input, the file the run would write into folder (exactly the name the run picks, including a `name (2).pdf` when the name is taken), whether a file is already there and would be replaced, the input's pages, title and size, and what cannot be undone. Writes nothing and creates no folder. operation is action (an Action Wizard run: give action or steps) or ocr (a searchable copy of each file: give dpi, language, skip_text_pages). The answer's approve field holds the exact call that would carry the plan out.",
+        )
+        .ro()
+        .cmd("actions.wizard")
+        .with(schema(
+            with_batch_walk(json!({
+                "operation": { "type": "string", "enum": ["action", "ocr"], "description": "Which batch to plan." },
+                "paths": batch_paths(),
+                "folder": { "type": "string" },
+                "action": { "type": "string", "description": "With operation action: a built-in action's name (see action_list)." },
+                "steps": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string" }, "arg": { "type": "string" } }, "required": ["step"] } },
+                "dpi": { "type": "number", "minimum": 72, "maximum": 600, "description": "With operation ocr: the resolution pages would be read at." },
+                "language": { "type": "string", "enum": ["en"], "description": "With operation ocr: the document language." },
+                "skip_text_pages": { "type": "boolean", "description": "With operation ocr: whether pages that already have text are left alone." },
+            })),
+            &["operation", "paths", "folder"],
+        )),
+        t("policy_status", "What this session may do", "The permission profile this session was started with (read-only, project or destructive), the destructive tools it was started with by name, how many tools it can run, which ones it refuses, and the root. Nothing in an open document can change any of it.")
+            .ro()
+            .with(schema(json!({}), &[])),
+        t("limits_status", "This session's limits", "The worker count, input and output size limits, batch limit and time limit this session was started with (0 means no limit), and the audit: checks made, inputs, outputs and batches refused, batches stopped by the time limit, and bytes written. A refused call changes nothing.")
+            .ro()
+            .with(schema(json!({}), &[])),
         t("doc_compare", "Compare files", "Compare the text of two open documents: other is the older version, doc the newer. Returns counts and each change (replaced, inserted, deleted) with the old and new text, pages (1-based) and rectangles (points, origin bottom-left).")
             .ro()
             .cmd("doc.compare")
@@ -898,7 +968,7 @@ pub fn tools() -> Vec<ToolDef> {
         t("doc_compare_mark", "Mark differences as comments", "Add the differences from other (older) to doc (newer) as comments in doc: highlights over replaced (blue) and inserted (green) text, notes where text was deleted (red), authored Compare. Undoable.")
             .cmd("doc.compare")
             .with(schema(json!({ "doc": doc(), "other": { "type": "integer" } }), &["doc", "other"])),
-        t("form_detect_fields", "Detect form fields", "Prepare a form ▸ automatic field detection: find the blanks a printed form asks to be filled (underscore runs, lines, empty boxes, small squares for check boxes) and name each field from its label. With add (default true) the fields are created as one undoable step; otherwise they are only proposed. Returns page (1-based), kind, name and rect (points, origin bottom-left).")
+        t("form_detect_fields", "Detect form fields", "Prepare a form ▸ automatic field detection: find the blanks a printed form asks to be filled (underscore runs, lines, empty boxes, rows of comb boxes, small squares for check boxes) and name each field from its label. With add (default true) the fields are created as one undoable step; otherwise they are only proposed. Returns page (1-based), kind, name and rect (points, origin bottom-left); a row of comb boxes is one text field with comb set to its number of cells, created with the comb flag and that character limit.")
             .cmd("form.detect")
             .with(schema(json!({ "doc": doc(), "pages": pages("to look at (default: all)"), "add": { "type": "boolean" } }), &["doc"])),
         t("form_actions", "Field actions", "Field Properties ▸ Actions: the field's action for each trigger (mouse_up, mouse_down, mouse_enter, mouse_exit, on_focus, on_blur).")
@@ -929,17 +999,31 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
-        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). Returns, per file, the output path, word count and skipped pages, or the error.")
+        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error.")
+            .destructive()
             .cmd("ocr.recognize_batch")
             .with(schema(
-                json!({
-                    "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                with_batch_walk(json!({
+                    "paths": batch_paths(),
                     "folder": { "type": "string" },
                     "dpi": { "type": "number", "minimum": 72, "maximum": 600 },
                     "language": { "type": "string", "enum": ["en"] },
-                }),
+                })),
                 &["paths", "folder"],
             )),
+        t(
+            "batch_expand",
+            "List the files a batch would run over",
+            "The list a batch tool would process, before it processes anything: give the same paths, exclude, include_hidden, depth and follow_links you would give action_run or ocr_recognize_files and it walks the folders, leaves out what the rules leave out, and names every file once. Writes nothing. Files that cannot be read are reported too, so nothing in the answer is a surprise later.",
+        )
+        .ro()
+        .with(schema(
+            with_batch_walk(json!({
+                "paths": batch_paths(),
+                "folder": { "type": "string", "description": "The folder a run would write into, left out of the walk so a run never processes what an earlier run wrote." },
+            })),
+            &["paths"],
+        )),
         t("ocr_status", "OCR status", "Whether text recognition is available (its models are installed: release packages include them; a source build fetches them with `cargo xtask models`; PDFCRAFT_MODELS overrides), where it looks for them, and the languages it reads.")
             .ro()
             .cmd("ocr.recognize")

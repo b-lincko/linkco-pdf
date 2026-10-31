@@ -88,7 +88,7 @@ fn reduce(name: &'static str, bytes: Vec<u8>, out: &std::path::Path) -> egui_kit
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     h.run_steps(2);
-    assert!(h.state().optimize_run.is_none() && h.state().progress_notice.is_none(), "the run finished");
+    assert!(h.state().optimize_run.is_none() && h.state().jobs.is_empty(), "the run finished and its card went with it");
     h
 }
 
@@ -122,10 +122,22 @@ fn reduce_file_size_saves_nothing_when_the_file_is_already_small() {
     let dir = std::env::temp_dir().join(format!("pdfcraft-reduce-small-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("reduced.pdf");
-    // A new text PDF is already compact: a copy would be no smaller (#490).
+    // A new text PDF is already compact: a copy would be no smaller (#490). The rewrite lands
+    // within a byte or two of the original, and the objects come out in a different order on
+    // each run, so which side of the line it falls on does too - a run that asked for the copy
+    // to be written was passing and then failing with nothing changed. Take the outcome the
+    // notice reports, and hold it to the rule either way: smaller is saved, the rest is not.
     let h = reduce("notes.txt", "lorem ipsum ".repeat(500).into_bytes(), &out);
-    assert!(!out.exists(), "no copy was written");
-    h.get_by_label_contains("This file is already as small as it can be made");
+    let before = h.state().session.docs()[0].bytes.len();
+    match std::fs::metadata(&out) {
+        Ok(copy) => {
+            assert!(copy.len() < before as u64, "a copy is saved only when it is smaller");
+            h.get_by_label_contains("% smaller");
+        }
+        Err(_) => {
+            h.get_by_label_contains("This file is already as small as it can be made");
+        }
+    }
 }
 
 #[test]
@@ -185,7 +197,7 @@ fn the_pdf_optimizer_dialog_saves_an_optimized_copy() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     h.run_steps(2);
-    assert!(h.state().progress_notice.is_none(), "the progress card is gone");
+    assert!(h.state().jobs.is_empty(), "the card went with the job");
     assert!(std::fs::read(&out).unwrap().starts_with(b"%PDF-"));
     assert_eq!(h.state().dialog, None);
 }

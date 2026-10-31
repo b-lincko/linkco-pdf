@@ -38,19 +38,35 @@ All document rendering and editing operations execute locally on your workstatio
 
 ## Recommended Tools
 
-The Home dashboard provides one-click access to the core tools implemented in the workspace (`crates/ui-egui/src/home.rs`):
+The Home dashboard shows one card per recommended tool, in this order. The second column is the tool group each card opens (its id in `crates/engine/src/catalog.rs`); the third says what works today; the last is one command that the command palette and the automation API accept right now.
 
-| Tool | Description | Primary Commands |
+| Tool | Tool group | What works today | Command |
+| :--- | :--- | :--- | :--- |
+| **Organize pages** | `organize` | Rotate, insert, delete, extract, replace, split, crop, duplicate, reverse, renumber and reorder pages in the thumbnail grid | `page.organize` |
+| **Edit a PDF** | `edit` | Edit text and images, add text, images, headers and footers, watermarks, backgrounds, links and Bates numbers | `edit.edit_text` |
+| **Combine files** | `combine` | Merge several files, with a thumbnail grid for rotating, removing and reordering their pages first | `page.combine` |
+| **Compress a PDF** | `compress` | Reduce the file size, or use the advanced optimiser | `optimize.reduce` |
+| **Export a PDF** | `export` | Export to Word (`.docx`), an image (`.png`), the embedded images, HTML, RTF (`.rtf`) and text (`.txt`) | `export.docx` |
+| **Scan & OCR** | `scan` | Recognise text in a scan, one file or a batch, and add an invisible searchable text layer | `ocr.recognize` |
+| **Fill & Sign** | `fill_sign` | Place text, checkmarks, crosses, dots, lines, dates, initials and signatures on a page | `sign.fill.text` |
+| **Protect a PDF** | `protect` | Password encryption, permissions, hidden-information removal, security properties, and removing security | `protect.password` |
+| **Redact a PDF** | `redact` | Mark content and areas, redact whole pages or lists of words and phrases, and sanitise the document | `redact.mark` |
+| **Open file** | — | Open one or more PDFs from disk; this is the Open card rather than a tool group | `file.open` |
+
+`RELEASE_NOTES.md` describes each release; this table is the standing statement of what the build does today. `docs/implementation/check_disclosure.py` fails the build when this table, the tool catalogue, the command registry and the Home cards stop agreeing.
+
+## What is not finished yet
+
+Availability is stated in the app as well as here: a tool group whose entry still needs work carries the milestone it completes in, and a tool inside it that does not work yet is marked **Planned** (with its milestone) or **needs an AI provider you configure**, and does nothing when clicked. This table lists every such group and how much of it works today.
+
+| Tool | Works today | Completes in |
 | :--- | :--- | :--- |
-| **Organize pages** | Page grid · Rotate · Delete | Opens the interactive page-organization grid (`organize`) |
-| **Edit a PDF** | Edit text & images · Add text | Activates direct PDF content editing (`edit`) |
-| **Combine files** | Merge PDFs · Reorder · Insert | Opens the Combine Files workspace (`page.combine`) |
-| **Compress a PDF** | Reduce file size · Optimize PDF | Deduplicates streams, subsets fonts, and optimizes file size (`file.reduce_size`) |
-| **Export a PDF** | Word · Image · HTML · Text | Exports the active document to `.docx`, `.png`, `.html`, `.rtf`, or `.txt` (`export`) |
-| **Scan & OCR** | Recognize text · Searchable PDF | Runs optical character recognition to generate a searchable text layer (`ocr.recognize`) |
-| **Fill & Sign** | Fill form fields · Sign document | Places text, checkmarks, dates, initials, and signatures on pages (`fill_sign`) |
-| **Protect a PDF** | Password security · Sanitize | Applies password encryption, permissions, or document sanitization (`protect`) |
-| **Open file** | Browse local filesystem | Opens one or more PDF documents from disk (`file.open`) |
+| **Edit a PDF** (`edit`) | 13 of 14 tools | M7 |
+| **Protect a PDF** (`protect`) | 4 of 5 tools | M8 |
+| **Use print production** (`print_production`) | 1 of 6 tools | M11 |
+| **Add search index** (`search_index`) | 0 of 1 tools | M12 |
+| **Use JavaScript** (`javascript`) | 0 of 3 tools | M6 |
+| **AI assistant** (`ai`) | 0 of 3 tools | needs a provider you configure |
 
 ---
 
@@ -187,6 +203,31 @@ cargo run --release -p pdfcraft-cli -- text document.pdf
 # Start the opt-in Model Context Protocol (MCP) server over stdio
 cargo run --release -p pdfcraft-cli -- mcp --compact
 ```
+
+Every command reports why it failed through its exit code, so a script does not have to read the
+message; `--error-format=json` (anywhere on the line) turns the message into one JSON line on
+standard error, `{"error":{"kind":"malformed","exit_code":4,"message":"in.pdf: …"}}`.
+
+| Exit | Kind | Meaning |
+|---|---|---|
+| 0 | — | The command did what was asked. |
+| 1 | `failed` | An I/O error, or a failure not classed below. |
+| 2 | `usage` | The command line cannot be run as written (an unknown option, a missing argument, a value the option does not take). Nothing was read or written. |
+| 3 | `unsupported` | This build cannot do it at all: no such tool, or the MCP feature was left out. |
+| 4 | `malformed` | The input is not a document that can be read. |
+| 5 | `refused` | The tool declined to use something it cannot trust — a control file that is a link, owned by someone else, or open to other users. |
+| 6 | `partial` | Part of the work happened and was reported (`text` printed some pages, a `--script` step failed after earlier steps ran). |
+
+The numbers are stable: a new kind is added with a new code, and an existing code is never reused.
+
+The tool table is versioned too. `pdfcraft-cli schema` prints every tool with its arguments and the
+`schema_version` they belong to, and `--schema-version V` answers whether this build speaks the
+revision a script was written against (exit 3 if it does not). Within one major version changes are
+additive; removing a tool, making an optional argument required or changing what a tool writes to a
+document is a major bump. The MCP server reports the same version in `initialize` and `tools/list`,
+and returns a failed call's stable kind (`usage`, `unsupported`, `refused`, `failed`) as
+`structuredContent.error.kind`, so an agent can branch on the kind rather than the message. The
+promise is written out in [`docs/api-stability.md`](docs/api-stability.md).
 
 ### Driving the Running App (agents and UI automation)
 
@@ -332,7 +373,7 @@ linkco-pdf/
 
 ## Security & Privacy
 
-- **Local Document Processing & Network Policy:** Linkco PDF Editor processes all PDF files locally on your workstation and includes no analytics, telemetry, crash-reporting beacons, or advertisements. The application performs no background network requests; the only network activity is the optional, user-initiated `Help ▸ Check for updates…` action (`apps/pdfcraft/src/updates.rs`), which queries the GitHub Releases API (`https://api.github.com/repos/b-lincko/linkco-pdf/releases/latest`) when clicked and never downloads or installs updates automatically.
+- **Local Document Processing & Network Policy:** Linkco PDF Editor processes all PDF files locally on your workstation and includes no analytics, telemetry, crash-reporting beacons, or advertisements. The application performs no background network requests; the only network activity is the optional, user-initiated `Help ▸ Check for updates…` action (`apps/pdfcraft/src/updates.rs`), which queries the GitHub Releases API (`https://api.github.com/repos/b-lincko/linkco-pdf/releases/latest`) when clicked and never downloads or installs updates automatically. Every place the code can reach the network or hand an address to another program is listed in [`docs/network-egress.md`](docs/network-egress.md), and a check in CI (`docs/implementation/check_egress.py`) fails when a source file starts using the network without an entry, when a listed place stops matching its entry, or when a crate gains an HTTP client nobody explained.
 - **Memory-Safe Architecture:** `unsafe_code = "forbid"` is enforced across all workspace crates (`crates/`, `apps/`, `xtask/`), preventing buffer overflows and memory corruption in workspace code when parsing untrusted PDF files.
 - **External Link Protection:** Clicking a link inside a PDF document never opens a browser or executes a local file path silently; only `https://`, `http://`, and `mailto:` schemes are permitted, and every external URL requires explicit user confirmation in a modal dialog showing the full destination address (with homograph/mixed-script warnings).
 - **Sandboxed Scripting:** Document JavaScript (`crates/js`) and XFA scripts (`crates/xfa`) execute inside an isolated `boa_engine` sandbox with strict loop-iteration, recursion, and execution-time limits and zero filesystem or network access.
@@ -352,3 +393,7 @@ at your option. Third-party font and icon attributions are cataloged in [`ATTRIB
 Copyright © Al Rawabet Commercial Services & Contracting Company W.L.L. (Linkco)  
 Developed by **Muhammad Bilal** (Linkco)  
 Building 159, Street 220, Zone 24, P.O. Box 32282, Doha – Qatar · Phone: +974 4437 2511 · Email: `info@linkco.com.qa` · Web: `www.linkco.com.qa`
+
+## Implementation TODO and delivery workflow
+
+The complete research scope is tracked in the [live implementation TODO](docs/implementation/TODO.md), with [workflow and verification rules](docs/implementation/README.md). Work proceeds basic → advanced → future, one audited component at a time, with user confirmation before starting the next. Proposed features are not shipped-feature claims.

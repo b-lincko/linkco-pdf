@@ -230,6 +230,25 @@ fn move_pages_reorders() {
 }
 
 #[test]
+fn reverse_pages_reorders() {
+    let mut doc = open(fixture());
+    reverse_pages(&mut doc, &[0, 1, 2]).unwrap();
+    assert_eq!(labels(&doc), ["Page 3", "Page 2", "Page 1"]);
+    // Unsorted, repeated indices name the same slots; page 1's slot stays put.
+    reverse_pages(&mut doc, &[2, 1, 2]).unwrap();
+    let doc = save_and_reopen(&doc);
+    assert_eq!(labels(&doc), ["Page 3", "Page 1", "Page 2"]);
+}
+
+#[test]
+fn cannot_reverse_missing_or_fewer_than_two_pages() {
+    let mut doc = open(fixture());
+    assert_eq!(reverse_pages(&mut doc, &[0, 3]), Err(OrganizeError::NoSuchPage(3)));
+    assert!(matches!(reverse_pages(&mut doc, &[1, 1]), Err(OrganizeError::Invalid(_))));
+    assert!(!doc.is_modified(), "failed operations leave the document untouched");
+}
+
+#[test]
 fn inserts_blank_page() {
     let mut doc = open(fixture());
     insert_blank_page(&mut doc, 1, 612.0, 792.0).unwrap();
@@ -491,6 +510,102 @@ fn form_fields_come_along_and_are_registered() {
     let field = out.resolve(&fields[0]).as_dict().cloned().unwrap();
     assert_eq!(field.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("Ada"));
     assert_eq!(field.reference(b"P"), Some(pages(&out).unwrap()[0].obj));
+}
+
+/// A one-page document whose page carries one text field, named `name` and holding `value`.
+fn doc_with_field(name: &str, value: &str) -> Document {
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [7 0 R] >> >>".into(), // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(), // 2
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>".into(), // 3
+        body(name),                                                                 // 4
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),            // 5
+        "<< /Type /Annot /Subtype /Widget /Rect [20 20 200 50] /P 3 0 R /Parent 7 0 R >>".into(), // 6
+        format!("<< /FT /Tx /T ({name}) /V ({value}) /Kids [6 0 R] >>"),            // 7
+    ];
+    open(build(&b, "/Root 1 0 R"))
+}
+
+/// The destination's top-level form fields, as dictionaries.
+fn form_fields(doc: &Document) -> Vec<Dict> {
+    let cat = catalog(doc);
+    let form = doc.resolve(cat.get(b"AcroForm").expect("/AcroForm"));
+    let list = form.as_dict().and_then(|f| f.get(b"Fields")).map(|f| doc.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
+    list.iter().map(|f| doc.resolve(f).as_dict().cloned().expect("a field dictionary")).collect()
+}
+
+fn field_names(doc: &Document) -> Vec<String> {
+    form_fields(doc).iter().map(|f| f.get(b"T").and_then(|t| t.as_string()).map(|s| s.to_text()).unwrap_or_default()).collect()
+}
+
+fn field_values(doc: &Document) -> Vec<String> {
+    form_fields(doc).iter().map(|f| f.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).unwrap_or_default()).collect()
+}
+
+#[test]
+fn fields_with_the_same_name_stay_apart_when_documents_are_combined() {
+    // Two fields with the same fully-qualified name are one field to a reader, so a plain merge
+    // gave both widgets one value (the last one read). Each keeps its own name and its own value.
+    let (a, b) = (doc_with_field("name", "Ada"), doc_with_field("name", "Bob"));
+    let out = full_roundtrip(&combine(&[("a", &a), ("b", &b)]).unwrap());
+    assert_eq!(field_names(&out), ["name", "name (2)"]);
+    assert_eq!(field_values(&out), ["Ada", "Bob"]);
+    // Each widget still hangs off its own field, which lists it and nothing else, on its own page.
+    let ps = pages(&out).unwrap();
+    let widgets: Vec<(ObjRef, ObjRef)> = ps
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let w = annots(&out, i).into_iter().next().expect("a widget per page");
+            (w.reference(b"Parent").expect("a parent field"), ps[i].obj)
+        })
+        .collect();
+    assert_ne!(widgets[0].0, widgets[1].0, "two fields, not one");
+    for (field, page) in widgets {
+        let kids = out
+            .get(field)
+            .as_dict()
+            .and_then(|d| d.get(b"Kids").cloned())
+            .map(|k| out.resolve(&k))
+            .and_then(|k| k.as_array().cloned())
+            .unwrap_or_default();
+        assert_eq!(kids.len(), 1, "one widget each");
+        let widget = kids[0].as_ref().expect("a widget reference");
+        assert_eq!(out.get(widget).as_dict().unwrap().reference(b"P"), Some(page), "the widget stays on its own page");
+    }
+}
+
+#[test]
+fn a_combined_name_skips_the_suffixes_the_form_already_uses() {
+    // "name (2)" is itself a name: the third file must not land on it.
+    let (a, b, c) = (doc_with_field("name", "1"), doc_with_field("name", "2"), doc_with_field("name", "3"));
+    let out = full_roundtrip(&combine(&[("a", &a), ("b", &b), ("c", &c)]).unwrap());
+    assert_eq!(field_names(&out), ["name", "name (2)", "name (3)"]);
+    assert_eq!(field_values(&out), ["1", "2", "3"]);
+    let taken = doc_with_field("name (2)", "x");
+    let other = doc_with_field("name", "y");
+    let out = full_roundtrip(&combine(&[("t", &taken), ("o", &other)]).unwrap());
+    assert_eq!(field_names(&out), ["name (2)", "name"], "free names are left alone");
+}
+
+#[test]
+fn one_document_keeps_every_field_name_as_it_was() {
+    // Extract, split and page moves copy a document into a new one: nothing collides, so nothing
+    // may be renamed (a merge must not quietly rewrite a name either).
+    let src = doc_with_field("name", "Ada");
+    assert_eq!(field_names(&full_roundtrip(&extract_pages(&src, &[0]).unwrap())), ["name"]);
+    assert_eq!(field_names(&full_roundtrip(&combine(&[("only", &src)]).unwrap())), ["name"]);
+    let duplicated = full_roundtrip(&extract_pages(&src, &[0, 0]).unwrap());
+    assert_eq!(field_names(&duplicated), ["name"], "one field shown twice stays one field");
+}
+
+#[test]
+fn a_non_ascii_field_name_is_renamed_without_losing_its_encoding() {
+    let (a, b) = (doc_with_field("Nom é", "un"), doc_with_field("Nom é", "deux"));
+    let out = full_roundtrip(&combine(&[("a", &a), ("b", &b)]).unwrap());
+    assert_eq!(field_names(&out), ["Nom é", "Nom é (2)"]);
+    let stored = form_fields(&out)[1].get(b"T").and_then(|t| t.as_string()).cloned().expect("a name");
+    assert!(stored.bytes.starts_with(&[0xFE, 0xFF]), "the renamed name is a text string: {:?}", stored.bytes);
 }
 
 #[test]
@@ -1471,7 +1586,7 @@ fn page_boxes_default_inherit_and_set() {
 #[test]
 fn duplicate_pages_inserts_copies_after_the_last() {
     let mut doc = open(fixture());
-    duplicate_pages(&mut doc, &[0, 1]).unwrap();
+    duplicate_pages(&mut doc, &[0, 1], None).unwrap();
     let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
     assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 1", "Page 2", "Page 3"]);
 }
@@ -1661,4 +1776,70 @@ fn a_repeated_widget_joins_an_indirect_kids_array() {
     let field = out.resolve(&fields[0]).as_dict().cloned().unwrap();
     let kids = out.resolve(field.get(b"Kids").unwrap()).as_array().cloned().unwrap();
     assert_eq!(kids.len(), 3, "both original widgets and the repeat's own: {kids:?}");
+}
+
+/// Custom document properties (Document Properties > Custom): any `/Info` key the spec does not
+/// name, set and cleared like the standard ones, listed apart from them, and with the names
+/// Acrobat refuses refused here too.
+#[test]
+fn custom_document_properties_are_listed_set_removed_and_their_names_checked() {
+    let mut doc = open(fixture());
+    assert!(custom_info(&doc).is_empty());
+    set_info(&mut doc, "Title", "Report").unwrap();
+    set_info(&mut doc, "Project", "Apollo").unwrap();
+    set_info(&mut doc, "Revision", "7").unwrap();
+    let mut listed = custom_info(&doc);
+    listed.sort();
+    assert_eq!(listed, [("Project".to_string(), "Apollo".to_string()), ("Revision".to_string(), "7".to_string())], "standard keys are not custom");
+    assert_eq!(info(&doc, "Project").as_deref(), Some("Apollo"));
+    set_info(&mut doc, "Project", "").unwrap();
+    let doc = save_and_reopen(&doc);
+    assert_eq!(custom_info(&doc), [("Revision".to_string(), "7".to_string())], "cleared, and the rest survives a save");
+    assert_eq!(info(&doc, "Title").as_deref(), Some("Report"));
+
+    for bad in ["", "Title", "ModDate", "Bad Name", "a/b", "tab\tbed", "hash#tag", "(x)"] {
+        assert!(check_custom_key(bad).is_err(), "{bad:?} must be refused");
+    }
+    let long = "x".repeat(MAX_CUSTOM_KEY_LEN + 1);
+    assert!(check_custom_key(&long).is_err());
+    for good in ["Project", "R\u{e9}vision", "\u{90e8}\u{9580}", "key-2.0", &"y".repeat(MAX_CUSTOM_KEY_LEN)] {
+        assert!(check_custom_key(good).is_ok(), "{good:?} is a usable name");
+    }
+    let mut doc = open(fixture());
+    assert!(set_info(&mut doc, "Bad Name", "x").is_err(), "set_info checks custom names");
+    assert!(custom_info(&doc).is_empty());
+}
+
+/// Padding is not part of a custom value, in any mix of NULs and whitespace, a value that is only
+/// padding is not listed, and such entries don't count towards the 256 listed: a real property
+/// after 300 blank ones is still there.
+#[test]
+fn custom_document_properties_drop_padding_before_the_cap() {
+    let mut doc = open(fixture());
+    set_info(&mut doc, "Title", "Report").unwrap();
+    let Some(Object::Ref(info_ref)) = doc.trailer().get(b"Info").cloned() else { panic!("an /Info reference") };
+    let text = |s: &str| Object::String(pdfcraft_cos::PdfString { bytes: s.as_bytes().to_vec(), hex: false });
+    doc.update_dict(info_ref, |d| {
+        d.set(b"Mixed".to_vec(), text(" \0Lab\0 "));
+        d.set(b"Pad".to_vec(), text(" \0 \0"));
+        for i in 0..300 {
+            d.set(format!("Blank{i}").into_bytes(), text("  "));
+        }
+        d.set(b"Keep".to_vec(), text("yes"));
+    })
+    .unwrap();
+    assert_eq!(custom_info(&doc), [("Mixed".to_string(), "Lab".to_string()), ("Keep".to_string(), "yes".to_string())]);
+}
+
+#[test]
+fn duplicate_pages_at_inserts_the_copies_there() {
+    let mut doc = open(fixture());
+    duplicate_pages(&mut doc, &[2], Some(0)).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(labels(&doc), ["Page 3", "Page 1", "Page 2", "Page 3"]);
+    // An index past the end lands at the end.
+    let mut doc = open(fixture());
+    duplicate_pages(&mut doc, &[0], Some(99)).unwrap();
+    let doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+    assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3", "Page 1"]);
 }

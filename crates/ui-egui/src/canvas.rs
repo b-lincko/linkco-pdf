@@ -243,6 +243,52 @@ struct PageTex {
     tex: TextureHandle,
 }
 
+/// A page the renderer refused: the reason shown on it, the demand that failed, and whether it
+/// may be tried again.
+///
+/// A render can fail for a reason that goes away — a worker was retired and replaced, memory was
+/// briefly exhausted, a huge page lost its race with a resize — so a failure is not final. It is
+/// retried on a short backoff a bounded number of times ([`RETRY_DELAYS`]) and then left alone,
+/// so a page that is genuinely broken costs two extra renders rather than one per frame. Any
+/// change to what is demanded of the page (a zoom, a rotation, a reflow) is a fresh attempt, and
+/// so is an edit to the page, which clears the failure.
+#[derive(Clone, Debug)]
+pub struct PageFailure {
+    /// What the renderer said, shown on the page.
+    pub message: String,
+    /// The demand (scale tag) that failed: another one means the page is being drawn differently.
+    tag: u64,
+    /// Attempts at this demand, the first failure included.
+    pub attempts: u8,
+    /// When the next automatic attempt is due (egui's clock, seconds); `None` once they run out.
+    next_try: Option<f64>,
+}
+
+/// How long to wait before each automatic retry of a page that failed to render. Its length is
+/// also how many retries there are: after these, the page waits for the demand to change.
+const RETRY_DELAYS: [f64; 2] = [1.0, 4.0];
+
+impl PageFailure {
+    /// The failure of a first attempt at `tag`, due at `now`.
+    fn first(message: String, tag: u64, now: f64) -> Self {
+        Self { message, tag, attempts: 1, next_try: RETRY_DELAYS.first().copied().map(|d| now + d) }
+    }
+
+    /// The same page failing again at the same demand.
+    fn again(&mut self, message: String, now: f64) {
+        self.message = message;
+        self.attempts = self.attempts.saturating_add(1);
+        // The first retry waits RETRY_DELAYS[0], the second RETRY_DELAYS[1], and then there
+        // are none: `attempts` counts the first failure too.
+        self.next_try = RETRY_DELAYS.get(usize::from(self.attempts.saturating_sub(1))).copied().map(|d| now + d);
+    }
+
+    /// Whether this failure may be tried again now.
+    fn due(&self, now: f64) -> bool {
+        self.next_try.is_some_and(|t| now >= t)
+    }
+}
+
 /// Retained RGBA texture accounting for automation and performance regressions. These
 /// surface bytes exclude driver overhead and temporary upload buffers; they are not RSS.
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
@@ -292,8 +338,8 @@ pub struct DocView {
     /// Compare files: differences shaded on this document's pages (page, user-space box, colour).
     pub compare_marks: Vec<(usize, [f32; 4], Color32)>,
     pages: HashMap<usize, PageTex>,
-    /// Pages the renderer could not draw, with the reason (never re-requested).
-    errors: HashMap<usize, String>,
+    /// Pages the renderer could not draw: why, how often, and when to try again.
+    errors: HashMap<usize, PageFailure>,
     /// When each still-missing page was first shown, to flag unusually slow renders.
     waiting_since: HashMap<usize, f64>,
     thumbs: HashMap<usize, PageTex>,
@@ -484,9 +530,15 @@ impl DocView {
 
     /// Pages that could not be rendered, with the reason (for automation; 0-based pages).
     pub fn page_errors(&self) -> Vec<(usize, &str)> {
-        let mut v: Vec<(usize, &str)> = self.errors.iter().map(|(p, e)| (*p, e.as_str())).collect();
+        let mut v: Vec<(usize, &str)> = self.errors.iter().map(|(p, e)| (*p, e.message.as_str())).collect();
         v.sort_unstable_by_key(|(p, _)| *p);
         v
+    }
+
+    /// How many times the renderer has refused `page` without an edit or a change of demand
+    /// since; `None` while it is drawing (or about to). For tests and diagnosis.
+    pub fn page_attempts(&self, page: usize) -> Option<u8> {
+        self.errors.get(&page).map(|f| f.attempts)
     }
 
     /// A view of a newly opened document, shown as `defaults` say. Opening a file then applies
@@ -1000,6 +1052,19 @@ impl DocView {
     pub fn rotate_view(&mut self, clockwise: bool) {
         self.rotation = (self.rotation + if clockwise { 90 } else { 270 }) % 360;
         self.goto = Some((self.current, 0.0));
+        // A rotation is a reader asking to see the page again: a page that failed gets another
+        // attempt rather than keeping its error through a change of view.
+        self.retry_failed();
+    }
+
+    /// Ask for another attempt at every page that failed to draw.
+    fn retry_failed(&mut self) {
+        if self.errors.is_empty() {
+            return;
+        }
+        self.errors.clear();
+        self.waiting_since.clear();
+        self.last_queue.clear();
     }
 
     /// Switch the zoom mode, keeping the current page in view.
@@ -1184,9 +1249,29 @@ impl DocView {
             .collect()
     }
 
+    /// Whether `page` may be asked to render at `tag` now.
+    ///
+    /// A page the renderer refused waits for its next automatic attempt ([`RETRY_DELAYS`]), and
+    /// once those are spent it is left as failed until the demand changes or an edit clears it.
+    /// A different `tag` *is* a change of demand, so it clears the failure and asks again.
+    fn may_request(&mut self, page: usize, tag: u64, now: f64) -> bool {
+        // Only the document view's own demand (a whole-page raster or a tile) says how the page
+        // is being drawn: a thumbnail's or a sheet preview's tag is a different question, and
+        // must not clear the page's failure, or two kinds of request would keep reviving it.
+        let view_demand = tag & (THUMB_TAG | PRINT_TAG | GRID_TAG) == 0;
+        match self.errors.get(&page) {
+            None => return true,
+            Some(failure) if !(view_demand && failure.tag != tag) => return failure.due(now),
+            Some(_) => {}
+        }
+        self.errors.remove(&page);
+        self.waiting_since.remove(&page);
+        true
+    }
+
     /// Admit current demand within explicit byte limits. Cached and pending surfaces share
     /// the allowance, so an evicted page can be requested again without a permanent done set.
-    fn prepare_render_queue(&mut self, info: &DocInfo, ppp: f32) -> Vec<RenderRequest> {
+    fn prepare_render_queue(&mut self, info: &DocInfo, ppp: f32, now: f64) -> Vec<RenderRequest> {
         let requests = std::mem::take(&mut self.frame_queue);
         let mut queue = Vec::new();
         let mut pages = HashSet::new();
@@ -1196,6 +1281,11 @@ impl DocView {
         let (mut page_bytes, mut tile_bytes) = (0usize, 0usize);
         for req in requests.iter().filter(|r| r.kind == RequestKind::Pixels) {
             let Some(p) = info.pages.get(req.page) else { continue };
+            // A page that failed is asked for again when its retry is due, and not before; a
+            // different demand for it (a zoom, a rotation, a reflow) is a fresh attempt.
+            if !self.may_request(req.page, req.tag, now) {
+                continue;
+            }
             // Organize-grid renders: only the cells in view that need one (organize_grid).
             if req.tag & GRID_TAG != 0 {
                 grid.push(*req);
@@ -1203,9 +1293,7 @@ impl DocView {
             }
             // Print-preview rasters: a few sheets at the pane's size (the dialog bounds them).
             if req.tag & PRINT_TAG != 0 {
-                if !self.errors.contains_key(&req.page) {
-                    queue.push(*req);
-                }
+                queue.push(*req);
                 continue;
             }
             // On-screen work is always admitted (the viewport bounds it); the limits only
@@ -1256,8 +1344,13 @@ impl DocView {
         let mut admitted = HashSet::new();
         for req in thumbs {
             let Some(p) = info.pages.get(req.page) else { continue };
+            // A page the renderer refuses is not asked for a thumbnail every frame either: it
+            // waits for the same retries the page itself gets, and then stays failed.
+            if !self.may_request(req.page, req.tag, now) {
+                continue;
+            }
             let bytes = rgba_bytes(device_pixels(p.width, req.scale) as usize, device_pixels(p.height, req.scale) as usize);
-            if thumb_bytes.saturating_add(bytes) > THUMB_BYTES || self.errors.contains_key(&req.page) {
+            if thumb_bytes.saturating_add(bytes) > THUMB_BYTES {
                 continue;
             }
             thumb_bytes += bytes;
@@ -1274,7 +1367,7 @@ impl DocView {
     }
 
     pub(crate) fn finish_render_frame(&mut self, ctx: &egui::Context, info: &DocInfo, pool: &RenderPool) {
-        let queue = self.prepare_render_queue(info, ctx.pixels_per_point());
+        let queue = self.prepare_render_queue(info, ctx.pixels_per_point(), ctx.input(|i| i.time));
         if queue != self.last_queue {
             pool.set_queue(queue.clone());
             self.last_queue = queue;
@@ -1325,8 +1418,20 @@ impl DocView {
             return 0;
         }
         if let Some(e) = r.error {
-            log::warn!("page {}: {e}", r.request.page + 1);
-            self.errors.insert(r.request.page, e);
+            let (page, tag) = (r.request.page, r.request.tag);
+            log::warn!("page {}: {e}", page + 1);
+            let now = ctx.input(|i| i.time);
+            match self.errors.get_mut(&page) {
+                // The demand that failed first is the one whose schedule counts: a page that
+                // also fails as a thumbnail or a sheet preview must not restart that schedule,
+                // or two demands failing in turn could keep reviving each other for ever.
+                Some(failure) if failure.tag == tag => failure.again(e, now),
+                Some(_) => {}
+                None => {
+                    self.errors.insert(page, PageFailure::first(e, tag, now));
+                }
+            }
+            self.waiting_since.remove(&page);
             return 0;
         }
         let page = r.request.page;
@@ -1354,6 +1459,12 @@ impl DocView {
             self.pages.insert(page, PageTex { tag: r.request.tag, tex });
             self.signature_drag.page_received(page);
             self.waiting_since.remove(&page);
+        }
+        // A page that came back is not a failed page: the card goes and the page shows. Only a
+        // whole-page or tile render says how the page itself is drawn — a thumbnail that came
+        // back says nothing about that.
+        if r.request.tag & (THUMB_TAG | PRINT_TAG | GRID_TAG) == 0 {
+            self.errors.remove(&page);
         }
         bytes
     }
@@ -1473,7 +1584,7 @@ impl DocView {
     pub(crate) fn queue_print_previews(&mut self, pages: &[(usize, f32)]) {
         self.print_pages.retain(|page, _| pages.iter().any(|(p, _)| p == page));
         for &(page, scale) in pages {
-            if self.errors.contains_key(&page) || !scale.is_finite() || scale <= 0.0 {
+            if !scale.is_finite() || scale <= 0.0 {
                 continue;
             }
             let tag = scale_tag(scale) | PRINT_TAG;
@@ -1503,6 +1614,14 @@ pub(crate) fn pick_preview_texture(have: &[(usize, egui::TextureId)], want: f32)
         .or_else(|| have.iter().rev().filter(|(w, _)| within(*w)).max_by_key(|(w, _)| *w))
         .or_else(|| have.iter().min_by_key(|(w, _)| *w))
         .map(|(_, id)| *id)
+}
+
+/// The scroll offset that puts `point` (content coordinates) at `rel` in the viewport, kept within
+/// the content as egui keeps it. egui clamps only after drawing, so an offset past the end showed
+/// the page misplaced for a frame and then jumped (zooming out beside a page that fits).
+fn anchored_scroll(point: Pos2, rel: Vec2, content: Vec2, viewport: Vec2) -> Vec2 {
+    let max = vec2((content.x - viewport.x).max(0.0), (content.y - viewport.y).max(0.0));
+    vec2((point.x - rel.x).clamp(0.0, max.x), (point.y - rel.y).clamp(0.0, max.y))
 }
 
 /// The request tag for a raster at `scale`: equal tags mean the same scale (to 1/65536).
@@ -1644,11 +1763,20 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
         view.open_find();
     }
+    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
+    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
+    // ⌘G / ⇧⌘G step through the matches from the find field too, as in Acrobat and Preview
+    // (#2669): ahead of the text-input check, but only while there is a search to step.
+    if view.find.is_some() {
+        if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
+            view.find_step(false);
+        } else if pressed(cmd(Key::G)) {
+            view.find_step(true);
+        }
+    }
     if ctx.egui_wants_keyboard_input() {
         return;
     }
-    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
-    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
     // Rotation first: egui matches ⌘+ loosely with respect to Shift.
     if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus))
         || pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Equals))
@@ -1688,11 +1816,6 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     if pressed(cmd(Key::Num2)) {
         view.fit = Fit::Width;
         view.goto = Some((view.current, 0.0));
-    }
-    if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
-        view.find_step(false);
-    } else if pressed(cmd(Key::G)) {
-        view.find_step(true);
     }
     if pressed(cmd(Key::OpenBracket)) {
         view.view_history(false);
@@ -1805,9 +1928,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     // No dialog, close prompt or palette over the page: only then does page input count.
     let unobstructed = !app.modal_open() && !app.palette_open;
+    let organize_zoom = app.organize_zoom;
     let view = &mut app.views[index];
     if view.organize {
+        // One remembered grid size for every document, kept in the settings.
+        view.set_grid_zoom(organize_zoom);
         organize_grid(view, info, doc.allows_assembly(), doc.dirty, unobstructed, ui, &t);
+        app.organize_zoom = view.grid_zoom();
         return;
     }
 
@@ -1936,7 +2063,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((page, fx, fy, rel)) = view.zoom_anchor.take() {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
-        scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
+        scroll = scroll.scroll_offset(anchored_scroll(point, rel, vec2(content_w, content_h), avail.size()));
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
@@ -2099,7 +2226,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     26.0,
                     Color32::from_rgb(0xC8, 0x3A, 0x3A),
                 );
-                let message = crate::i18n::fmt(tl!("This page couldn't be displayed.\n{e}"), &[("e", err)]);
+                let mut message = crate::i18n::fmt(tl!("This page couldn't be displayed.\n{e}"), &[("e", &err.message)]);
+                // A page that failed more than once is not being asked again on its own; say
+                // so, and that changing the view (or an edit) tries afresh.
+                if err.attempts > 1 {
+                    let tried = crate::i18n::fmt(tl!("Tried {n} times. Zoom or rotate the page to try again."), &[("n", &err.attempts.to_string())]);
+                    message.push('\n');
+                    message.push_str(&tried);
+                }
                 let msg =
                     ui.fonts_mut(|f| f.layout(message, theme::regular(12.5), Color32::from_rgb(0x6A, 0x2A, 0x2A), (r.width() - 40.0).max(80.0)));
                 painter.galley(pos2(r.center().x - msg.size().x / 2.0, r.center().y), msg, Color32::BLACK);
@@ -3069,9 +3203,8 @@ fn notices(
     let mut open_security = false;
     let mut open_repairs = false;
     let mut toggled = None;
-    let msg = if secured {
-        Some(("lock", tl!("This document is secured. Some changes are restricted by its security settings.").to_string(), false))
-    } else if let Some(x) = xfa {
+    // What the document is as a form, if it is one: what the bar says first, secured or not.
+    let form = if let Some(x) = xfa {
         let lang = crate::i18n::current();
         let pages = crate::i18n::trn(lang, x.pages as u64, "{n} page", "{n} pages");
         let fields = crate::i18n::trn(lang, x.fields as u64, "{n} field", "{n} fields");
@@ -3102,6 +3235,19 @@ fn notices(
             crate::i18n::fmt(tl!("This document contains {n} interactive form fields."), &[("n", &info.fields.len().to_string())]),
             true,
         ))
+    } else {
+        None
+    };
+    let msg = if secured {
+        // A secured form still says what it is, and keeps Highlight fields: the security
+        // sentence follows the form's.
+        let security = tl!("This document is secured. Some changes are restricted by its security settings.");
+        Some(match form {
+            Some((icon, text, fields)) => (icon, format!("{text} {security}"), fields),
+            None => ("lock", security.to_string(), false),
+        })
+    } else if form.is_some() {
+        form
     } else if repaired {
         Some(("bandage", tl!("This file was damaged and has been repaired. Saving keeps the repaired version.").to_string(), false))
     } else if !info.warnings.is_empty() {
@@ -3460,6 +3606,15 @@ pub(crate) fn drop_gap(cells: &[(usize, Rect)], p: Pos2) -> Option<usize> {
     Some(if p.x < r.center().x { *i } else { i + 1 })
 }
 
+/// Ctrl (Option on macOS) held when a page drag drops copies the dragged pages into the gap
+/// instead of moving them, as Acrobat's Organize Pages does.
+///
+/// The OS comes from the context, not `cfg!`: the wasm build runs on macOS too, where
+/// `cfg!(target_os = "macos")` is false, so Option has to copy there as well.
+fn copy_modifier(ctx: &egui::Context, m: &egui::Modifiers) -> bool {
+    if crate::commands::mac_shortcuts(ctx) { m.alt } else { m.ctrl }
+}
+
 /// A "+" on a gap of the page grid: insert files there. Returns whether it was clicked.
 fn gap_button(ui: &mut egui::Ui, gap: usize, at: Pos2, height: f32, label: String, t: &Tokens) -> bool {
     let resp = ui.interact(Rect::from_center_size(at, Vec2::splat(22.0)), ui.id().with(("org-gap", gap)), Sense::click());
@@ -3617,6 +3772,8 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
             }
         }
         // While dragging: the gap the pages would go to, drawn as a bar.
+        // Ctrl (Option on macOS) held over the drop copies the pages; see #2997.
+        let copying = copy_modifier(ui.ctx(), &ui.input(|i| i.modifiers));
         if let (Some(pages), Some(p)) = (view.org_drag.clone(), ui.input(|i| i.pointer.hover_pos())) {
             if let Some(gap) = drop_gap(&cells, p) {
                 let x = match cells.iter().find(|(i, _)| *i == gap) {
@@ -3625,8 +3782,18 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 };
                 let row = cells.iter().find(|(i, _)| *i == gap).or(cells.last()).map(|(_, r)| r.y_range()).unwrap_or(egui::Rangef::new(0.0, 0.0));
                 ui.painter().line_segment([pos2(x, row.min + 10.0), pos2(x, row.max - 10.0)], Stroke::new(3.0, t.accent));
+                let mut text_at = p + vec2(14.0, 14.0);
+                if copying {
+                    // A "+" by the pointer: this drop copies the pages, it doesn't move them.
+                    let badge = p + vec2(12.0, 12.0);
+                    ui.painter().circle(badge, 9.0, t.accent, Stroke::new(1.0, t.accent));
+                    let ink = Stroke::new(1.5, Color32::WHITE);
+                    ui.painter().line_segment([badge - vec2(4.0, 0.0), badge + vec2(4.0, 0.0)], ink);
+                    ui.painter().line_segment([badge - vec2(0.0, 4.0), badge + vec2(0.0, 4.0)], ink);
+                    text_at.x += 18.0;
+                }
                 ui.painter().text(
-                    p + vec2(14.0, 14.0),
+                    text_at,
                     Align2::LEFT_TOP,
                     if pages.len() == 1 { tl!("1 page").to_string() } else { crate::i18n::fmt(tl!("{n} pages"), &[("n", &pages.len().to_string())]) },
                     theme::medium(12.0),
@@ -3636,13 +3803,19 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
             if drop {
                 view.org_drag = None;
                 if let Some(gap) = drop_gap(&cells, p) {
-                    // `to` counts positions without the moving pages.
-                    let to = gap - pages.iter().filter(|x| **x < gap).count();
-                    let first = pages[0];
-                    let contiguous = pages.windows(2).all(|w| w[1] == w[0] + 1);
-                    if !(contiguous && to == first) {
-                        view.pending_edit = Some(Edit::MovePages { pages: pages.clone(), to });
-                        view.selected = (to..to + pages.len()).collect();
+                    if copying {
+                        // The copies land at the gap as it is: nothing leaves its place.
+                        view.pending_edit = Some(Edit::DuplicatePages { pages: pages.clone(), at: Some(gap) });
+                        view.selected = (gap..gap + pages.len()).collect();
+                    } else {
+                        // `to` counts positions without the moving pages.
+                        let to = gap - pages.iter().filter(|x| **x < gap).count();
+                        let first = pages[0];
+                        let contiguous = pages.windows(2).all(|w| w[1] == w[0] + 1);
+                        if !(contiguous && to == first) {
+                            view.pending_edit = Some(Edit::MovePages { pages: pages.clone(), to });
+                            view.selected = (to..to + pages.len()).collect();
+                        }
                     }
                 }
             }
@@ -3717,6 +3890,99 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A render can fail for a reason that goes away (a retired worker, a brief allocation
+    /// failure), so a failure is retried twice and then left alone: never given up on at the
+    /// first error, and never re-requested for ever either.
+    #[test]
+    fn a_failed_page_is_retried_twice_and_then_waits_for_the_view_to_change() {
+        let mut failure = PageFailure::first("the renderer refused it".into(), 7, 100.0);
+        assert_eq!(failure.attempts, 1);
+        assert!(!failure.due(100.5), "the first retry waits");
+        assert!(failure.due(101.0));
+        failure.again("the renderer refused it".into(), 101.0);
+        assert_eq!(failure.attempts, 2);
+        assert!(!failure.due(104.5));
+        assert!(failure.due(105.0));
+        failure.again("the renderer refused it".into(), 105.0);
+        assert_eq!(failure.attempts, 3);
+        assert_eq!(failure.next_try, None, "the automatic attempts are spent");
+        assert!(!failure.due(100_000.0));
+        // The clock never runs backwards into a claim that a spent failure is due.
+        assert!(!failure.due(f64::NEG_INFINITY));
+    }
+
+    /// A refusal with a passing cause (a retired worker, a brief allocation failure) must not keep
+    /// the page blank until the file is reopened, and a page that is genuinely broken must not be
+    /// asked for again every frame either: two retries, then it waits for the demand to change.
+    #[test]
+    fn a_refused_page_is_retried_twice_then_waits_for_a_new_demand() {
+        let ctx = egui::Context::default();
+        let info = thumbnail_info(1);
+        let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
+        let req = RenderRequest { scale: 1.0, tag: 1000, ..Default::default() };
+        let refused = |request: RenderRequest| pdfcraft_render::RenderedPage {
+            request,
+            width: 0,
+            height: 0,
+            rgba: pdfcraft_render::Pixels::default(),
+            text: None,
+            error: Some("the renderer refused it".into()),
+            warnings: Vec::new(),
+            millis: 0,
+        };
+        let demand = |v: &mut DocView, at: f64| {
+            v.frame_queue = vec![req];
+            v.prepare_render_queue(&info, 1.0, at)
+        };
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, refused(req));
+        assert_eq!(v.page_attempts(0), Some(1));
+        assert_eq!(v.page_errors(), vec![(0, "the renderer refused it")]);
+        assert!(v.waiting_since.is_empty(), "the slow-render hint cannot contradict the card");
+        // Sixty frames of demand inside the first second ask for nothing: no render storm.
+        for _ in 0..60 {
+            assert!(demand(&mut v, 0.0).is_empty());
+        }
+        // The first retry is due after 1 s, the second after 4 s more, and then none is. A result
+        // is stamped with the frame's own clock (here the default context's 0 s), so the times
+        // the demand is asked at are what tell the retries apart.
+        assert_eq!(demand(&mut v, 1.0), vec![req]);
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, refused(req));
+        assert_eq!(v.page_attempts(0), Some(2));
+        assert!(demand(&mut v, 3.9).is_empty());
+        assert_eq!(demand(&mut v, 4.0), vec![req]);
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, refused(req));
+        assert_eq!(v.page_attempts(0), Some(3));
+        assert!(demand(&mut v, 100_000.0).is_empty(), "the automatic attempts are spent");
+
+        // A different demand is a fresh attempt, and a render that comes back drops the card.
+        let zoomed = RenderRequest { scale: 2.0, tag: 2000, ..Default::default() };
+        v.frame_queue = vec![zoomed];
+        assert_eq!(v.prepare_render_queue(&info, 2.0, 100_000.0), vec![zoomed]);
+        assert_eq!(v.page_attempts(0), None, "a new demand clears the failure");
+        v.last_queue = vec![zoomed];
+        v.receive_result(&ctx, refused(zoomed));
+        assert_eq!(v.page_attempts(0), Some(1));
+        v.last_queue = vec![zoomed];
+        v.receive_result(&ctx, solid_result(zoomed, 10, 10));
+        assert!(v.page_errors().is_empty(), "a page that came back is not a failed page");
+    }
+
+    #[test]
+    fn zoom_anchor_scroll_stays_within_the_content() {
+        let (content, viewport) = (vec2(1000.0, 2000.0), vec2(800.0, 600.0));
+        // Past the end: clamped to the maximum (200, 1400), not left for egui to snap back.
+        assert_eq!(anchored_scroll(pos2(900.0, 1900.0), vec2(0.0, 0.0), content, viewport), vec2(200.0, 1400.0));
+        // Before the start.
+        assert_eq!(anchored_scroll(pos2(10.0, 10.0), vec2(300.0, 300.0), content, viewport), Vec2::ZERO);
+        // Inside: unchanged.
+        assert_eq!(anchored_scroll(pos2(150.0, 800.0), vec2(100.0, 100.0), content, viewport), vec2(50.0, 700.0));
+        // Content smaller than the viewport: no scrolling.
+        assert_eq!(anchored_scroll(pos2(400.0, 400.0), Vec2::ZERO, vec2(500.0, 500.0), viewport), vec2(0.0, 0.0));
+    }
 
     #[test]
     fn rendered_rasters_become_texture_images_without_a_copy() {
@@ -3796,7 +4062,7 @@ trailer << /Root 1 0 R >>
                 for p in range.start * cols..(range.end * cols).min(info.pages.len()) {
                     v.need_thumbnail(p, p / cols == row);
                 }
-                let queue = v.prepare_render_queue(&info, ppp);
+                let queue = v.prepare_render_queue(&info, ppp, 0.0);
                 assert!(queue.len() <= 5 * cols, "only three visible rows and two prefetch rows");
                 assert_eq!(queue.first().unwrap().page / cols, row, "visible cells precede prefetch");
                 let bytes: usize = queue
@@ -3810,7 +4076,7 @@ trailer << /Root 1 0 R >>
                     })
                     .sum();
                 assert!(bytes <= THUMB_BYTES);
-                assert_eq!(queue, v.prepare_render_queue(&info, ppp), "unchanged demand reconstructs the same work");
+                assert_eq!(queue, v.prepare_render_queue(&info, ppp, 0.0), "unchanged demand reconstructs the same work");
             }
         }
     }
@@ -3822,7 +4088,7 @@ trailer << /Root 1 0 R >>
         for page in 0..MAX_THUMB_DEMAND {
             v.need_thumbnail(page, true);
         }
-        let queue = v.prepare_render_queue(&info, 2.0);
+        let queue = v.prepare_render_queue(&info, 2.0, 0.0);
         assert_eq!(queue.len(), MAX_THUMB_DEMAND);
         let bytes: usize = queue
             .iter()
@@ -3853,19 +4119,19 @@ trailer << /Root 1 0 R >>
         let info = thumbnail_info(10_000);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.need_thumbnail(0, true);
-        let first = v.prepare_render_queue(&info, 1.0);
+        let first = v.prepare_render_queue(&info, 1.0, 0.0);
         v.last_queue = first.clone();
         assert_eq!(v.receive_result(&ctx, solid_result(first[0], 132, 171)), 132 * 171 * 4);
-        assert!(v.prepare_render_queue(&info, 1.0).is_empty());
+        assert!(v.prepare_render_queue(&info, 1.0, 0.0).is_empty());
         v.begin_render_frame();
         v.need_thumbnail(9999, true);
-        v.prepare_render_queue(&info, 1.0);
+        v.prepare_render_queue(&info, 1.0, 0.0);
         assert!(v.thumbs.is_empty(), "jump releases old handles");
         v.begin_render_frame();
         v.need_thumbnail(0, true);
-        assert_eq!(v.prepare_render_queue(&info, 1.0), first, "an evicted result must be requested again");
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0), first, "an evicted result must be requested again");
         v.begin_render_frame();
-        assert!(v.prepare_render_queue(&info, 1.0).is_empty(), "closing consumers cancels thumbnail work");
+        assert!(v.prepare_render_queue(&info, 1.0, 0.0).is_empty(), "closing consumers cancels thumbnail work");
     }
 
     #[test]
@@ -3874,8 +4140,8 @@ trailer << /Root 1 0 R >>
         let info = thumbnail_info(1);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.need_thumbnail(0, true);
-        let first = v.prepare_render_queue(&info, 1.0)[0];
-        v.last_queue = v.prepare_render_queue(&info, 2.0);
+        let first = v.prepare_render_queue(&info, 1.0, 0.0)[0];
+        v.last_queue = v.prepare_render_queue(&info, 2.0, 0.0);
         // Valid pixels: only the request gate can keep these out (a size check can't).
         let obsolete = || solid_result(first, 132, 171);
         assert_eq!(v.receive_result(&ctx, obsolete()), 0);
@@ -3904,7 +4170,7 @@ trailer << /Root 1 0 R >>
         v.receive_result(&ctx, solid_result(req, 10, 10));
         v.frame_queue = vec![req];
         v.page_changed(0);
-        assert_eq!(v.prepare_render_queue(&info, 1.0), vec![req]);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0), vec![req]);
         assert_eq!(v.pages.get(&0).unwrap().tag, STALE_TAG);
     }
 
@@ -3917,12 +4183,12 @@ trailer << /Root 1 0 R >>
         }
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.frame_queue = (0..40).map(|page| RenderRequest { page, scale: 1.0, tag: 1000, ..Default::default() }).collect();
-        let queue = v.prepare_render_queue(&info, 1.0);
+        let queue = v.prepare_render_queue(&info, 1.0, 0.0);
         assert_eq!(queue.len(), 2, "128 MiB admits two 4000-square pages, not 24");
         v.frame_queue = (0..40)
             .map(|page| RenderRequest { page, scale: 1.0, tag: 1000, tile: Some(Tile { x: 0, y: 0, w: 1024, h: 1024 }), ..Default::default() })
             .collect();
-        assert_eq!(v.prepare_render_queue(&info, 1.0).len(), 32);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0).len(), 32);
         assert!(!v.admit_texture(RenderRequest::default(), PAGE_BYTES + 1));
     }
 
@@ -3938,7 +4204,7 @@ trailer << /Root 1 0 R >>
         // Ten 16 MB pages on screen (a zoomed-out HiDPI view) exceed the 128 MiB allowance.
         v.frame_visible = (0..10).collect();
         v.frame_queue = (0..40).map(|page| RenderRequest { page, scale: 1.0, tag: 1000, ..Default::default() }).collect();
-        let queue = v.prepare_render_queue(&info, 1.0);
+        let queue = v.prepare_render_queue(&info, 1.0, 0.0);
         let pages: Vec<usize> = queue.iter().map(|r| r.page).collect();
         assert_eq!(pages, (0..10).collect::<Vec<_>>(), "every on-screen page, and no prefetch past the allowance");
         v.last_queue = queue.clone();
@@ -3950,7 +4216,7 @@ trailer << /Root 1 0 R >>
         v.frame_queue = (0..40)
             .map(|x| RenderRequest { page: 0, scale: 1.0, tag: 1000, tile: Some(Tile { x: x * TILE, y: 0, w: 1024, h: 1024 }), ..Default::default() })
             .collect();
-        assert_eq!(v.prepare_render_queue(&info, 1.0).len(), 40);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0).len(), 40);
     }
 
     #[test]
@@ -3961,21 +4227,21 @@ trailer << /Root 1 0 R >>
         let req = |page| RenderRequest { page, scale: 1.0, tag: 1000, ..Default::default() };
         v.frame_visible = [0].into();
         v.frame_queue = vec![req(0)];
-        v.last_queue = v.prepare_render_queue(&info, 1.0);
+        v.last_queue = v.prepare_render_queue(&info, 1.0, 0.0);
         v.receive_result(&ctx, solid_result(req(0), 100, 130));
         // Single-page view moves on to page 1: page 0 is no longer demanded.
         v.begin_render_frame();
         v.current = 1;
         v.frame_visible = [1].into();
         v.frame_queue = vec![req(1)];
-        assert_eq!(v.prepare_render_queue(&info, 1.0), vec![req(1)]);
+        assert_eq!(v.prepare_render_queue(&info, 1.0, 0.0), vec![req(1)]);
         assert!(v.pages.contains_key(&0), "kept while the allowance has room");
         // And back: nothing to render.
         v.begin_render_frame();
         v.current = 0;
         v.frame_visible = [0].into();
         v.frame_queue = vec![req(0)];
-        assert!(v.prepare_render_queue(&info, 1.0).is_empty());
+        assert!(v.prepare_render_queue(&info, 1.0, 0.0).is_empty());
     }
 
     #[test]
@@ -4019,7 +4285,7 @@ trailer << /Root 1 0 R >>
 
             view.begin_render_frame();
             view.need_thumbnail(0, true);
-            let queue = view.prepare_render_queue(&info, ctx.pixels_per_point());
+            let queue = view.prepare_render_queue(&info, ctx.pixels_per_point(), 0.0);
             assert!(queue.is_empty(), "the synthetic thumbnail satisfies current demand");
             view.last_queue = queue;
             expected.push((request, dimensions));
@@ -4191,7 +4457,7 @@ trailer << /Root 1 0 R >>
         let info = thumbnail_info(1);
         let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
         v.need_thumbnail(0, true);
-        let queue = v.prepare_render_queue(&info, 2.0);
+        let queue = v.prepare_render_queue(&info, 2.0, 0.0);
         let scale = queue.first().expect("one thumbnail").scale;
         assert!(612.0 * scale >= 150.0 * 2.0, "{scale}");
     }

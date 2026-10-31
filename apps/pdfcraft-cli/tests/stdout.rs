@@ -28,6 +28,7 @@ fn output_commands_exit_cleanly_when_the_reader_has_closed() {
     std::fs::write(&script, steps.to_string()).unwrap();
     for args in [
         vec!["tools"],
+        vec!["schema"],
         vec!["--version"],
         vec!["info", path],
         vec!["text", path],

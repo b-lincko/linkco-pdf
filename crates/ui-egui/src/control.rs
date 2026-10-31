@@ -177,6 +177,10 @@ pub fn attach(ctx: &egui::Context) -> (Control, ControlClient) {
 pub(crate) trait Host {
     fn state(&self) -> Value;
     fn command(&mut self, id: &str) -> Reply;
+    /// The running background jobs, as the card draws them.
+    fn jobs(&self) -> Value;
+    /// Ask a job to stop; `false` when it is not running.
+    fn cancel_job(&mut self, id: crate::jobs::JobId) -> bool;
     fn dock(&mut self, reset: bool, params: &Value) -> Reply;
     fn commands(&self) -> Value;
     fn set(&mut self, key: &str, value: &str) -> Reply;
@@ -290,6 +294,7 @@ impl Control {
                 };
                 Ok(Handled::Now(host.set(str_param("key")?, &value)))
             }
+            "ui.jobs" => Ok(Handled::Now(self.jobs(host, p))),
             "ui.open" => Ok(Handled::Now(host.open(str_param("path")?))),
             "ui.inspect" => Ok(Handled::Now(Ok(self.inspect(p)))),
             "ui.click" => self.click(p),
@@ -352,10 +357,30 @@ impl Control {
                 Ok(Handled::Screenshot(region))
             }
             other => Err(format!(
-                "unknown method {other:?} (ui.state, ui.inspect, ui.click, ui.focus, ui.resize, ui.quit, ui.move, ui.drag, ui.type, ui.key, ui.command, ui.commands, ui.set, ui.open, ui.screenshot)"
+                "unknown method {other:?} (ui.state, ui.jobs, ui.inspect, ui.click, ui.focus, ui.resize, ui.quit, ui.move, ui.drag, ui.type, ui.key, ui.command, ui.commands, ui.set, ui.open, ui.screenshot)"
             )),
         })();
         r.unwrap_or_else(|e| Handled::Now(Err(e)))
+    }
+
+    /// `ui.jobs` lists the running background jobs, and with `{"cancel": id}` asks one of them to
+    /// stop. A stop is cooperative: the answer says the request was taken, not that the work has
+    /// already stopped.
+    fn jobs(&self, host: &mut impl Host, p: &Value) -> Result<Value, String> {
+        // A stop is a write: a stray parameter is refused rather than ignored, so a misspelled
+        // verb cannot silently do nothing.
+        if !p.is_null() && !p.is_object() {
+            return Err("ui.jobs: params must be an object".into());
+        }
+        if let Some(key) = p.as_object().and_then(|o| o.keys().find(|k| k.as_str() != "cancel")) {
+            return Err(format!("ui.jobs: unknown parameter {key:?} (cancel)"));
+        }
+        if let Some(id) = p.get("cancel") {
+            let id = id.as_u64().ok_or_else(|| "ui.jobs: cancel must be a job id (see ui.state jobs)".to_string())?;
+            let job = crate::jobs::JobId(id);
+            return if host.cancel_job(job) { Ok(host.jobs()) } else { Err(format!("ui.jobs: no running job {id}")) };
+        }
+        Ok(host.jobs())
     }
 
     fn inspect(&self, p: &Value) -> Value {
@@ -402,11 +427,22 @@ impl Control {
         let modifiers = modifiers(p.get("modifiers"))?;
         let which = pointer_button(p, "ui.drag")?;
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: which, pressed, modifiers };
-        let mut frames = vec![vec![egui::Event::PointerMoved(from)], vec![button(from, true)]];
+        // The events carry the modifiers and so does the input state: gestures that read
+        // `ui.input(|i| i.modifiers)` (a Ctrl-drag copy, an Alt-drag column select) see them.
+        let held = |mut events: Vec<egui::Event>| {
+            if modifiers != egui::Modifiers::NONE {
+                events.insert(0, egui::Event::ModifiersChanged(modifiers));
+            }
+            events
+        };
+        let mut frames = vec![held(vec![egui::Event::PointerMoved(from)]), held(vec![button(from, true)])];
         for k in 1..=steps {
-            frames.push(vec![egui::Event::PointerMoved(from + (to - from) * (k as f32 / steps as f32))]);
+            frames.push(held(vec![egui::Event::PointerMoved(from + (to - from) * (k as f32 / steps as f32))]));
         }
-        frames.push(vec![button(to, false)]);
+        frames.push(held(vec![button(to, false)]));
+        if modifiers != egui::Modifiers::NONE {
+            frames.push(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        }
         let n = self.inject(frames);
         Ok(Handled::AfterFrames(n, json!({ "dragged": [[from.x, from.y], [to.x, to.y]] })))
     }
@@ -619,6 +655,28 @@ fn screenshot_png(image: &egui::ColorImage, region: Option<egui::Rect>, ppp: f32
     Ok(json!({ "png_base64": base64::engine::general_purpose::STANDARD.encode(out), "width": cw, "height": ch, "pixels_per_point": ppp }))
 }
 
+/// The running background jobs, as a person sees them on the card: what each is, how far it has
+/// got, and whether a stop was already asked for.
+fn jobs_json(jobs: &crate::jobs::Jobs) -> Value {
+    Value::Array(
+        jobs.jobs()
+            .iter()
+            .map(|j| {
+                json!({
+                    "id": j.id.0,
+                    "kind": j.kind.name(),
+                    "label": j.label,
+                    "stage": j.stage,
+                    "done": j.done,
+                    "total": j.total,
+                    "fraction": j.fraction,
+                    "stopping": j.stopping,
+                })
+            })
+            .collect(),
+    )
+}
+
 impl Host for crate::PdfCraftApp {
     fn dock(&mut self, reset: bool, params: &Value) -> Reply {
         crate::docking::command(self, reset, params)
@@ -636,12 +694,37 @@ impl Host for crate::PdfCraftApp {
             .enumerate()
             .filter_map(|(i, v)| {
                 let d = self.session.get(v.id)?;
-                Some(json!({ "tab": i, "doc": v.id.0, "name": d.name, "path": d.path, "pages": d.info.pages.len(), "dirty": d.dirty, "active": self.active == Some(i) }))
+                // What the last poll found for this file: another program writing it, the file
+                // being renamed inside its folder, or the file being gone.
+                let disk = match self.disk_alerts.get(&v.id) {
+                    Some(crate::disk_watch::Alert::Changed) => json!({ "state": "changed" }),
+                    Some(crate::disk_watch::Alert::Renamed(to)) => json!({ "state": "renamed", "at": to.to_string_lossy() }),
+                    Some(crate::disk_watch::Alert::Gone) => json!({ "state": "gone" }),
+                    _ => Value::Null,
+                };
+                Some(json!({
+                    "tab": i,
+                    "doc": v.id.0,
+                    "name": d.name,
+                    "path": d.path,
+                    "pages": d.info.pages.len(),
+                    "dirty": d.dirty,
+                    "active": self.active == Some(i),
+                    "disk": disk,
+                }))
             })
             .collect();
         json!({
             "docking": self.docking,
             "documents": docs,
+            // A save held back because the file changed on disk, with what the other version holds.
+            "save_conflict": self.save_conflict.as_ref().map(|c| json!({
+                "doc": c.id.0,
+                "name": c.name,
+                "dest": c.dest,
+                "disk_pages": c.disk.and_then(|d| d.pages()),
+                "disk_bytes": c.disk.map(|d| d.bytes()),
+            })),
             "active": active.map(|v| json!({
                 "doc": v.id.0,
                 "page": v.current + 1,
@@ -704,7 +787,8 @@ impl Host for crate::PdfCraftApp {
             "theme_preference": self.theme_preference,
             "language": self.language,
             "notice": self.toast.as_ref().map(|t| t.0.clone()),
-            "progress": self.progress_notice.as_ref().map(|p| json!({ "label": p.label, "fraction": p.fraction })),
+            // Every background job that is running, the same list the card draws.
+            "jobs": jobs_json(&self.jobs),
             "password_prompt": self.password_prompt.is_some(),
             "close_prompt": self.close_request.is_some(),
         })
@@ -717,6 +801,14 @@ impl Host for crate::PdfCraftApp {
         }
         self.execute(id);
         Ok(json!({ "ran": id }))
+    }
+
+    fn jobs(&self) -> Value {
+        jobs_json(&self.jobs)
+    }
+
+    fn cancel_job(&mut self, id: crate::jobs::JobId) -> bool {
+        crate::PdfCraftApp::cancel_job(self, id)
     }
 
     fn commands(&self) -> Value {

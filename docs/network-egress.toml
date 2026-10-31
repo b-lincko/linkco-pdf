@@ -1,0 +1,53 @@
+# Every place the product can move bytes off this computer, or hand an address to another
+# program, with what limits it (REC-S09, REC-S03).
+#
+# `python3 docs/implementation/check_egress.py --check` fails when a source file gains network
+# code that is not listed here, when a listed place no longer has the code its entry names, or
+# when a crate gains an HTTP client without a `[[dependency]]` entry. It runs in CI through
+# `docs/implementation/test_egress.py`.
+#
+# `kind` is one of: browser (an address handed to the browser, when the user asks), loopback
+# (this computer only), update-check (a request made only on the user's command), no-socket (the
+# file only names a network type; no connection is made).
+
+
+[[place]]
+file = "apps/pdfcraft/src/updates.rs"
+kind = "update-check"
+tokens = ["ureq::"]
+what = "Help ▸ Check for updates asks GitHub for the latest release: one HTTPS GET to api.github.com."
+restraint = "Only when the user chooses that command — there is no check at start, and nothing else calls it (main installs the function as the dialog's source and nothing else mentions it). A 10 s timeout, the answer is capped at 1 MiB, and only a page under the project's releases page is ever offered for download. Nothing is downloaded or installed by the app."
+
+[[place]]
+file = "crates/ui-egui/src/lib.rs"
+kind = "browser"
+tokens = ["egui::OpenUrl", "OpenUrl::"]
+what = "An address handed to the browser or mail program: a link the user clicks, a button's URI action, or `app.launchURL` from a script."
+restraint = "The request leaves for the browser, not from here, and only when the user acts. An address that comes from the document first asks for permission (request_document_url) and must pass engine::links::document_url, which allows only web and mail schemes, refuses anything the URL parser rejects, and bounds the length — the app never fetches a document's address itself."
+
+[[place]]
+file = "crates/ui-egui/src/control.rs"
+kind = "loopback"
+tokens = ["TcpListener", "std::net::"]
+what = "The agent control channel: a JSON-RPC listener on 127.0.0.1 that lets a script drive the real interface."
+restraint = "Off unless the app is started with --control FILE. It binds 127.0.0.1 on a random port, so it is reachable from this computer only and never from the network. Every connection must first present the random token from the control file, which is created owner-only (0600); without it the connection is closed."
+
+[[place]]
+file = "apps/pdfcraft-cli/src/main.rs"
+kind = "loopback"
+tokens = ["TcpStream", "std::net::"]
+what = "`pdfcraft-cli ui` connects to that control channel to inspect and drive the running app."
+restraint = "127.0.0.1 and the port come from the control file, which must be the user's own: a link, another user's file, a file other users can read, or a file that grows past 64 KiB is refused before connecting. A 40 s read timeout bounds the wait."
+
+[[place]]
+file = "crates/print/src/spool.rs"
+kind = "no-socket"
+tokens = ["std::net::"]
+what = "A printer address is parsed as an IPv4 host, to tell a queue name from a host name."
+restraint = "Parsing only — the IP address is never connected to. Printing goes through the platform's own spooler, and a CUPS job is fed to `lp` on its standard input, never through a file in a shared folder."
+
+[[dependency]]
+crate = "ureq"
+where = "apps/pdfcraft/Cargo.toml"
+what = "The HTTPS client used by Help ▸ Check for updates."
+reason = "One request, only when the user asks (see the first place above). It is a dependency of the desktop app only: the library crates and the web build do not have it, so nothing they do can reach the network."

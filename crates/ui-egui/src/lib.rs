@@ -7,6 +7,12 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+/// Whether two paths name the same file: equal as written, or equal once made absolute (the
+/// destination a file dialog returns is absolute, a document's own path need not be).
+pub(crate) fn same_file(a: &str, b: &str) -> bool {
+    a == b || matches!((std::path::absolute(a), std::path::absolute(b)), (Ok(x), Ok(y)) if x == y)
+}
+
 /// Translate an English UI string into the current language (see [`i18n`]).
 macro_rules! tl {
     ($s:expr) => {
@@ -32,7 +38,14 @@ mod chrome;
 mod combine_grid;
 pub use combine_grid::ThumbState as CombineThumb;
 mod combine_ui;
+// The web build has no path-based files to compare: the shared types stay compiled (a dropped
+// file still has a name) but the desktop-only checks are allowed to go unused there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+mod conflict;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+mod disk_watch;
 pub mod docking;
+pub mod jobs;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
 mod comment_props;
@@ -113,6 +126,8 @@ pub(crate) const MAX_AUTHOR_CHARS: usize = 200;
 pub mod portable;
 mod protect;
 mod recovery;
+mod recovery_budget;
+mod settings_privacy;
 #[cfg(not(target_arch = "wasm32"))]
 mod system_fonts;
 pub mod theme;
@@ -124,9 +139,12 @@ mod widgets;
 use pdfcraft_engine::{DocId, Session};
 
 pub use canvas::{DocView, RasterMemory};
+pub use disk_watch::Alert;
 pub use editing::{CloseRequest, SaveTarget};
 pub use files::{ExtractDraft, FilePurpose, FileRequest, RotateDraft, SplitDraft, SplitMode, SplitPlan};
 pub use recovery::{AUTOSAVE_SECS, RecoveryMeta, RecoveryStore};
+pub use recovery_budget::Limits as RecoveryLimits;
+pub use settings_privacy::{LOGS_DIR as SETTINGS_LOGS_DIR, SETTINGS_FILE, protect as protect_settings};
 use theme::{ThemeKind, ThemePreference};
 
 /// Top-level workspace modes (Acrobat's mode bar).
@@ -477,6 +495,20 @@ pub struct PdfCraftApp {
     pub close_request: Option<CloseRequest>,
     /// Save to this path instead of asking (tests and automation).
     pub save_override: Option<String>,
+    /// What the app last saw in the file each document was opened from or saved to, so saving can
+    /// notice that another program replaced one ([`conflict`]) and the poll can notice a file that
+    /// was renamed, moved or deleted ([`disk_watch`]).
+    pub(crate) disk_watch: std::collections::HashMap<pdfcraft_engine::DocId, disk_watch::Watch>,
+    /// The last state reported for each document, so a notice is said once, not every poll.
+    pub(crate) disk_alerts: std::collections::HashMap<pdfcraft_engine::DocId, disk_watch::Alert>,
+    /// When each document's file was last compared by content rather than by size and time.
+    pub(crate) disk_verified: std::collections::HashMap<pdfcraft_engine::DocId, f64>,
+    /// When the open documents' files were last looked at (see [`disk_watch`]).
+    pub(crate) last_disk_check: f64,
+    /// A save held back because its file changed on disk; the prompt asks what to do.
+    pub save_conflict: Option<SaveConflict>,
+    /// One overwrite the user agreed to, consumed by the next save of the conflicting file.
+    pub(crate) overwrite_agreed: bool,
     /// Document Properties ▸ Description fields being edited: (document, Title/Author/Subject/Keywords).
     pub props_draft: Option<(DocId, [String; 4])>,
     /// Document Properties ▸ Initial View (and reading options) being edited.
@@ -508,14 +540,14 @@ pub struct PdfCraftApp {
     /// Scan & OCR: the Recognize Text choices, the running job, and (tests) run it inline.
     pub ocr_draft: ocr_ui::OcrDraft,
     pub ocr_run: Option<ocr_ui::OcrRun>,
-    pub ocr_batch: Option<std::sync::Arc<std::sync::Mutex<ocr_ui::BatchProgress>>>,
+    pub ocr_batch: Option<ocr_ui::OcrBatchRun>,
     /// Background jobs (OCR, actions, listing pinned folders) run inline instead (tests).
     pub run_inline: bool,
     /// Action Wizard: the user's actions, the dialog state, the running action and (tests) the
     /// files to use instead of a picker.
     pub custom_actions: Vec<pdfcraft_engine::actions::Action>,
     pub wizard: actions_ui::Wizard,
-    pub action_run: Option<std::sync::Arc<std::sync::Mutex<actions_ui::RunProgress>>>,
+    pub action_run: Option<actions_ui::ActionRun>,
     pub action_files_override: Option<Vec<String>>,
     /// Standards ▸ PDF/A: level and last result.
     pub pdfa: standards_ui::PdfaState,
@@ -544,6 +576,9 @@ pub struct PdfCraftApp {
     /// How large the Combine grid draws its cards (1.0 = the usual; kept in the settings). Set
     /// with [`PdfCraftApp::set_combine_zoom`].
     pub combine_zoom: f32,
+    /// How large Organize pages draws its grid, for every document (1.0 = the usual; kept in
+    /// the settings).
+    pub organize_zoom: f32,
     /// The Combine grid's thumbnails: rendered off the UI thread, a few at a time.
     pub(crate) combine_thumbs: combine_grid::Thumbs,
     /// Images waiting for the resolution choice (released on cancel).
@@ -555,8 +590,9 @@ pub struct PdfCraftApp {
     pub optimize_draft: OptimizeDraft,
     /// The running optimization (Optimize PDF ▸ Advanced optimization).
     pub optimize_run: Option<optimize_ui::OptimizeRun>,
-    /// A background job's progress card (see [`widgets::progress_notice`]).
-    pub progress_notice: Option<widgets::ProgressNotice>,
+    /// The background jobs that are running, drawn by the card at the bottom of the window
+    /// (see [`widgets::jobs_card`]) and reported on the control channel.
+    pub jobs: jobs::Jobs,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
     /// Files dropped on the page grid, waiting for the pointer to say which gap they go to.
@@ -609,6 +645,8 @@ pub struct PdfCraftApp {
     pub export_draft: export_ui::ExportDraft,
     /// A running export's progress.
     export_status: Option<export_ui::ExportStatus>,
+    /// The card row of the export in flight, retired when the worker reports.
+    export_job: Option<jobs::JobId>,
     /// The saved Fill & Sign signature and initials (drawn or typed).
     pub signature: Option<fill_sign::SavedSig>,
     pub initials: Option<fill_sign::SavedSig>,
@@ -680,6 +718,20 @@ impl Default for PdfCraftApp {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A save refused because the file changed on disk after the app loaded or last wrote it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaveConflict {
+    /// The document whose save was deferred.
+    pub id: pdfcraft_engine::DocId,
+    /// The file it would have replaced.
+    pub dest: String,
+    /// The document's title, for the prompt.
+    pub name: String,
+    /// What the file holds now, so the prompt can say what a save would replace and offer to
+    /// show the difference. `None` when the file could not be described at all.
+    pub disk: Option<conflict::DiskVersion>,
 }
 
 /// What the operating system says about light and dark, as "draw dark". `None` means nobody
@@ -763,6 +815,12 @@ impl PdfCraftApp {
             host_dirty: None,
             close_request: None,
             save_override: None,
+            disk_watch: std::collections::HashMap::new(),
+            disk_alerts: std::collections::HashMap::new(),
+            disk_verified: std::collections::HashMap::new(),
+            last_disk_check: f64::NEG_INFINITY,
+            save_conflict: None,
+            overwrite_agreed: false,
             props_draft: None,
             view_draft: None,
             requests: Default::default(),
@@ -803,13 +861,14 @@ impl PdfCraftApp {
             combine_columns: Default::default(),
             combine_view: Default::default(),
             combine_zoom: 1.0,
+            organize_zoom: 1.0,
             combine_thumbs: Default::default(),
             image_import: None,
             custom_stamps: Vec::new(),
             stamp_draft: Default::default(),
             optimize_draft: OptimizeDraft::default(),
             optimize_run: None,
-            progress_notice: None,
+            jobs: jobs::Jobs::default(),
             page_clipboard: None,
             grid_drop: None,
             last_snapshot: None,
@@ -839,6 +898,7 @@ impl PdfCraftApp {
             marks_draft: Default::default(),
             export_draft: Default::default(),
             export_status: None,
+            export_job: None,
             signature: None,
             initials: None,
             signature_draft: Default::default(),
@@ -935,6 +995,9 @@ impl PdfCraftApp {
     ) -> Result<(), String> {
         use pdfcraft_render::OpenError;
         let size = bytes.len();
+        // Remember what was on disk, but only for a file this open actually read: the bytes in
+        // hand are that file's contents, so no second read is needed.
+        let watch = path.as_deref().map(|p| disk_watch::Watch::of_bytes(std::path::Path::new(p), bytes.as_slice()));
         let id = match self.session.open(name, path.clone(), bytes.clone(), password) {
             Ok(id) => id,
             Err(e @ (OpenError::NeedsPassword | OpenError::WrongPassword)) => {
@@ -946,6 +1009,10 @@ impl PdfCraftApp {
             Err(e) => return Err(e.to_string()),
         };
         self.password_prompt = None;
+        if let Some(watch) = watch {
+            self.disk_watch.insert(id, watch);
+            self.disk_alerts.remove(&id);
+        }
         let doc = self.session.get(id).ok_or("the document could not be opened")?;
         let pages = doc.info.pages.len();
         // Acrobat opens straight to the Comments panel when a document has comments.
@@ -1087,6 +1154,15 @@ impl PdfCraftApp {
     }
 
     /// Save an attachment to disk, or open a PDF attachment in a new tab.
+    /// [`Self::attachment_action`] for the file of the attachment comment at (page, index).
+    pub fn comment_attachment_action(&mut self, doc: DocId, page: usize, index: usize, open: bool) {
+        let source = pdfcraft_render::AttachmentSource::Annotation { page, index };
+        // The menus offer the items only for a listed file, so a miss is a comment gone since.
+        if let Some(i) = self.session.get(doc).and_then(|d| d.info.attachments.iter().position(|a| a.source == source)) {
+            self.attachment_action(doc, i, open);
+        }
+    }
+
     pub fn attachment_action(&mut self, doc: DocId, index: usize, open: bool) {
         let Some(d) = self.session.get(doc) else { return };
         let Some(att) = d.info.attachments.get(index).cloned() else { return };
@@ -1118,19 +1194,44 @@ impl PdfCraftApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
     }
 
+    /// Act on the save-conflict prompt: compare with the file, save a copy, overwrite, or write
+    /// nothing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn resolve_conflict(&mut self, choice: dialogs::ConflictChoice) {
+        let Some(conflict) = self.save_conflict.clone() else { return };
+        match choice {
+            dialogs::ConflictChoice::Cancel => self.dismiss_conflict(),
+            dialogs::ConflictChoice::Overwrite => self.overwrite_conflict(),
+            dialogs::ConflictChoice::SaveAs => {
+                self.dismiss_conflict();
+                // Save As keeps the open document and asks where on the next frame.
+                let Some(index) = self.views.iter().position(|v| v.id == conflict.id) else { return };
+                self.save_view(index, editing::SaveTarget::As);
+            }
+            // Look at the other version first: the save stays deferred and nothing is written.
+            dialogs::ConflictChoice::Compare => self.compare_with_disk(&conflict),
+        }
+    }
+
     /// Answer the password prompt (`None` cancels).
     pub fn submit_password(&mut self, password: Option<String>) {
         let Some(p) = self.password_prompt.take() else { return };
+        let recovering = p.recovered.is_some();
         let Some(pw) = password else {
             // A cancelled recovery goes back on offer; its snapshot stays in the store and must
             // not attach itself to whatever document is unlocked next (#813).
             if let Some(meta) = p.recovered {
-                self.recoverable.push(meta);
+                self.return_recovery(meta);
             }
             return;
         };
         match self.try_open(&p.name, p.path, p.bytes, Some(&pw), p.activate) {
-            Err(e) => self.notify_fmt("Couldn't open {name}: {e}", &[("name", &p.name), ("e", &e.to_string())]),
+            Err(e) => {
+                self.notify_fmt("Couldn't open {name}: {e}", &[("name", &p.name), ("e", &e.to_string())]);
+                if let Some(meta) = p.recovered {
+                    self.return_recovery(meta);
+                }
+            }
             // A recovered encrypted document is open once its prompt is gone.
             Ok(()) if self.password_prompt.is_none() => {
                 if let Some(meta) = &p.recovered {
@@ -1143,6 +1244,9 @@ impl PdfCraftApp {
                     prompt.recovered = p.recovered;
                 }
             }
+        }
+        if recovering {
+            self.show_pending_recovery();
         }
     }
 
@@ -1209,6 +1313,9 @@ impl PdfCraftApp {
         }
         let id = self.views.remove(index).id;
         self.forget_recovery(id);
+        self.disk_watch.remove(&id);
+        self.disk_alerts.remove(&id);
+        self.disk_verified.remove(&id);
         self.session.close(id);
         self.active = match self.active {
             _ if self.views.is_empty() => None,
@@ -1307,11 +1414,17 @@ impl PdfCraftApp {
         }
     }
 
-    /// Draw the running job's progress card and pass a Cancel click on to the job.
+    /// Draw the running jobs and pass a Cancel click on to the job it belongs to.
     fn show_progress(&mut self, ctx: &egui::Context) {
-        if widgets::progress_notice(self, ctx) {
-            self.cancel_optimize();
+        if let Some(id) = widgets::jobs_card(self, ctx) {
+            self.cancel_job(id);
         }
+    }
+
+    /// Ask one running job to stop. Its worker finishes the item in hand and reports back; the
+    /// card says it is stopping until then.
+    pub fn cancel_job(&mut self, id: jobs::JobId) -> bool {
+        self.jobs.cancel(id)
     }
 
     fn sync_theme(&mut self, ctx: &egui::Context) {
@@ -1385,7 +1498,7 @@ impl PdfCraftApp {
     /// Serialize the user's persistent state (recent files, theme). Local only.
     pub fn persist(&self) -> String {
         let trusted: Vec<String> = self.session.trusted_certificates().iter().map(pdfcraft_engine::sign::x509::to_pem).collect();
-        serde_json::json!({
+        let mut persisted = serde_json::json!({
             "docking": self.docking,
             "docking_left_open": self.left_open,
             "docking_right": self.right,
@@ -1435,8 +1548,10 @@ impl PdfCraftApp {
             "combine_view": self.combine_view.as_str(),
             "combine_zoom": self.combine_zoom,
             "comments_panel_closed": self.comments_panel_closed,
-        })
-        .to_string()
+        });
+        // Set outside json! above, which is at serde_json's macro recursion limit.
+        persisted["organize_zoom"] = serde_json::json!(self.organize_zoom);
+        persisted.to_string()
     }
 
     /// Restore state written by `persist`. Unknown or malformed data is ignored.
@@ -1457,6 +1572,10 @@ impl PdfCraftApp {
         }
         if let Some(zoom) = v["combine_zoom"].as_f64() {
             self.set_combine_zoom(zoom as f32);
+        }
+        // Clamped like any grid zoom when the grid next shows; nonsense keeps the usual size.
+        if let Some(zoom) = v["organize_zoom"].as_f64().map(|z| z as f32).filter(|z| z.is_finite()) {
+            self.organize_zoom = zoom.clamp(*canvas::GRID_ZOOM_RANGE.start(), *canvas::GRID_ZOOM_RANGE.end());
         }
         if let Ok(r) = serde_json::from_value::<Vec<RecentFile>>(v["recent"].clone()) {
             // Only keep entries whose files still exist.
@@ -1698,6 +1817,8 @@ impl PdfCraftApp {
                     return Err("grid-zoom must be between 50 and 300".into());
                 }
                 v.set_grid_zoom(percent / 100.0);
+                // The grid's size is one for every document, as it is remembered.
+                self.organize_zoom = v.grid_zoom();
             }
             ("rotate", Some(v)) => {
                 let deg: u16 = value.parse().map_err(|_| "rotate: 0, 90, 180 or 270")?;
@@ -2017,6 +2138,7 @@ impl eframe::App for PdfCraftApp {
         self.guard_quit(ctx);
         let now = ctx.input(|i| i.time);
         self.autosave_tick(now);
+        self.disk_tick(now);
         if self.host_dirty.is_some() {
             let dirty = self.first_dirty().is_some();
             if let Some(report) = self.host_dirty.as_mut() {

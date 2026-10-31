@@ -78,3 +78,12 @@ family (`sign`, `sign_with_timestamp`, `timestamp_document`, `embed_ltv`).
 - Performance budgets (`misc.performance-budgets`) are not set or enforced.
 - Some shipped features are still reachable only from the UI, not through an `automation` tool;
   `cargo xtask parity` lists them; closing that gap is tracked in the execution plan (D4).
+
+## Recovery snapshot acknowledgement
+
+`Session::autosave_snapshots()` selects dirty revisions not yet persisted; selection no longer
+consumes them. After the **complete** recovery-store write succeeds, call
+`Session::acknowledge_autosave(&snapshot)`. On failure, do not acknowledge: the next selection
+returns that revision even without another edit. Acknowledgement checks the snapshot's opaque
+revision and working-byte identity; stale, clean and closed documents are ignored. It never marks
+user work saved. `mark_recovered` still treats the reopened recovery bytes as already stored.

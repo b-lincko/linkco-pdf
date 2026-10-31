@@ -2,7 +2,7 @@
 //! "save changes?" prompt when closing a tab or quitting with unsaved edits.
 
 use pdfcraft_engine::Edit;
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes};
+use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, sync_staged};
 
 use crate::PdfCraftApp;
 
@@ -49,6 +49,12 @@ impl PdfCraftApp {
                         let n = pages.iter().collect::<std::collections::BTreeSet<_>>().len();
                         let to = to.min(info.pages.len() - n);
                         view.select_pages(&(to..to + n).collect::<Vec<_>>());
+                    }
+                    // A copy dropped by a Ctrl-drag: select the copies where they landed.
+                    Edit::DuplicatePages { pages, at: Some(at) } => {
+                        let n = pages.iter().collect::<std::collections::BTreeSet<_>>().len();
+                        let at = at.min(info.pages.len().saturating_sub(n));
+                        view.select_pages(&(at..at + n).collect::<Vec<_>>());
                     }
                     Edit::InsertBlankPage { at, .. } => view.select_pages(&[at.min(info.pages.len() - 1)]),
                     Edit::DeletePages { .. } => view.select_pages(&[]),
@@ -390,14 +396,14 @@ impl PdfCraftApp {
                     let dialog = rfd::AsyncFileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name);
                     // The bytes are taken once the user has chosen, so edits made meanwhile are saved too.
                     self.ask_one(crate::pickers::Ask::Save(dialog), None, move |app, dest| {
-                        if app.save_doc_to(id, &dest.to_string_lossy()) {
+                        if app.save_doc_to(id, &dest.to_string_lossy(), target) {
                             after(app);
                         }
                     });
                     return false;
                 }
             };
-            let saved = self.save_doc_to(id, &destination);
+            let saved = self.save_doc_to(id, &destination, target);
             if saved {
                 after(self);
             }
@@ -450,31 +456,130 @@ impl PdfCraftApp {
         }
     }
 
+    /// Replace the file anyway after the user was shown that it changed on disk.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn overwrite_conflict(&mut self) {
+        let Some(c) = self.save_conflict.take() else { return };
+        self.overwrite_agreed = true;
+        self.save_doc_to(c.id, &c.dest, SaveTarget::InPlace);
+    }
+
+    /// Drop a deferred save without writing anything (the user chose not to overwrite).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn dismiss_conflict(&mut self) {
+        self.save_conflict = None;
+        self.overwrite_agreed = false;
+    }
+
+    /// Show what the file on disk holds beside the open document, without writing anything.
+    ///
+    /// The version on disk is opened as a separate, pathless document (`work (on disk).pdf`) and
+    /// this document is compared against it as the newer one, so the existing Compare panel lists
+    /// and shades the differences. Being pathless, the copy cannot be saved over the file it came
+    /// from. The deferred save is dropped: the document stays unsaved, and saving again asks the
+    /// same question, by which time the reader knows what it is about.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn compare_with_disk(&mut self, conflict: &crate::SaveConflict) {
+        let path = std::path::Path::new(&conflict.dest);
+        let Some(facts) = crate::conflict::DiskVersion::of_path(path) else {
+            self.notify_fmt("“{name}” could not be opened to compare it.", &[("name", &conflict.name)]);
+            return;
+        };
+        // Two reasons not to open it: too big to load here, or not a document this app can read
+        // (encrypted, damaged). Either way the reader is told, and the prompt stays so the other
+        // choices are still there.
+        if facts.too_large_to_compare() {
+            self.notify(tl!("The version on disk is too large to compare here.").to_string());
+            return;
+        }
+        let Some(bytes) = facts.pages().and_then(|_| facts.read(path)) else {
+            self.notify_fmt("“{name}” could not be opened to compare it.", &[("name", &conflict.name)]);
+            return;
+        };
+        let before = self.views.len();
+        let name = on_disk_name(&conflict.name);
+        if let Err(e) = self.open_bytes(&name, None, bytes) {
+            self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &e)]);
+            return;
+        }
+        // Opening a document whose pages cannot be read asks for a password instead of adding a
+        // tab; that question belongs to the other program's file, not to this decision.
+        if self.views.len() <= before {
+            if self.password_prompt.is_some() {
+                self.submit_password(None);
+            }
+            self.notify_fmt("“{name}” could not be opened to compare it.", &[("name", &conflict.name)]);
+            return;
+        }
+        let copy = self.views[before].id;
+        self.compare_old = Some(copy);
+        // The document whose save was deferred is the newer version being compared.
+        if let Some(index) = self.views.iter().position(|v| v.id == conflict.id) {
+            self.active = Some(index);
+        }
+        self.dismiss_conflict();
+        self.run_compare();
+    }
+
     /// Write document `id` to `dest` and make it the document's file. Returns `true` if written.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str) -> bool {
+    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget) -> bool {
         // Save As answers on a later frame: commit what was typed meanwhile, too (#166), even
         // if another tab is active by then.
         if !self.commit_typing_in(id) || !self.flatten_fill_sign_for_save(id) {
             return false;
         }
-        let Some(name) = self.session.get(id).map(|d| d.name.clone()) else {
+        let Some((name, full)) = self.session.get(id).map(|d| {
+            // Save As to another file is a clean copy, without the earlier revisions that still
+            // hold deleted pages or replaced text (#2165). A signed document stays incremental so
+            // its signatures keep covering the file.
+            let full = target == SaveTarget::As
+                && !d.path.as_deref().is_some_and(|p| crate::same_file(p, dest))
+                && d.read_only_reason.is_none()
+                && !d.is_signed();
+            (d.name.clone(), full)
+        }) else {
             self.notify_tr("The document was closed before it could be saved.");
             return false;
         };
-        let bytes = match self.session.save_bytes(id) {
+        let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) };
+        let bytes = match bytes {
             Ok(b) => b,
             Err(e) => {
                 self.notify_fmt("Couldn't save {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
                 return false;
             }
         };
+        // Refuse to replace a file another program changed since the app loaded or last wrote
+        // it: the deferred save is offered again with an explicit overwrite.
+        let previous = self.session.get(id).and_then(|d| d.path.clone());
+        let overwriting = previous.as_deref().is_some_and(|p| crate::same_file(p, dest));
+        if overwriting
+            && !self.overwrite_agreed
+            && let Some(then) = self.disk_watch.get(&id).map(|w| w.stamp())
+            && crate::conflict::changed(then, crate::conflict::Stamp::of_path(std::path::Path::new(dest)))
+        {
+            // Describe what would be lost before asking: the other version's pages and when it
+            // was written, both read from the file itself and bounded (conflict::READ_LIMIT).
+            let disk = crate::conflict::DiskVersion::of_path(std::path::Path::new(dest));
+            self.save_conflict = Some(crate::SaveConflict { id, dest: dest.to_string(), name: name.clone(), disk });
+            return false;
+        }
+        self.overwrite_agreed = false;
         if let Err(e) = write_atomically(dest, &bytes) {
             self.notify_fmt("Couldn't save {name}: {e}", &[("name", dest), ("e", &e.to_string())]);
             return false;
         }
         match self.session.mark_saved(id, bytes, Some(dest.to_string())) {
             Ok(()) => {
+                // From now on, conflicts and the poll compare against what this save wrote.
+                match crate::disk_watch::Watch::of_path(std::path::Path::new(dest)) {
+                    Some(watch) => self.disk_watch.insert(id, watch),
+                    None => self.disk_watch.remove(&id),
+                };
+                self.disk_alerts.remove(&id);
+                self.disk_verified.remove(&id);
+                self.save_conflict = None;
                 self.forget_recovery(id);
                 if let Some(doc) = self.session.get(id)
                     && let Some(view) = self.views.iter_mut().find(|v| v.id == id)
@@ -668,7 +773,30 @@ pub fn write_atomically(path: &str, bytes: &[u8]) -> std::io::Result<()> {
 
 /// [`write_atomically`], trying the staging names that `suffixes` give.
 fn write_atomically_with(path: &str, bytes: &[u8], suffixes: impl IntoIterator<Item = u64>) -> std::io::Result<()> {
-    use std::io::Write;
+    write_atomically_syncing(path, bytes, suffixes, std::fs::File::sync_all)
+}
+
+/// [`write_atomically_with`], flushing the staging file with `sync_all` (the standard library's
+/// in the app, a failing one in tests).
+fn write_atomically_syncing(
+    path: &str,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    write_atomically_using(path, bytes, suffixes, std::io::Write::write_all, sync_all, |from, to| std::fs::rename(from, to))
+}
+
+/// The save pipeline with private I/O seams for deterministic failure tests. Production callers
+/// always supply the standard file operations; these are not automation/runtime fault switches.
+fn write_atomically_using(
+    path: &str,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    write_all: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+    rename: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     let target = std::path::Path::new(path);
     let dir = target.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
     let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("save");
@@ -677,10 +805,10 @@ fn write_atomically_with(path: &str, bytes: &[u8], suffixes: impl IntoIterator<I
         // Closed at the end of the block, before the rename.
         {
             let mut f = f;
-            f.write_all(bytes)?;
-            f.sync_all()?;
+            write_all(&mut f, bytes)?;
+            sync_staged(&f, sync_all)?;
         }
-        std::fs::rename(&tmp, target)
+        rename(&tmp, target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -771,11 +899,33 @@ fn bookmark_at<'a>(items: &'a [pdfcraft_render::OutlineItem], path: &[usize]) ->
     if rest.is_empty() { Some(item) } else { bookmark_at(&item.children, rest) }
 }
 
+/// The title of the other program's version when it is opened beside the document: same name,
+/// before the extension, so the tab says which file it is and which one is this document.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn on_disk_name(name: &str) -> String {
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => name.split_at(i),
+        _ => (name, ""),
+    };
+    format!("{}{ext}", crate::i18n::fmt(tl!("{name} (on disk)"), &[("name", stem)]))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{write_atomically, write_atomically_with};
+    use super::{on_disk_name, write_atomically, write_atomically_syncing, write_atomically_using, write_atomically_with};
     use pdfcraft_platform::staging::{STAGING_ATTEMPTS, staging_suffixes};
     use std::path::{Path, PathBuf};
+
+    /// The copy opened beside the document says which file it is, and keeps the extension so the
+    /// tab and the open dialog still read it as a PDF.
+    #[test]
+    fn the_other_version_opens_under_a_name_that_names_it() {
+        assert_eq!(on_disk_name("work.pdf"), "work (on disk).pdf");
+        assert_eq!(on_disk_name("Report 2026.PDF"), "Report 2026 (on disk).PDF");
+        assert_eq!(on_disk_name("notes"), "notes (on disk)");
+        // A name that is only an extension is not split into nothing.
+        assert_eq!(on_disk_name(".pdf"), ".pdf (on disk)");
+    }
 
     /// A fresh, empty folder for one staging test.
     fn staging_dir(test: &str) -> PathBuf {
@@ -808,6 +958,262 @@ mod tests {
         {
             Err(std::io::Error::other(format!("no symbolic links here: {} {}", target.display(), link.display())))
         }
+    }
+
+    /// Parent kills a real child at a verified I/O boundary; no destructors can clean staging.
+    #[test]
+    fn process_kill_preserves_atomic_save_boundary_and_retry() {
+        use std::io::Write as _;
+        const PHASE: &str = "PDFCRAFT_SAVE_KILL_PHASE";
+        const DIRECTORY: &str = "PDFCRAFT_SAVE_KILL_DIRECTORY";
+        const NEW: &[u8] = b"COMPLETE NEW FILE";
+        fn pause(ready: &Path, phase: &str) -> ! {
+            std::fs::write(ready, phase).unwrap();
+            loop {
+                std::thread::park();
+            }
+        }
+        if let Some(phase) = std::env::var_os(PHASE) {
+            let phase = phase.to_str().unwrap();
+            assert!(matches!(phase, "partial" | "flushed" | "renamed"));
+            let dir = PathBuf::from(std::env::var_os(DIRECTORY).unwrap());
+            let target = dir.join("out.pdf");
+            let ready = dir.join("ready");
+            write_atomically_using(
+                &target.to_string_lossy(),
+                NEW,
+                [7],
+                |file, bytes| {
+                    if phase == "partial" {
+                        file.write_all(b"PARTIAL")?;
+                        pause(&ready, phase);
+                    }
+                    file.write_all(bytes)
+                },
+                std::fs::File::sync_all,
+                |from, to| {
+                    if phase == "flushed" {
+                        pause(&ready, phase);
+                    }
+                    std::fs::rename(from, to)?;
+                    pause(&ready, phase);
+                },
+            )
+            .unwrap();
+            panic!("the child returned instead of waiting for termination");
+        }
+        struct Reap(std::process::Child);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                // Also kill/reap on assertion failure or readiness timeout: no orphan processes.
+                if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                    let _ = self.0.kill();
+                }
+                let _ = self.0.wait();
+            }
+        }
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::process_kill_preserves_atomic_save_boundary_and_retry");
+        for phase in ["partial", "flushed", "renamed"] {
+            for existing in [false, true] {
+                let dir = staging_dir(&format!("kill-{phase}-{existing}"));
+                let target = dir.join("out.pdf");
+                let ready = dir.join("ready");
+                assert!(!ready.exists(), "a fresh case must not reuse a stale barrier");
+                if existing {
+                    std::fs::write(&target, b"ORIGINAL FILE").unwrap();
+                }
+                let mut child = Reap(
+                    std::process::Command::new(std::env::current_exe().unwrap())
+                        .args(["--exact", &test, "--nocapture"])
+                        .env(PHASE, phase)
+                        .env(DIRECTORY, &dir)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::inherit())
+                        .spawn()
+                        .unwrap(),
+                );
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    if std::fs::read(&ready).is_ok_and(|bytes| bytes == phase.as_bytes()) {
+                        break;
+                    }
+                    assert!(child.0.try_wait().unwrap().is_none(), "child exited before the {phase} barrier");
+                    assert!(std::time::Instant::now() < deadline, "child did not reach the {phase} barrier");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                child.0.kill().unwrap();
+                let status = child.0.wait().unwrap();
+                assert!(!status.success(), "termination was not a graceful successful return");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt as _;
+                    assert_eq!(status.signal(), Some(9), "the child must die from SIGKILL");
+                }
+                if phase == "renamed" {
+                    assert_eq!(std::fs::read(&target).unwrap(), NEW);
+                    assert!(!staged(&dir, 7).exists());
+                } else {
+                    if existing {
+                        assert_eq!(read(&target), "ORIGINAL FILE");
+                    } else {
+                        assert!(!target.exists(), "no partial target was published");
+                    }
+                    let orphan = std::fs::read(staged(&dir, 7)).unwrap();
+                    let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };
+                    assert_eq!(orphan, expected);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt as _;
+                        assert_eq!(std::fs::metadata(staged(&dir, 7)).unwrap().permissions().mode() & 0o777, 0o600);
+                    }
+                }
+                // Deterministic collision with an orphan: retry must skip, never overwrite it.
+                write_atomically_with(&target.to_string_lossy(), b"RETRY COMPLETE", [7, 8]).unwrap();
+                assert_eq!(read(&target), "RETRY COMPLETE");
+                assert!(!staged(&dir, 8).exists());
+                if phase == "renamed" {
+                    assert!(!staged(&dir, 7).exists());
+                } else {
+                    let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };
+                    assert_eq!(std::fs::read(staged(&dir, 7)).unwrap(), expected, "orphan was not reused or overwritten");
+                }
+                std::fs::remove_dir_all(dir).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_partial_disk_full_write_never_replaces_the_target() {
+        use std::io::Write as _;
+        for existing in [false, true] {
+            let dir = staging_dir(&format!("partial-write-{existing}"));
+            let target = dir.join("out.pdf");
+            if existing {
+                std::fs::write(&target, b"ORIGINAL").unwrap();
+            }
+            let error = write_atomically_using(
+                &target.to_string_lossy(),
+                b"NEW CONTENT",
+                [7],
+                |file, bytes| {
+                    assert_eq!(bytes, b"NEW CONTENT");
+                    file.write_all(b"NEW")?;
+                    assert_eq!(read(&staged(&dir, 7)), "NEW", "actual partial bytes reached staging");
+                    Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "injected disk full"))
+                },
+                |_| panic!("a failed write must not reach flush"),
+                |_, _| panic!("a failed write must not reach rename"),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("injected disk full"), "{error}");
+            if existing {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_denied_rename_keeps_original_bytes_and_cleans_staging() {
+        for existing in [false, true] {
+            let dir = staging_dir(&format!("denied-rename-{existing}"));
+            let target = dir.join("out.pdf");
+            if existing {
+                std::fs::write(&target, b"ORIGINAL").unwrap();
+            }
+            let flushed = std::cell::Cell::new(false);
+            let renamed = std::cell::Cell::new(false);
+            let error = write_atomically_using(
+                &target.to_string_lossy(),
+                b"NEW CONTENT",
+                [7],
+                std::io::Write::write_all,
+                |file| {
+                    assert!(!flushed.replace(true));
+                    file.sync_all()
+                },
+                |from, to| {
+                    assert!(!renamed.replace(true));
+                    assert!(flushed.get(), "flush before rename");
+                    assert_eq!(from, staged(&dir, 7));
+                    assert_eq!(to, target);
+                    assert_eq!(read(from), "NEW CONTENT");
+                    assert_eq!(to.exists(), existing);
+                    if existing {
+                        assert_eq!(read(to), "ORIGINAL", "rename has not happened yet");
+                    }
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::fs::OpenOptionsExt as _;
+                        // Exclusive reopening would fail if the staging writer were still open.
+                        let exclusive = std::fs::OpenOptions::new().read(true).share_mode(0).open(from).unwrap();
+                        drop(exclusive);
+                    }
+                    Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected rename denial"))
+                },
+            )
+            .unwrap_err();
+            assert!(flushed.get() && renamed.get());
+            assert!(error.to_string().contains("injected rename denial"), "{error}");
+            if existing {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn interrupted_and_short_writes_can_finish_before_replacement() {
+        use std::io::Write as _;
+        struct ShortWrites<'a> {
+            file: &'a mut std::fs::File,
+            calls: usize,
+        }
+        impl std::io::Write for ShortWrites<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                if self.calls == 1 {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                self.file.write(bytes.get(..2).unwrap_or(bytes))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.file.flush()
+            }
+        }
+        let dir = staging_dir("short-interrupted");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"ORIGINAL").unwrap();
+        write_atomically_using(
+            &target.to_string_lossy(),
+            b"NEW CONTENT",
+            [7],
+            |file, bytes| {
+                let mut writer = ShortWrites { file, calls: 0 };
+                writer.write_all(bytes)?;
+                assert!(writer.calls > 2, "retry interruption and multiple short writes");
+                Ok(())
+            },
+            |file| {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(read(&staged(&dir, 7)), "NEW CONTENT");
+                file.sync_all()
+            },
+            |from, to| std::fs::rename(from, to),
+        )
+        .unwrap();
+        assert_eq!(read(&target), "NEW CONTENT");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -895,6 +1301,42 @@ mod tests {
         names
     }
 
+    /// On macOS `sync_all` asks for a full flush, which SMB and FUSE volumes (a Cryptomator vault,
+    /// #981) refuse as unsupported: ENOTSUP (45) or ENOTTY (25). The save still goes through.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_volume_without_full_flush_still_saves() {
+        for errno in [45, 25] {
+            let dir = staging_dir(&format!("nofullsync-{errno}"));
+            let target = dir.join("out.pdf");
+            std::fs::write(&target, "OLD").unwrap();
+            let asked = std::cell::Cell::new(false);
+            let refuse = |_: &std::fs::File| {
+                asked.set(true);
+                Err(std::io::Error::from_raw_os_error(errno))
+            };
+            write_atomically_syncing(&target.to_string_lossy(), b"NEW", [7], refuse).unwrap();
+            assert!(asked.get(), "the full flush was tried");
+            assert_eq!(read(&target), "NEW");
+            assert_eq!(listing(&dir), ["out.pdf"], "no staging file is left behind");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Only "not supported" is let through: any other flush failure fails the save and keeps the
+    /// original.
+    #[test]
+    fn a_failed_flush_keeps_the_original() {
+        let dir = staging_dir("syncfails");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, "OLD").unwrap();
+        let e = write_atomically_syncing(&target.to_string_lossy(), b"NEW", [7], |_| Err(std::io::Error::other("disk gone"))).unwrap_err();
+        assert_eq!(e.to_string(), "disk gone");
+        assert_eq!(read(&target), "OLD");
+        assert_eq!(listing(&dir), ["out.pdf"], "the staging file was removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn saving_a_long_name_leaves_only_the_saved_file() {
         assert_ne!(staging_suffixes().next(), staging_suffixes().next(), "each save draws new names");
@@ -908,6 +1350,25 @@ mod tests {
         assert_eq!(read(&dir.join(&name)), "NEWER");
         assert_eq!(listing(&dir), [name], "no staging file is left behind");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_desktop_saves_do_not_widen_private_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = staging_dir("private-output");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_atomically_syncing(&target.to_string_lossy(), b"NEW", [7], |file| {
+            assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600, "private while staging");
+            file.sync_all()
+        })
+        .unwrap();
+        assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(read(&target), "NEW");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Windows refuses to replace a read-only file, so the rename fails: the staging file must not
@@ -948,6 +1409,7 @@ mod revert_draft_tests {
             select_all: false,
             calendar: None,
             calendar_rect: None,
+            calendar_text: None,
         }
     }
 

@@ -35,7 +35,65 @@ fn fixture(n: usize) -> Vec<u8> {
     out
 }
 
+/// A one-page PDF reading "Page 1" whose page carries a thumbnail (`/Thumb`) with a marker in it:
+/// a picture of the page as it was, which a redaction must not leave behind.
+fn fixture_with_thumbnail() -> Vec<u8> {
+    let body = "BT /F1 24 Tf 20 150 Td (Page 1) Tj ET";
+    let thumb = "\u{0}OLDTHUMB1\u{ff}";
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R /Thumb 6 0 R /Resources << /Font << /F1 3 0 R >> >> >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()).into_bytes(),
+        format!(
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n{thumb}\nendstream",
+            thumb.len()
+        )
+        .into_bytes(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
 /// A fresh directory with `a.pdf` (3 pages) and `b.pdf` (2 pages).
+/// The file name a plan put in a JSON string (paths differ by platform, names do not).
+fn file_name(v: &Value) -> String {
+    Path::new(v.as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned()
+}
+
+/// Every file under `dir` with its size, sorted: a plan may add or change nothing in it.
+fn tree(dir: &Path) -> Vec<(PathBuf, u64)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push((path.clone(), std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 fn workdir(test: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("pdfcraft-automation-{test}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -82,11 +140,13 @@ fn tool_table_is_well_formed() {
     }
 }
 
-/// Each of these writes to its required `path` and replaces an existing file there, so the MCP
-/// annotations must not tell clients the call is read-only or harmless (#130).
+/// Each of these writes files: three replace a `path`, and the two batch writers create a folder
+/// and write into it (OCR over the target's own name). The MCP annotations must not tell clients
+/// the call is read-only or harmless (#130), and the permission profiles read the same flags, so a
+/// writer that claimed to change nothing would also be allowed by every profile (REC-B09).
 #[test]
 fn file_writing_tools_are_not_read_only() {
-    for name in ["doc_export_data", "accessibility_report", "image_save"] {
+    for name in ["doc_export_data", "accessibility_report", "image_save", "action_run", "ocr_recognize_files"] {
         let t = tools().into_iter().find(|t| t.name == name).unwrap();
         assert!(!t.read_only, "{name} writes a file but advertises read-only");
         assert!(t.destructive, "{name} overwrites its path but advertises non-destructive");
@@ -165,6 +225,54 @@ fn edit_undo_redo_and_save_round_trip() {
     let after = std::fs::read(dir.join("out/edited.pdf")).unwrap();
     assert!(after.len() as u64 > before);
     assert_eq!(after.windows(5).filter(|w| w == b"%%EOF").count(), 2);
+    let outputs: Vec<_> = std::fs::read_dir(dir.join("out")).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(outputs, [std::ffi::OsString::from("edited.pdf")], "successful saves leave no staging files");
+}
+
+#[test]
+fn a_failed_atomic_save_keeps_unsaved_edits_for_a_retry() {
+    let dir = workdir("save-retry");
+    let original = std::fs::read(dir.join("a.pdf")).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Still unsaved" }));
+    std::fs::write(dir.join("blocked"), b"NOT A DIRECTORY").unwrap();
+    assert!(a.call("doc_save", &json!({ "doc": doc, "path": "blocked/out.pdf" })).is_err());
+    assert_eq!(std::fs::read(dir.join("a.pdf")).unwrap(), original);
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc }))["title"], "Still unsaved");
+    assert!(a.call("doc_close", &json!({ "doc": doc })).is_err(), "failed saves must not clear the dirty flag");
+    let saved = ok(&mut a, "doc_save", json!({ "doc": doc }));
+    assert_eq!(saved["document"]["dirty"], false);
+    let mut reopened = auto(&dir);
+    let id = ok(&mut reopened, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut reopened, "doc_info", json!({ "doc": id }))["title"], "Still unsaved");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_outputs_do_not_widen_private_unix_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = workdir("private-output");
+    let source = dir.join("a.pdf");
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Private report" }));
+    ok(&mut a, "doc_save", json!({ "doc": doc }));
+    assert_eq!(std::fs::metadata(&source).unwrap().permissions().mode() & 0o777, 0o600);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "copy.pdf" }));
+    assert_eq!(std::fs::metadata(dir.join("copy.pdf")).unwrap().permissions().mode() & 0o777, 0o600);
+    let output = a.write_output("result.txt", b"PRIVATE RESULT").unwrap();
+    assert_eq!(std::fs::metadata(output).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::read_to_string(dir.join("result.txt")).unwrap(), "PRIVATE RESULT");
+    let mut reopened = auto(&dir);
+    let id = ok(&mut reopened, "doc_open", json!({ "path": "copy.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut reopened, "doc_info", json!({ "doc": id }))["title"], "Private report");
+    let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    files.sort();
+    assert_eq!(files, ["a.pdf", "b.pdf", "copy.pdf", "result.txt"].map(std::ffi::OsString::from));
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -473,6 +581,26 @@ fn writing_to_a_folder_touches_nothing_beside_it() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+/// An export that fails — its output folder is a file — reports why, leaves the document open
+/// and untouched, and the next export to a real folder works: a failed operation is confined to
+/// that operation, not to the document or the session.
+#[test]
+fn a_failed_export_leaves_the_document_open_and_usable() {
+    let (base, root) = sandbox("failed-export");
+    let mut a = auto(&root);
+    std::fs::write(root.join("not-a-folder"), b"x").unwrap();
+    let doc = ok(&mut a, "doc_open", json!({ "path": "inside.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_list", json!({}));
+    let failed = a.call("doc_export_images", &json!({ "doc": doc, "folder": "not-a-folder", "dpi": 18 })).unwrap_err();
+    assert!(matches!(&failed, ToolError::Failed(_)), "the export says why it failed: {failed:?}");
+    // The document is still open, with the same page count and nothing half-written.
+    assert_eq!(ok(&mut a, "doc_list", json!({})), before);
+    let out = ok(&mut a, "doc_export_images", json!({ "doc": doc, "folder": "out", "dpi": 18 }));
+    assert_eq!(out["files"].as_array().unwrap().len(), 1, "{out}");
+    assert!(root.join("out").join("inside_page_1.png").is_file());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 #[test]
 fn file_names_from_documents_stay_in_the_output_folder() {
     // Folder outputs name their files after the document. A document name with separators,
@@ -709,7 +837,9 @@ fn mcp_compact_tool_search_filters_by_query_and_category() {
     assert_eq!(one["name"], "page_rotate");
     assert_eq!(one["input_schema"]["type"], "object");
     let def = tools().into_iter().find(|t| t.name == "page_rotate").unwrap();
-    assert_eq!(one["input_schema"], def.input_schema);
+    // The published schema is the tool's own, with its worked example (REC-B01).
+    assert_eq!(one["input_schema"], pdfcraft_automation::schema::schema_with_example(&def));
+    assert_eq!(one["input_schema"]["examples"][0]["degrees"], 90);
     assert_eq!(one["description"], def.description);
 
     // Bad arguments are tool errors.
@@ -1355,6 +1485,34 @@ fn orphan_form_fields_through_tools() {
     let reset = ok(&mut a, "form_fields", json!({ "doc": doc }));
     let v = reset["fields"].as_array().unwrap().iter().find(|f| f["name"] == "alpha").unwrap()["value"].clone();
     assert_ne!(v, "Filled by an agent");
+}
+
+#[test]
+fn reversing_pages_through_tools() {
+    let dir = workdir("reverse");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_reverse", json!({ "doc": doc }));
+    assert_eq!(page_text(&mut a, doc), ["Page 3", "Page 2", "Page 1"], "no pages reverses the whole document");
+    ok(&mut a, "page_reverse", json!({ "doc": doc, "pages": [1, 2] }));
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3", "Page 1"], "only the listed pages swap");
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(page_text(&mut a, doc), ["Page 3", "Page 2", "Page 1"]);
+    assert!(matches!(a.call("page_reverse", &json!({ "doc": doc, "pages": [4] })), Err(ToolError::InvalidArgs(_))));
+    assert!(matches!(a.call("page_reverse", &json!({ "doc": doc, "pages": [2] })), Err(ToolError::Failed(_))), "one page has nothing to reverse");
+}
+
+#[test]
+fn page_duplicate_at_inserts_the_copies_there() {
+    let dir = workdir("duplicate-at");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "page_duplicate", json!({ "doc": doc, "pages": [2], "at": 1 }));
+    assert_eq!(r["pages"], 4);
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 1", "Page 2", "Page 3"]);
+    // `at` is 1-based and within 1..=pages+1, as for the other page inserts.
+    assert!(matches!(a.call("page_duplicate", &json!({ "doc": doc, "pages": [1], "at": 0 })), Err(ToolError::InvalidArgs(_))), "1-based");
+    assert!(matches!(a.call("page_duplicate", &json!({ "doc": doc, "pages": [1], "at": 6 })), Err(ToolError::InvalidArgs(_))), "past the end");
 }
 
 #[test]
@@ -2126,6 +2284,22 @@ fn redacting_through_tools() {
     assert!(matches!(a.call("redact_apply", &json!({ "doc": doc })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc, "find": "nowhere to be found" })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc })), Err(ToolError::InvalidArgs(_))));
+}
+
+#[test]
+fn redaction_takes_the_page_thumbnail_with_it() {
+    // A page thumbnail is a picture of the page from before: leaving it would let anyone read
+    // what the redaction covered. The tools go through the same path as the interface.
+    let dir = workdir("redact-thumbnail");
+    std::fs::write(dir.join("thumb.pdf"), fixture_with_thumbnail()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "thumb.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "redact_mark", json!({ "doc": doc, "find": "Page 1" }));
+    ok(&mut a, "redact_apply", json!({ "doc": doc }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "thumb-out.pdf" }));
+    let bytes = std::fs::read(dir.join("thumb-out.pdf")).unwrap();
+    assert!(!bytes.windows(9).any(|w| w == b"OLDTHUMB1"), "a picture of the page before the redaction");
+    assert!(!page_text(&mut a, doc)[0].contains("Page 1"));
 }
 
 #[test]
@@ -3084,6 +3258,41 @@ fn field_actions_through_tools() {
 }
 
 #[test]
+fn detecting_comb_boxes_through_tools() {
+    let mut body = String::from("BT /F1 10 Tf 40 105 Td (Postcode) Tj ET\n");
+    for i in 0..5 {
+        body.push_str(&format!("{} 100 16 20 re S\n", 120 + i * 16));
+    }
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 300] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let dir = workdir("detect-comb");
+    std::fs::write(dir.join("comb.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "comb.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "form_detect_fields", json!({ "doc": doc }));
+    assert_eq!(r["fields"], json!([{ "page": 1, "kind": "text", "comb": 5, "name": "Postcode", "rect": [120.0, 100.0, 200.0, 120.0] }]), "{r}");
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Postcode": "75001" } }));
+    assert_eq!(ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"][0]["value"], "75001");
+}
+
+#[test]
 fn detecting_form_fields_through_tools() {
     let dir = workdir("detect-fields");
     let mut a = auto(&dir);
@@ -3916,4 +4125,325 @@ fn text_extract_with_a_rect_takes_one_column() {
         let e = a.call("text_extract", &json!({ "doc": doc, "rect": bad })).unwrap_err();
         assert!(matches!(e, ToolError::InvalidArgs(_)), "{bad}: {e}");
     }
+}
+
+/// Independent inch/mm dimensions, checked in the saved file through the tool path.
+#[test]
+fn architectural_and_iso_papers_through_tools() {
+    let dir = workdir("plotter-papers");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let mm = 72.0 / 25.4;
+    for (name, w, h) in [
+        ("ARCH A", 9.0 * 72.0, 12.0 * 72.0),
+        ("arch b", 12.0 * 72.0, 18.0 * 72.0),
+        ("ARCH C", 18.0 * 72.0, 24.0 * 72.0),
+        ("ARCH D", 24.0 * 72.0, 36.0 * 72.0),
+        ("ARCH E1", 30.0 * 72.0, 42.0 * 72.0),
+        ("ARCH E (36 x 48 in)", 36.0 * 72.0, 48.0 * 72.0),
+        ("ANSI C", 17.0 * 72.0, 22.0 * 72.0),
+        ("ANSI D", 22.0 * 72.0, 34.0 * 72.0),
+        ("ANSI E", 34.0 * 72.0, 44.0 * 72.0),
+        ("A2", 420.0 * mm, 594.0 * mm),
+        ("A6", 105.0 * mm, 148.0 * mm),
+        ("A1", 594.0 * mm, 841.0 * mm),
+        ("A0", 841.0 * mm, 1189.0 * mm),
+        ("Letter", 612.0, 792.0),
+        ("US Legal", 612.0, 1008.0),
+        ("Tabloid", 792.0, 1224.0),
+    ] {
+        for orientation in ["portrait", "landscape"] {
+            let out = ok(
+                &mut a,
+                "doc_print",
+                json!({"doc": doc, "pages": "1", "paper": name,
+                "layout": "actual", "orientation": orientation, "path": "plot.pdf"}),
+            );
+            assert_eq!(out["sheets"], 1);
+            let bytes = std::fs::read(dir.join("plot.pdf")).unwrap();
+            let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap();
+            let pages = pdfcraft_model::pages(&saved);
+            assert_eq!(pages.len(), 1);
+            let (ew, eh) = if orientation == "landscape" { (h, w) } else { (w, h) };
+            let (aw, ah) = pages[0].display_size(&saved);
+            assert!((aw - ew).abs() < 0.02 && (ah - eh).abs() < 0.02, "{name} {orientation}: {aw} x {ah}");
+        }
+    }
+    let before = std::fs::read(dir.join("plot.pdf")).unwrap();
+    let bad = a.call("doc_print", &json!({"doc": doc, "paper": "ARCH Z", "path": "plot.pdf"}));
+    assert!(matches!(bad, Err(ToolError::InvalidArgs(m)) if m.contains("ARCH E1") && m.contains("A0")));
+    assert_eq!(std::fs::read(dir.join("plot.pdf")).unwrap(), before);
+    assert!(a.call("doc_print", &json!({"doc": doc, "paper": "ARCH D", "path": "../escape.pdf"})).is_err());
+}
+
+/// Custom document properties through the tools: set and cleared with doc_set_info under any
+/// name the spec does not use, listed by doc_info apart from the standard entries, bad names
+/// refused without a change.
+#[test]
+fn custom_document_properties_are_set_listed_and_cleared_through_the_tools() {
+    let dir = workdir("custom-info");
+    std::fs::write(dir.join("a.pdf"), fixture(1)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Report" }));
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Project", "value": "Apollo" }));
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Revision", "value": "7" }));
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert_eq!(info["title"], "Report");
+    let mut custom: Vec<(String, String)> =
+        info["custom"].as_array().unwrap().iter().map(|c| (c["name"].as_str().unwrap().into(), c["value"].as_str().unwrap().into())).collect();
+    custom.sort();
+    assert_eq!(custom, [("Project".to_string(), "Apollo".to_string()), ("Revision".to_string(), "7".to_string())], "{}", info["custom"]);
+    assert!(a.call("doc_set_info", &json!({ "doc": doc, "key": "Bad Name", "value": "x" })).is_err(), "a name with a space is refused");
+    assert!(a.call("doc_set_info", &json!({ "doc": doc, "key": "", "value": "x" })).is_err());
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Project", "value": "" }));
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert_eq!(info["custom"].as_array().unwrap().len(), 1, "{}", info["custom"]);
+    assert_eq!(info["custom"][0]["name"], "Revision");
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "custom.pdf" }));
+    let mut b = auto(&dir);
+    let re = ok(&mut b, "doc_open", json!({ "path": "custom.pdf" }))["doc"].as_u64().unwrap();
+    let info = ok(&mut b, "doc_info", json!({ "doc": re }));
+    assert_eq!(info["custom"][0]["value"], "7", "{}", info["custom"]);
+}
+
+/// The custom list `doc_info` shows when a file opens is the one it shows after an unrelated
+/// edit: a name value, a blank or NUL-padded string and a number are judged the same way by the
+/// open-time reader and by the engine's refresh.
+#[test]
+fn custom_document_properties_do_not_change_after_an_unrelated_edit() {
+    let dir = workdir("custom-info-stable");
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>",
+        "<< /Producer (Test) /Project (Apollo) /Dept /RnD /Blank (   ) /Padded (Lab\\000\\000) /Revision 7 /Empty () /Mixed ( \\000Lab\\000 ) /Pad ( \\000 ) >>",
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{i} 0 obj\n{o}\nendobj\n", i = i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R /Info 4 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    std::fs::write(dir.join("custom.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "custom.pdf" }))["doc"].as_u64().unwrap();
+    let opened = ok(&mut a, "doc_info", json!({ "doc": doc }))["custom"].clone();
+    let names: Vec<&str> = opened.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Project", "Padded", "Mixed"], "{opened}");
+    assert_eq!(opened[1]["value"], "Lab", "{opened}");
+    assert_eq!(opened[2]["value"], "Lab", "{opened}");
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Report" }));
+    let edited = ok(&mut a, "doc_info", json!({ "doc": doc }))["custom"].clone();
+    assert_eq!(edited, opened);
+}
+
+/// `batch_plan` says what a batch would write, writes nothing, and its names are the ones the run
+/// actually picks — including the `(2)` it adds rather than replacing a file (REC-B03).
+#[test]
+fn batch_plan_names_the_files_the_run_would_write_and_writes_nothing() {
+    let dir = workdir("batch-plan");
+    let mut a = auto(&dir);
+    std::fs::create_dir_all(dir.join("results")).unwrap();
+    // A file already sitting where the first result would go: the run renames rather than replaces.
+    std::fs::write(dir.join("results/a.pdf"), b"an older result").unwrap();
+    let before = tree(&dir);
+    let plan = ok(
+        &mut a,
+        "batch_plan",
+        json!({
+            "operation": "action",
+            "steps": [{ "step": "set_title", "arg": "Planned" }],
+            "paths": ["a.pdf", "b.pdf", "missing.pdf"],
+            "folder": "results"
+        }),
+    );
+    // Nothing was written, and the folder the plan names was not created for it.
+    assert_eq!(tree(&dir), before, "planning must not touch the filesystem");
+    assert_eq!(plan["dry_run"], true);
+    assert_eq!(plan["writes"], 0);
+    assert_eq!(plan["folder_exists"], true);
+
+    let targets = plan["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 3);
+    // The destination of each is what the run picks, name for name.
+    assert_eq!(file_name(&targets[0]["output"]), "a (2).pdf", "{}", targets[0]);
+    assert_eq!(targets[0]["replaces"], false, "a (2) is a free name, so nothing is replaced");
+    assert_eq!(file_name(&targets[1]["output"]), "b.pdf", "{}", targets[1]);
+    // What the input is: the counts come from the file, not from a guess.
+    assert_eq!(targets[0]["pages"], 3);
+    assert_eq!(targets[1]["pages"], 2);
+    assert_eq!(targets[0]["bytes"], std::fs::metadata(dir.join("a.pdf")).unwrap().len());
+    // A file that is not there is a per-file error, as it would be for the run.
+    assert!(targets[2]["error"].is_string(), "{}", targets[2]);
+    // The steps that would run over each target.
+    assert_eq!(targets[0]["steps"][0]["step"], "set_title");
+    assert_eq!(plan["irreversible"][0], "writes 2 file(s) into the folder; the inputs in paths are not changed");
+    assert_eq!(plan["replaces"].as_array().unwrap().len(), 0);
+
+    // The approve block is the call that carries the plan out, unchanged.
+    let approve = &plan["approve"];
+    assert_eq!(approve["tool"], "action_run");
+    let run = ok(&mut a, "action_run", approve["args"].clone());
+    assert_eq!(file_name(&run["files"][0]["output"]), "a (2).pdf", "{run}");
+    assert!(run["files"][2]["error"].is_string());
+}
+
+/// The plan of a batch that would replace files says so, by name, and says the old file is gone.
+#[test]
+fn batch_plan_reports_the_files_it_would_replace() {
+    let dir = workdir("batch-plan-replace");
+    let mut a = auto(&dir);
+    std::fs::create_dir_all(dir.join("scanned")).unwrap();
+    std::fs::write(dir.join("scanned/a.pdf"), b"last month's copy").unwrap();
+    let plan = ok(&mut a, "batch_plan", json!({ "operation": "ocr", "paths": ["a.pdf", "b.pdf"], "folder": "scanned", "skip_text_pages": false }));
+    let targets = plan["targets"].as_array().unwrap();
+    // OCR writes under the input's own name, so the file that is there is the one replaced.
+    assert_eq!(file_name(&targets[0]["output"]), "a.pdf");
+    assert_eq!(targets[0]["replaces"], true);
+    assert_eq!(targets[0]["replaces_note"], "a file is already there and would be replaced");
+    assert_eq!(targets[1]["replaces"], false);
+    let replaced = plan["replaces"].as_array().unwrap();
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(file_name(&replaced[0]), "a.pdf");
+    let why: Vec<&str> = plan["irreversible"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert!(why.iter().any(|w| w.contains("cannot be brought back")), "{why:?}");
+    assert!(why.iter().any(|w| w.contains("skip_text_pages")), "{why:?}");
+    // What OCR would change, per target.
+    assert_eq!(targets[0]["changes"].as_array().unwrap().len(), 3);
+    assert_eq!(plan["approve"]["tool"], "ocr_recognize_files");
+    // Still nothing written, and the planted file untouched.
+    assert_eq!(std::fs::read(dir.join("scanned/a.pdf")).unwrap(), b"last month's copy");
+}
+
+/// Every way of asking for a plan that cannot be answered is refused before anything is read.
+#[test]
+fn batch_plan_refuses_what_it_cannot_plan() {
+    let dir = workdir("batch-plan-refusals");
+    let mut a = auto(&dir);
+    for (args, why) in [
+        (json!({ "operation": "print", "paths": ["a.pdf"], "folder": "out" }), "unknown operation"),
+        (json!({ "operation": "action", "paths": [], "folder": "out" }), "nothing to plan"),
+        (json!({ "operation": "action", "paths": ["a.pdf"], "folder": "out" }), "give action or steps"),
+        (json!({ "operation": "action", "action": "fly to the moon", "paths": ["a.pdf"], "folder": "out" }), "no built-in action"),
+        (json!({ "operation": "action", "steps": [{ "step": "fly" }], "paths": ["a.pdf"], "folder": "out" }), "unknown step"),
+        (json!({ "operation": "ocr", "paths": ["a.pdf"], "folder": "out", "language": "tlh" }), "unsupported language"),
+    ] {
+        let err = a.call("batch_plan", &args).unwrap_err().to_string();
+        assert!(err.contains(why), "{args}: {err}");
+    }
+    // A path or folder that leaves the root refuses the plan, before anything is read.
+    for args in [
+        json!({ "operation": "action", "action": "add page numbers", "paths": ["../escape.pdf"], "folder": "out" }),
+        json!({ "operation": "action", "action": "add page numbers", "paths": ["a.pdf"], "folder": "../out" }),
+        json!({ "operation": "ocr", "paths": ["../escape.pdf"], "folder": "out" }),
+    ] {
+        let err = a.call("batch_plan", &args).unwrap_err().to_string();
+        assert!(err.contains("outside the allowed directory"), "{args}: {err}");
+    }
+    // A plan is read-only: the model is told so, and no tool call of a plan writes.
+    let def = tools().into_iter().find(|t| t.name == "batch_plan").expect("batch_plan is registered");
+    assert!(def.read_only && !def.destructive);
+    assert!(!dir.join("out").exists(), "a refused plan created the folder it named");
+}
+
+/// Two inputs with the same file name: the plan promises the numbered name the run gives the second
+/// one, rather than claiming both write the same file (REC-B03).
+#[test]
+fn batch_plan_numbers_a_repeated_input_name_as_the_run_does() {
+    let dir = workdir("batch-plan-repeated-name");
+    std::fs::create_dir_all(dir.join("left")).unwrap();
+    std::fs::create_dir_all(dir.join("right")).unwrap();
+    std::fs::write(dir.join("left/report.pdf"), fixture(1)).unwrap();
+    std::fs::write(dir.join("right/report.pdf"), fixture(2)).unwrap();
+    let mut a = auto(&dir);
+    let args = json!({ "operation": "action", "steps": [{ "step": "set_title", "arg": "Same" }], "paths": ["left/report.pdf", "right/report.pdf"], "folder": "out" });
+    let plan = ok(&mut a, "batch_plan", args);
+    let targets = plan["targets"].as_array().unwrap();
+    assert_eq!(file_name(&targets[0]["output"]), "report.pdf");
+    assert_eq!(file_name(&targets[1]["output"]), "report (2).pdf", "the second input gets the free name");
+    assert_eq!((targets[0]["replaces"].as_bool(), targets[1]["replaces"].as_bool()), (Some(false), Some(false)));
+    let run = ok(&mut a, "action_run", plan["approve"]["args"].clone());
+    assert_eq!(file_name(&run["files"][0]["output"]), "report.pdf");
+    assert_eq!(file_name(&run["files"][1]["output"]), "report (2).pdf", "{run}");
+    // The same inputs planned again now find those two names taken, and say so honestly.
+    let again = ok(
+        &mut a,
+        "batch_plan",
+        json!({ "operation": "action", "action": "add page numbers", "paths": ["left/report.pdf", "right/report.pdf"], "folder": "out" }),
+    );
+    let targets = again["targets"].as_array().unwrap();
+    assert_eq!(file_name(&targets[0]["output"]), "report (3).pdf");
+    assert_eq!(file_name(&targets[1]["output"]), "report (4).pdf");
+    assert_eq!(again["replaces"].as_array().unwrap().len(), 0);
+}
+
+/// OCR writes each result under the input's own name, so a repeated input name is a replacement
+/// inside the batch — the plan names the file that the second result would overwrite.
+#[test]
+fn batch_plan_reports_a_repeated_input_name_in_an_ocr_batch() {
+    let dir = workdir("batch-plan-ocr-repeat");
+    std::fs::create_dir_all(dir.join("one")).unwrap();
+    std::fs::create_dir_all(dir.join("two")).unwrap();
+    std::fs::write(dir.join("one/scan.pdf"), fixture(1)).unwrap();
+    std::fs::write(dir.join("two/scan.pdf"), fixture(2)).unwrap();
+    let mut a = auto(&dir);
+    let plan = ok(&mut a, "batch_plan", json!({ "operation": "ocr", "paths": ["one/scan.pdf", "two/scan.pdf"], "folder": "ocr" }));
+    let targets = plan["targets"].as_array().unwrap();
+    assert_eq!(file_name(&targets[0]["output"]), "scan.pdf");
+    assert_eq!(targets[0]["replaces"], false);
+    assert_eq!(targets[1]["replaces"], true);
+    assert!(targets[1]["replaces_note"].as_str().unwrap().contains("earlier input in this batch"), "{}", targets[1]);
+    assert_eq!(plan["replaces"].as_array().unwrap().len(), 1);
+    assert!(!dir.join("ocr").exists());
+}
+
+/// Every argument of `batch_plan` shot with values of the wrong type: each call answers with a
+/// result or a tool error, and never panics (a panic fails the test).
+#[test]
+fn batch_plan_takes_malformed_arguments_without_panicking() {
+    let dir = workdir("batch-plan-hostile");
+    let mut a = auto(&dir);
+    let good = json!({ "operation": "action", "action": "add page numbers", "paths": ["a.pdf"], "folder": "out" });
+    for (key, value) in [
+        ("operation", json!(null)),
+        ("operation", json!([])),
+        ("operation", json!(7)),
+        ("paths", json!(null)),
+        ("paths", json!("a.pdf")),
+        ("paths", json!([null])),
+        ("paths", json!([7])),
+        ("paths", json!({})),
+        ("folder", json!(null)),
+        ("folder", json!([])),
+        ("folder", json!(1)),
+        ("folder", json!("")),
+        ("action", json!(1)),
+        ("action", json!([])),
+        ("steps", json!("set_title")),
+        ("steps", json!([{}])),
+        ("steps", json!([null])),
+        ("steps", json!({ "step": "set_title" })),
+        ("dpi", json!("high")),
+        ("dpi", json!(-5)),
+        ("dpi", json!(1e9)),
+        ("language", json!(1)),
+        ("language", json!("xx")),
+        ("skip_text_pages", json!("yes")),
+    ] {
+        let mut args = good.clone();
+        args[key] = value.clone();
+        // The result does not matter — an error naming the argument is the point; a panic is not.
+        let _ = a.call("batch_plan", &args);
+    }
+    // And a plan that is wrong in every way at once.
+    let _ = a.call("batch_plan", &json!({ "operation": [], "paths": 7, "folder": {}, "steps": "x" }));
+    let _ = a.call("batch_plan", &json!({}));
+    assert!(!dir.join("out").exists(), "a malformed plan created the folder it named");
 }

@@ -1,7 +1,25 @@
 //! Staging files for atomic saves: a new, unpredictably named file beside the target, written and
-//! then renamed over it. Writing, closing, renaming and cleaning up stay with the caller.
+//! then renamed over it. Creation and flushing are shared; writing, closing, renaming and cleaning
+//! up stay with the caller.
 
 use std::path::{Path, PathBuf};
+
+/// Flush the staging file to the disk before it replaces the original. On macOS `sync_all` asks
+/// for a full flush (`F_FULLFSYNC`), which SMB and FUSE volumes, such as a mounted Cryptomator
+/// vault, refuse as unsupported: there a plain `fsync` is the strongest flush the volume offers.
+/// Any other failure still fails the save.
+pub fn sync_staged(f: &std::fs::File, sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use rustix::io::Errno;
+        match sync_all(f) {
+            Err(e) if matches!(Errno::from_io_error(&e), Some(Errno::NOTSUP | Errno::NOTTY)) => Ok(rustix::fs::fsync(f)?),
+            other => other,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    sync_all(f)
+}
 
 /// How many staging names [`create_staging`] tries. A random 64-bit name is only taken if someone
 /// put a file there on purpose, so running out means refusing, not trying harder.
@@ -21,13 +39,28 @@ pub enum StagingName {
 /// a symbolic link even when dangling, a folder), on Windows as everywhere else; such a name is
 /// skipped, never opened, so a file planted at the staging path can't receive or redirect the
 /// write. Pass [`staging_suffixes`]: fixed suffixes are for tests, and a predictable name can be
-/// taken in advance to refuse every save.
+/// taken in advance to refuse every save. `name` must be a single native filename, not a path
+/// or (on Windows) an alternate data stream. Invalid names return `InvalidInput` before any
+/// suffix is consumed or filesystem access is attempted, including before truncating long names.
+/// On Unix the file is created with mode `0o600`, subject to umask, before any bytes are written.
+/// It keeps that restrictive mode if renamed into place; existing target permissions/ACLs are
+/// not copied. Other platforms keep their existing OS-default access-control behavior.
 pub fn create_staging(
     dir: &Path,
     name: &str,
     form: StagingName,
     suffixes: impl IntoIterator<Item = u64>,
 ) -> std::io::Result<(PathBuf, std::fs::File)> {
+    // Check the whole input before truncating it or trying a suffix. A caller must pass a
+    // filename, never a path: the leading dot in the format does not neutralize `../` segments
+    // if a matching directory exists. Use native path rules so legal Unix backslashes remain
+    // usable, but reject alternate data streams on Windows as well as paths.
+    let invalid = name.contains('\0') || Path::new(name).file_name() != Some(std::ffi::OsStr::new(name));
+    #[cfg(windows)]
+    let invalid = invalid || name.contains(':');
+    if invalid {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "a temporary file name must be a filename, not a path"));
+    }
     // At most 128 bytes of the target's name, cut between characters, so the staging name fits
     // the 255-byte (Linux, macOS) and 255-unit (Windows) limits however long that name is.
     let mut stem = String::new();
@@ -42,7 +75,16 @@ pub fn create_staging(
             StagingName::SuffixThenTag => format!(".{stem}.{suffix:016x}.pdfcraft-tmp"),
             StagingName::TagThenSuffix => format!(".{stem}.pdfcraft-{suffix:016x}.tmp"),
         });
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        // Restrict access in the creation syscall, before any document bytes are written.
+        // chmod afterward would leave an exposure window. A stricter umask still applies.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        match options.open(&tmp) {
             Ok(file) => return Ok((tmp, file)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             // Windows reports a folder at the name as "access denied"; it is taken all the same.
@@ -78,6 +120,175 @@ mod tests {
 
     fn file_name(p: &Path) -> String {
         p.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_staged_file_is_flushed_with_the_supplied_operation() {
+        use std::io::Write;
+        let dir = test_dir("flush");
+        let (path, mut file) = create_staging(&dir, "out.pdf", StagingName::SuffixThenTag, [1]).unwrap();
+        file.write_all(b"STAGED").unwrap();
+        let called = std::cell::Cell::new(false);
+        sync_staged(&file, |file| {
+            assert!(!called.replace(true), "flush exactly once");
+            assert_eq!(file.metadata().unwrap().len(), 6);
+            file.sync_all()
+        })
+        .unwrap();
+        assert!(called.get());
+        drop(file);
+        assert_eq!(std::fs::read(path).unwrap(), b"STAGED");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_staged_flush_is_not_ignored() {
+        let dir = test_dir("flush-failure");
+        let (_, file) = create_staging(&dir, "out.pdf", StagingName::SuffixThenTag, [1]).unwrap();
+        let error = sync_staged(&file, |_| Err(std::io::Error::other("disk gone"))).unwrap_err();
+        assert_eq!(error.to_string(), "disk gone");
+        drop(file);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Change umask only in a child shell: it is process-global and must not race other tests.
+    #[cfg(unix)]
+    #[test]
+    fn staging_permissions_are_private_from_creation() {
+        use std::os::unix::fs::PermissionsExt as _;
+        const CHILD_MODE: &str = "PDFCRAFT_STAGING_TEST_MODE";
+        if let Some(mode) = std::env::var_os(CHILD_MODE) {
+            use std::io::Write as _;
+            let expected: u32 = mode.to_str().unwrap().parse().unwrap();
+            let dir = test_dir("private-create");
+            // Keep the fixture usable even when the child umask removes every permission.
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let (path, mut file) = create_staging(&dir, "out.pdf", form, [1]).unwrap();
+                assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, expected, "private before the first byte: {path:?}");
+                file.write_all(b"SECRET").unwrap();
+                assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, expected);
+                drop(file);
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+            // A receipt proves the child ran this test, not merely an empty test filter.
+            std::fs::write(std::env::var_os("PDFCRAFT_STAGING_TEST_RECEIPT").unwrap(), b"verified").unwrap();
+            return;
+        }
+        let dir = test_dir("private-child");
+        let receipt = dir.join("verified");
+        // module_path includes the crate name, which libtest omits from its test names.
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::staging_permissions_are_private_from_creation");
+        for (mask, expected) in [("000", 0o600), ("022", 0o600), ("077", 0o600), ("777", 0)] {
+            let output = std::process::Command::new("/bin/sh")
+                .args(["-c", "umask \"$1\" || exit; shift; exec \"$@\"", "pdfcraft-staging-test", mask])
+                .arg(std::env::current_exe().unwrap())
+                .args(["--exact", &test, "--nocapture"])
+                .env(CHILD_MODE, expected.to_string())
+                .env("PDFCRAFT_STAGING_TEST_RECEIPT", &receipt)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "umask {mask}: {}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            assert!(receipt.is_file(), "the child must execute the requested test: umask {mask}");
+            std::fs::remove_file(&receipt).unwrap();
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_staging_does_not_change_a_colliding_files_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = test_dir("private-collision");
+        for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+            let (planted, file) = create_staging(&dir, "out.pdf", form, [1]).unwrap();
+            drop(file);
+            std::fs::write(&planted, b"PLANTED").unwrap();
+            std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let (path, file) = create_staging(&dir, "out.pdf", form, [1, 2]).unwrap();
+            assert_ne!(path, planted);
+            assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+            drop(file);
+            assert_eq!(std::fs::read(&planted).unwrap(), b"PLANTED");
+            assert_eq!(std::fs::metadata(&planted).unwrap().permissions().mode() & 0o777, 0o644);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_staging_name_cannot_traverse_out_of_its_directory() {
+        let root = test_dir("traversal");
+        let dir = root.join("selected");
+        // The leading dot added by the staging format used to turn this into a traversable
+        // directory: selected/.escape/../../outside.pdf.<suffix>.pdfcraft-tmp.
+        std::fs::create_dir_all(dir.join(".escape")).unwrap();
+        let original = root.join("original.pdf");
+        std::fs::write(&original, b"ORIGINAL").unwrap();
+        for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+            let error = create_staging(&dir, "escape/../../outside.pdf", form, [1]).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        }
+        assert_eq!(std::fs::read(&original).unwrap(), b"ORIGINAL");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2, "nothing staged beside the selected directory");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "nothing staged inside it either");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_names_are_rejected_before_using_a_suffix_or_touching_the_filesystem() {
+        let dir = test_dir("invalid");
+        let names = ["", ".", "..", "../out.pdf", "nested/out.pdf", "out.pdf/", "/out.pdf", "nested/../out.pdf", "out.pdf/.", "out\0.pdf"];
+        for name in names {
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let suffixes = std::iter::from_fn(|| panic!("an invalid name consumed a suffix"));
+                let error = create_staging(&dir.join("missing"), name, form, suffixes).unwrap_err();
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{name:?}");
+            }
+        }
+        // Validation must precede truncation: an invalid path must not become a valid prefix.
+        let long_path = format!("{}/out.pdf", "x".repeat(200));
+        let error = create_staging(&dir, &long_path, StagingName::TagThenSuffix, [1]).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_and_alternate_streams_are_not_staging_names() {
+        let dir = test_dir("windows-invalid");
+        for name in [r"..\out.pdf", r"nested\out.pdf", r"C:out.pdf", r"C:\out.pdf", r"\\server\share\out.pdf", "out.pdf:payload"] {
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let error = create_staging(&dir, name, form, [1]).unwrap_err();
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{name:?}");
+            }
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ordinary_native_filenames_still_stage_beside_the_target() {
+        use std::io::Write;
+        let dir = test_dir("valid");
+        for name in ["report.pdf", "revision..v2.pdf", ".private.pdf", "..not-parent.pdf", "tender 2026.pdf", "مناقصة.pdf"] {
+            for form in [StagingName::SuffixThenTag, StagingName::TagThenSuffix] {
+                let (path, mut file) = create_staging(&dir, name, form, [1]).unwrap();
+                assert_eq!(path.parent(), Some(dir.as_path()));
+                file.write_all(b"STAGED").unwrap();
+                drop(file);
+                assert_eq!(std::fs::read(&path).unwrap(), b"STAGED");
+            }
+        }
+        #[cfg(unix)]
+        {
+            // A backslash is a legal filename character on Unix, not a path separator.
+            let (path, file) = create_staging(&dir, r"a\b.pdf", StagingName::TagThenSuffix, [1]).unwrap();
+            drop(file);
+            assert_eq!(path.parent(), Some(dir.as_path()));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// The callers' tests plant files at these exact names; if a name changed, those tests would

@@ -23,7 +23,6 @@ pub mod links;
 pub mod ocr;
 pub mod optimizer;
 pub mod signature_image;
-mod upright_image;
 pub mod xfa;
 
 pub use signature_image::{ImageSignaturePreview, SignatureImage};
@@ -227,7 +226,7 @@ pub struct Document {
     pub dirty: bool,
     /// Bumped on every change to the working file (edit, undo, redo, save); autosave compares it.
     generation: u64,
-    /// The generation last handed out by `autosave_snapshots`.
+    /// The generation last acknowledged as successfully persisted for recovery.
     snapshot_generation: u64,
     /// Why the document cannot be edited (e.g. encryption), if so.
     pub read_only_reason: Option<String>,
@@ -268,6 +267,11 @@ impl Document {
     /// PDF Optimizer ▸ Audit space usage.
     pub fn audit_space(&self) -> Vec<optimize::SpaceUse> {
         self.editor.as_ref().map(|e| optimize::audit_space(&e.cos, self.bytes.len() as u64)).unwrap_or_default()
+    }
+
+    /// The custom document properties as they are now (name, text), Document Properties ▸ Custom.
+    pub fn custom_info(&self) -> Vec<(String, String)> {
+        self.editor.as_ref().map(|e| pdfcraft_organize::custom_info(&e.cos)).unwrap_or_default()
     }
 
     /// Edit a PDF: the images `page` draws (0-based).
@@ -541,6 +545,12 @@ fn is_placeholder_title(title: &str) -> bool {
     address || t == "untitled"
 }
 
+/// The reader shows the same pages in `a` and `b`: count, displayed size and rotation.
+fn same_pages(a: &[pdfcraft_render::PageInfo], b: &[pdfcraft_render::PageInfo]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| (x.width - y.width).abs() < 0.01 && (x.height - y.height).abs() < 0.01 && x.rotation == y.rotation)
+}
+
 /// What is displayed: the working file, plus (in memory only, never saved) the appearances
 /// PdfCraft draws for comments that have none ([`pdfcraft_annot::with_missing_appearances`]).
 /// The working file is unchanged, and so is everything that reads it (saving, signatures, …).
@@ -637,6 +647,8 @@ fn outline_rows(items: &[pdfcraft_render::OutlineItem]) -> Vec<BookmarkRow> {
 /// A document's working file captured for crash recovery.
 #[derive(Clone, Debug)]
 pub struct RecoverySnapshot {
+    // An opaque revision token: callers must acknowledge the snapshot they actually stored.
+    generation: u64,
     pub doc: DocId,
     pub name: String,
     pub path: Option<String>,
@@ -794,14 +806,21 @@ pub enum Edit {
         pages: Vec<usize>,
         to: usize,
     },
+    /// `pages` reversed among the positions they occupy.
+    ReversePages {
+        pages: Vec<usize>,
+    },
     InsertBlankPage {
         at: usize,
         width: f64,
         height: f64,
     },
     /// Copies of `pages` inserted after the last of them.
+    /// Copies of `pages` inserted at `at` (an index in the page order as it is now), or after the
+    /// last of them when `at` is `None`.
     DuplicatePages {
         pages: Vec<usize>,
+        at: Option<usize>,
     },
     /// Replace Pages: the content of `pages` is replaced by `src_pages` of another PDF; the
     /// pages' links, comments and bookmarks stay.
@@ -1218,8 +1237,9 @@ impl Edit {
             Edit::RotatePages { pages, .. } => plural("Rotate page", pages.len()),
             Edit::DeletePages { pages } => plural("Delete page", pages.len()),
             Edit::MovePages { pages, .. } => plural("Move page", pages.len()),
+            Edit::ReversePages { .. } => "Reverse pages".into(),
             Edit::InsertBlankPage { .. } => "Insert blank page".into(),
-            Edit::DuplicatePages { pages } => plural("Duplicate page", pages.len()),
+            Edit::DuplicatePages { pages, .. } => plural("Duplicate page", pages.len()),
             Edit::ReplacePages { pages, .. } => plural("Replace page", pages.len()),
             Edit::SetPageBox { pages, which: PageBox::Crop, .. } => plural("Crop page", pages.len()),
             Edit::SetPageBox { .. } => "Set page boxes".into(),
@@ -1355,6 +1375,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         Edit::RotatePages { .. }
         | Edit::DeletePages { .. }
         | Edit::MovePages { .. }
+        | Edit::ReversePages { .. }
         | Edit::InsertBlankPage { .. }
         | Edit::DuplicatePages { .. }
         | Edit::ReplacePages { .. }
@@ -1549,11 +1570,12 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::RotatePages { pages, degrees } => pdfcraft_organize::rotate_pages(doc, pages, *degrees)?,
         Edit::DeletePages { pages } => pdfcraft_organize::delete_pages(doc, pages)?,
         Edit::MovePages { pages, to } => pdfcraft_organize::move_pages(doc, pages, *to)?,
+        Edit::ReversePages { pages } => pdfcraft_organize::reverse_pages(doc, pages)?,
         Edit::InsertBlankPage { at, width, height } => {
             pdfcraft_organize::insert_blank_page(doc, *at, *width, *height)?;
         }
         Edit::SetInfo { key, value } => pdfcraft_organize::set_info(doc, key, value)?,
-        Edit::DuplicatePages { pages } => pdfcraft_organize::duplicate_pages(doc, pages)?,
+        Edit::DuplicatePages { pages, at } => pdfcraft_organize::duplicate_pages(doc, pages, *at)?,
         Edit::ReplacePages { pages, name, bytes, src_pages } => {
             let src = open_source(name, bytes)?;
             pdfcraft_organize::replace_pages(doc, pages, &src, src_pages)?;
@@ -2346,6 +2368,31 @@ impl Session {
             },
             (_, cos) => (bytes, info, cos),
         };
+        // The catalog leads to no page, but the reader found pages by scanning: gather the page
+        // objects into a page tree as one more revision, or page edits address none of them
+        // (#1656). Kept only when the reader then shows the same pages, and never on a signed
+        // document, where writing the repair could rewrite the file under its signatures.
+        let (bytes, info, cos) = match cos {
+            Ok(Ok(cos)) if !info.pages.is_empty() && pdfcraft_organize::page_count(&cos).unwrap_or(0) == 0 => {
+                let mut work = cos.clone();
+                let signed = || pdfcraft_sign::pdf::list(&cos, &bytes, &self.trust).iter().any(|s| s.signed);
+                let rebuilt = match pdfcraft_organize::recover_page_tree(&mut work) {
+                    Ok(n) if n > 0 && !signed() => rebase(&work).ok().filter(|(_, i, _)| same_pages(&i.pages, &info.pages)),
+                    _ => None,
+                };
+                match rebuilt {
+                    Some((b, i, mut c)) => {
+                        for line in cos.repair_log() {
+                            c.note_repair(line.clone());
+                        }
+                        c.note_repair(format!("the page tree is missing; its {} pages were found by scanning the file", i.pages.len()));
+                        (b, i, Ok(Ok(c)))
+                    }
+                    None => (bytes, info, Ok(Ok(cos))),
+                }
+            }
+            cos => (bytes, info, cos),
+        };
         // XFA notes survive the document being re-read after edits.
         let xfa_warnings: Vec<String> = if info.xfa.is_some() { info.warnings.clone() } else { Vec::new() };
         let id = self.push_document(name, path, bytes, info, cos, render_password, password, xfa)?;
@@ -2519,8 +2566,9 @@ impl Session {
         }
         // Signed documents are only ever saved incrementally: an edit that needs a full rewrite
         // (applying redactions, changing security, sanitizing) would invalidate the signatures.
+        // So does any edit to a file rebuilt from object headers: it has no chain to append to.
         let rewrites = |c: &pdfcraft_cos::Document| c.full_save_required() || c.encryption_changed();
-        if signed && rewrites(&next) && !rewrites(&editor.cos) {
+        if signed && ((rewrites(&next) && !rewrites(&editor.cos)) || (next.is_modified() && next.revisions().is_empty())) {
             return Err(EditError::SignedRewrite(edit.label()));
         }
         let previous = std::mem::replace(&mut editor.cos, next);
@@ -2622,6 +2670,7 @@ impl Session {
             doc.info.keywords = info("Keywords");
             doc.info.creator = info("Creator");
             doc.info.producer = info("Producer");
+            doc.info.custom = pdfcraft_organize::custom_info(&editor.cos);
             doc.info.file_size = bytes.len();
             if !doc.signatures.is_empty() {
                 doc.signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
@@ -2856,6 +2905,20 @@ impl Session {
             }
         };
         pdfcraft_print::impose(&cos, settings).map_err(|e| EditError::Print(e.to_string()))
+    }
+
+    /// For each page, whether its text mostly runs bottom-to-top ([`pdfcraft_print::text_reads_up`]);
+    /// only `pages` are read, the others are `false`.
+    pub fn print_text_up(&self, id: DocId, pages: &[usize]) -> Vec<bool> {
+        let Some(doc) = self.get(id) else { return Vec::new() };
+        let cos = match doc.editor.as_ref() {
+            Some(e) => e.cos.clone(),
+            None => match pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()) {
+                Ok(c) => c,
+                Err(_) => return Vec::new(),
+            },
+        };
+        (0..doc.info.pages.len()).map(|i| pages.contains(&i) && pdfcraft_print::text_reads_up(&cos, i)).collect()
     }
 
     /// Rasterize an imposed print-ready PDF's sheets at `dpi` (clamped 72..=600, or capped at 150
@@ -3108,14 +3171,15 @@ impl Session {
         write_full(doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
 
-    /// Documents with unsaved changes made since the last call: their current working file,
-    /// for crash recovery. Encrypted documents stay encrypted in the snapshot.
-    pub fn autosave_snapshots(&mut self) -> Vec<RecoverySnapshot> {
+    /// Documents with unsaved changes not yet acknowledged as persisted for crash recovery.
+    /// Selection does not mark a revision stored: call `acknowledge_autosave` only after the
+    /// whole recovery-store write succeeds. Encrypted documents stay encrypted in the snapshot.
+    pub fn autosave_snapshots(&self) -> Vec<RecoverySnapshot> {
         let mut out = Vec::new();
-        for d in &mut self.docs {
+        for d in &self.docs {
             if d.dirty && d.generation != d.snapshot_generation {
-                d.snapshot_generation = d.generation;
                 out.push(RecoverySnapshot {
+                    generation: d.generation,
                     doc: d.id,
                     name: d.name.clone(),
                     path: d.path.clone(),
@@ -3125,6 +3189,18 @@ impl Session {
             }
         }
         out
+    }
+
+    /// Acknowledge a complete, successful recovery-store write. A stale snapshot cannot mark
+    /// a newer edit persisted, nor regress an already acknowledged revision. This never marks
+    /// the document saved. Returns false for a closed, clean or changed document.
+    pub fn acknowledge_autosave(&mut self, snapshot: &RecoverySnapshot) -> bool {
+        let Some(d) = self.docs.iter_mut().find(|d| d.id == snapshot.doc) else { return false };
+        if !d.dirty || d.generation != snapshot.generation || !Arc::ptr_eq(&d.bytes, &snapshot.bytes) {
+            return false;
+        }
+        d.snapshot_generation = snapshot.generation;
+        true
     }
 
     /// Mark a document opened from a recovery file: it has unsaved changes and belongs at
@@ -3301,7 +3377,7 @@ fn embed_image(
     name: &str,
     bytes: &[u8],
 ) -> Result<(pdfcraft_cos::ObjRef, (f64, f64)), pdfcraft_create::CreateError> {
-    pdfcraft_create::image_xobject(doc, name, &upright_image::upright(bytes))
+    pdfcraft_create::image_xobject(doc, name, bytes)
 }
 
 /// Bring a mark's picture into `doc`: a PDF page as a form XObject, or an image.
@@ -3481,7 +3557,8 @@ pub fn render_imposed_sheets(imposed_pdf: &[u8], dpi: u32, max_dpi: u32, graysca
         if grayscale {
             print::spool::apply_grayscale_rgba(rendered.rgba.bytes_mut());
         }
-        let png = export::encode_image(rendered.width, rendered.height, &rendered.rgba, export::ImageFormat::Png).map_err(EditError::Write)?;
+        let png = export::encode_image(rendered.width, rendered.height, &rendered.rgba, export::ImageFormat::Png, f64::from(effective_dpi))
+            .map_err(EditError::Write)?;
         out.push(print::spool::RenderedSheet { width_pt, height_pt, width_px: rendered.width, height_px: rendered.height, dpi: effective_dpi, png });
     }
     Ok(out)

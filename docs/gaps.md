@@ -1,6 +1,8 @@
 # Where PdfCraft falls short of Acrobat Pro
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (alpha markers removed after the gate was re-judged: no gap blocks alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-25 · **Last updated:** 2026-10-25 · **Change:** B001 adds the owner-directed implementation queue and staging-filename safety; broad gaps and historical readiness estimates remain open.
+
+> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M1: raw-deflate fallback preserves decoding-limit errors in strict and tolerant decoding; M7: content pieces are joined with a space, as hayro, MuPDF and Poppler join them, so a trailing comment hides the start of the next piece the way it will render. Estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 Every known shortfall, one entry each, ranked by what it costs users. This is the work list: agents
 choose from the top unless the owner says otherwise, and prefer these over new P2/P3 checklist
@@ -14,6 +16,10 @@ workflow's partial sub-cases and are the first beta items.
 Hours are Opus 5.5 agent wall-clock hours. "Doc" names the parity document the gap belongs to.
 When a gap closes, delete its entry, note it in the [ROADMAP.md](../ROADMAP.md) progress log and
 update the numbers.
+
+## Owner-directed implementation queue
+
+The 25 October 2026 owner instruction adds the complete research scope to a [live TODO](implementation/TODO.md), ordered basic → advanced → future, with implement/audit/fix/re-audit/test/push/CI. On 26 October the owner authorized basic-stage batch continuation without per-component approval stops; approval is still required before advanced/future work. B001 hardens shared save staging; it does not close a broad gap or change the historical readiness estimates below. Current verification is in [the component record](implementation/progress.toml).
 
 ## Summary
 
@@ -302,6 +308,8 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | M7: content pieces are joined with a space instead of a newline, so a comment at the end of a piece runs on into the next one as the renderer reads it; piece-boundary comment edges are recorded for the writers that must keep them. Estimates unchanged. |
+| 2026-10-18 | minor | M1: raw-deflate fallback preserves decoding-limit errors in strict and tolerant decoding; synthetic filter and COS stream regressions. Estimates unchanged. |
 | 2026-10-10 | minor | Removed the alpha markers: with the cross-app gate rule, gaps 1 and 8 are partial sub-cases, not blockers; stage alpha |
 | 2026-10-10 | minor | Marked the alpha blockers (gap 1 and the Office part of gap 8) after the core-workflow gate put the stage at pre-alpha |
 | 2026-10-10 | major | Created. Ranked 24 gaps from the 2026-10-10 re-measure, the open GitHub issues and the former ROADMAP.md §Where we're lacking and where we're going (renderer, hardening, fidelity, editing, Pro workflows, 1.0 polish), which this file replaces |

@@ -62,6 +62,9 @@ impl NewField {
 pub struct FieldProps {
     pub name: Option<String>,
     pub tooltip: Option<String>,
+    /// Normal push-button label (`/MK /CA`) of one widget (0-based index).
+    /// An empty string clears the label; other widgets and icon layouts are preserved.
+    pub caption: Option<(usize, String)>,
     pub read_only: Option<bool>,
     pub required: Option<bool>,
     pub multiline: Option<bool>,
@@ -655,6 +658,7 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
                 locked: false,
                 hidden: false,
                 rotation: 0,
+                caption: None,
             };
             let ap = appearance::check_box_states(doc, &w, FieldKind::Radio, export);
             doc.update_dict(widget, |d| d.set(b"AP".to_vec(), Object::Dict(ap)))?;
@@ -671,8 +675,17 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
 
 /// Regenerate every widget appearance of a field from its current value and settings.
 pub fn redraw_field(doc: &mut Document, name: &str) -> Result<(), FormError> {
+    redraw_widgets(doc, name, None)
+}
+
+/// As `redraw_field`, but for one widget only: a label edit leaves the other widgets' own
+/// appearances alone.
+fn redraw_widgets(doc: &mut Document, name: &str, only: Option<usize>) -> Result<(), FormError> {
     let f = fields(doc).into_iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?;
-    for w in &f.widgets {
+    for (index, w) in f.widgets.iter().enumerate() {
+        if only.is_some_and(|only| only != index) {
+            continue;
+        }
         let ap = match f.kind {
             FieldKind::Text | FieldKind::Combo | FieldKind::List => {
                 let s = appearance::field_appearance(doc, &f, w, &f.value);
@@ -841,6 +854,15 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
     }
     let all = fields(doc);
     let f = all.iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?.clone();
+    // Refuse a wrong type/index before any other requested property is written.
+    if let Some((wi, _)) = &props.caption {
+        if f.kind != FieldKind::PushButton {
+            return invalid("only push buttons have a caption");
+        }
+        if f.widgets.get(*wi).is_none() {
+            return invalid(format!("{name} has no widget {}", wi.saturating_add(1)));
+        }
+    }
     // Validated before anything is written, so a refused rotation leaves the document unchanged.
     // `Some(Some(rect))`: the widget's axis changes and it gets the swapped rectangle.
     let mut rotated_rect: Option<Option<[f64; 4]>> = None;
@@ -1157,7 +1179,18 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             }
         })?;
     }
-    redraw_field(doc, &new_name)?;
+    if let Some((wi, caption)) = &props.caption
+        && let Some(w) = f.widgets.get(*wi)
+    {
+        // Copy an indirect/shared MK before patching it; colours, icons, rotation and
+        // unknown entries belong to this widget, and other owners keep their old label.
+        let mut mk = doc.get(w.obj).as_dict().and_then(|d| d.get(b"MK").map(|m| doc.resolve(m).as_dict().cloned())).flatten().unwrap_or_default();
+        mk.set(b"CA".to_vec(), PdfString::text(caption));
+        doc.update_dict(w.obj, |d| d.set(b"MK".to_vec(), Object::Dict(mk)))?;
+    }
+    // A label-only edit must not replace another widget's custom appearances.
+    let only = props.caption.as_ref().filter(|_| *props == (FieldProps { caption: props.caption.clone(), ..Default::default() })).map(|(wi, _)| *wi);
+    redraw_widgets(doc, &new_name, only)?;
     if props.calculate.is_some() {
         crate::recalculate(doc)?;
     }

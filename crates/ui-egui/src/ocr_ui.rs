@@ -36,13 +36,13 @@ impl Default for OcrDraft {
     }
 }
 
-/// Progress of a run: pages done, total, the result once finished, and a cancel request.
+/// Progress of a run: pages done, the total, and the result once finished. Stopping goes through
+/// the job centre's [`crate::jobs::Cancel`], shared with the worker.
 #[derive(Default)]
 pub struct OcrProgress {
     pub done: usize,
     pub total: usize,
     pub result: Option<Result<Vec<OcrPage>, String>>,
-    pub cancel: bool,
 }
 
 /// Recognize text in multiple files: files done, total, and the summary once finished.
@@ -53,9 +53,18 @@ pub struct BatchProgress {
     pub message: Option<String>,
 }
 
+/// A run over several files: its progress and its row in the job centre.
+#[derive(Clone)]
+pub struct OcrBatchRun {
+    pub progress: Arc<Mutex<BatchProgress>>,
+    pub job: crate::jobs::JobId,
+}
+
 pub struct OcrRun {
     pub doc: DocId,
     pub progress: Arc<Mutex<OcrProgress>>,
+    /// The job's row in the centre, so the card and the control channel can see and stop it.
+    pub job: crate::jobs::JobId,
 }
 
 pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (bool, bool) {
@@ -154,6 +163,8 @@ impl PdfCraftApp {
         };
         let settings = OcrSettings { dpi: d.dpi as f32, language: d.language.clone(), ..Default::default() };
         let Some(job) = self.session.ocr_job(id, &pages, settings) else { return };
+        // Registered before the worker starts, so the card shows the job from this frame on.
+        let (job_id, cancel) = self.jobs.begin(crate::jobs::Kind::Recognize, tl!("Recognize text").to_string(), job.pages.len());
         let progress = Arc::new(Mutex::new(OcrProgress { total: job.pages.len(), ..Default::default() }));
         let p = progress.clone();
         let work = move || {
@@ -162,7 +173,8 @@ impl PdfCraftApp {
                     let Ok(mut s) = p.lock() else { return false };
                     s.done = done;
                     s.total = total;
-                    !s.cancel
+                    // Checked between pages: the page in hand finishes, the rest do not start.
+                    !cancel.is_cancelled()
                 })
             });
             if let Ok(mut s) = p.lock() {
@@ -177,7 +189,7 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.ocr_run = Some(OcrRun { doc: id, progress });
+        self.ocr_run = Some(OcrRun { doc: id, progress, job: job_id });
         self.poll_ocr();
     }
 
@@ -209,46 +221,49 @@ impl PdfCraftApp {
             self.notify_tr("Text recognition is already running");
             return;
         }
+        let (job, cancel) = self.jobs.begin(crate::jobs::Kind::RecognizeFiles, tl!("Recognize Text in Files").to_string(), files.len());
         let progress = Arc::new(Mutex::new(BatchProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();
         // The summary is written on the worker thread: draw it in the UI's language.
         let lang = crate::i18n::current();
         let work = move || {
             crate::i18n::set_current(lang);
-            let (mut ok, mut words, mut failed) = (0, 0, Vec::new());
-            match pdfcraft_engine::ocr::engine() {
-                Err(e) => failed.push(e),
-                Ok(ocr) => {
-                    for (i, (name, bytes)) in files.into_iter().enumerate() {
-                        if let Ok(mut s) = p.lock() {
-                            s.done = i;
-                        }
-                        let r = pdfcraft_engine::ocr::recognize_file(&name, Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true);
-                        let saved = r.and_then(|r| {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            crate::editing::write_atomically(&dir.join(&name).to_string_lossy(), &r.bytes).map_err(|e| e.to_string())?;
-                            #[cfg(target_arch = "wasm32")]
-                            crate::editing::download(&name, &r.bytes)?;
-                            Ok(r.words())
-                        });
-                        match saved {
-                            Ok(n) => {
-                                ok += 1;
-                                words += n;
-                            }
-                            Err(e) => failed.push(format!("{name}: {}", e)),
-                        }
+            let mut words = 0;
+            let total = files.len();
+            let engine = pdfcraft_engine::ocr::engine();
+            let outcome = crate::jobs::run_batch(
+                &cancel,
+                files,
+                |done| {
+                    if let Ok(mut s) = p.lock() {
+                        s.done = done;
                     }
-                }
-            }
-            let done = if ok == 1 {
+                },
+                |(name, bytes)| {
+                    let ocr = engine.as_ref().map_err(|e| e.clone())?;
+                    let r = pdfcraft_engine::ocr::recognize_file(&name, Arc::new(bytes), None, settings.clone(), ocr, |_, _| true)?;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::editing::write_atomically(&dir.join(&name).to_string_lossy(), &r.bytes).map_err(|e| format!("{name}: {e}"))?;
+                    #[cfg(target_arch = "wasm32")]
+                    crate::editing::download(&name, &r.bytes).map_err(|e| format!("{name}: {e}"))?;
+                    words += r.words();
+                    Ok::<(), String>(())
+                },
+            );
+            let done = if outcome.done == 1 {
                 crate::i18n::fmt(tl!("Recognized {w} words in 1 file"), &[("w", &words.to_string())])
             } else {
-                crate::i18n::fmt(tl!("Recognized {w} words in {n} files"), &[("w", &words.to_string()), ("n", &ok.to_string())])
+                crate::i18n::fmt(tl!("Recognized {w} words in {n} files"), &[("w", &words.to_string()), ("n", &outcome.done.to_string())])
             };
             let mut msg = done;
-            if !failed.is_empty() {
-                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &failed.join("; "))]));
+            if outcome.cancelled {
+                msg.push_str(&crate::i18n::fmt(
+                    tl!(" (stopped after {done} of {total})"),
+                    &[("done", &outcome.done.to_string()), ("total", &total.to_string())],
+                ));
+            }
+            if !outcome.failed.is_empty() {
+                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &outcome.failed.join("; "))]));
             }
             if let Ok(mut s) = p.lock() {
                 s.done = s.total;
@@ -263,55 +278,56 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.ocr_batch = Some(progress);
+        self.ocr_batch = Some(OcrBatchRun { progress, job });
         self.poll_ocr();
     }
 
-    /// Stop a running recognition (the pages read so far are kept).
+    /// Stop a running recognition, of one document or of a folder of files. The page (or file) in
+    /// hand finishes and is kept; no further one starts.
     pub fn cancel_ocr(&mut self) {
-        if let Some(r) = &self.ocr_run
-            && let Ok(mut s) = r.progress.lock()
-        {
-            s.cancel = true;
+        let single = self.ocr_run.as_ref().map(|r| r.job);
+        let batch = self.ocr_batch.as_ref().map(|b| b.job);
+        for job in single.into_iter().chain(batch) {
+            self.jobs.cancel(job);
         }
     }
 
     /// Show progress; apply the result once the worker is done.
     pub(crate) fn poll_ocr(&mut self) {
         if let Some(b) = self.ocr_batch.clone() {
-            let msg = b.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
+            let msg = b.progress.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
             match msg {
                 Some(Ok(m)) => {
                     self.ocr_batch = None;
+                    self.jobs.finish(b.job);
                     self.notify(m);
                 }
                 Some(Err((done, total))) => {
-                    let m = crate::i18n::fmt(
-                        tl!("Recognizing text… file {d} of {t}"),
+                    let stage = crate::i18n::fmt(
+                        tl!("file {d} of {t}"),
                         &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())],
                     );
-                    if self.toast.as_ref().is_none_or(|t| t.0 != m) {
-                        self.notify(m);
-                    }
+                    self.jobs.stage(b.job, stage, if total == 0 { 0.0 } else { done as f32 / total as f32 });
                     if let Some(ctx) = &self.ctx {
                         ctx.request_repaint_after(std::time::Duration::from_millis(200));
                     }
                 }
-                None => self.ocr_batch = None,
+                None => {
+                    self.ocr_batch = None;
+                    self.jobs.finish(b.job);
+                }
             }
         }
         let Some(run) = self.ocr_run.as_ref() else { return };
-        let (doc, progress) = (run.doc, run.progress.clone());
+        let (doc, progress, job) = (run.doc, run.progress.clone(), run.job);
         let Ok(mut s) = progress.lock() else { return };
         let Some(result) = s.result.take() else {
-            let msg = crate::i18n::fmt(
-                tl!("Recognizing text… page {d} of {t}"),
-                &[("d", &(s.done + 1).min(s.total.max(1)).to_string()), ("t", &s.total.max(1).to_string())],
-            );
+            let stage =
+                crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &(s.done + 1).min(s.total.max(1)).to_string()), ("n", &s.total.max(1).to_string())]);
+            let (done, total) = (s.done, s.total);
             drop(s);
-            if self.toast.as_ref().is_none_or(|t| t.0 != msg) {
-                self.notify(msg);
-            }
+            // The card carries the count; no toast repeats it over other notices.
+            self.jobs.stage(job, stage, if total == 0 { 0.0 } else { done as f32 / total as f32 });
             if let Some(ctx) = &self.ctx {
                 ctx.request_repaint_after(std::time::Duration::from_millis(200));
             }
@@ -319,6 +335,7 @@ impl PdfCraftApp {
         };
         drop(s);
         self.ocr_run = None;
+        self.jobs.finish(job);
         let found = match result {
             Ok(f) => f,
             Err(e) => {

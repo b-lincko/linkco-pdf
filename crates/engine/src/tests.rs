@@ -30,6 +30,50 @@ pub(crate) fn fixture(n: usize) -> Vec<u8> {
     out
 }
 
+/// `fixture(2)` with the catalog pointing at a page tree object the file does not have (#1656).
+fn fixture_without_page_tree() -> Vec<u8> {
+    let bytes = fixture(2);
+    let catalog = b"<< /Type /Catalog /Pages 2 0 R >>";
+    let at = bytes.windows(catalog.len()).position(|w| w == catalog).unwrap();
+    let mut out = bytes.clone();
+    out[at..at + catalog.len()].copy_from_slice(b"<< /Type /Catalog /Pages 9 0 R >>");
+    out
+}
+
+#[test]
+fn a_recovered_page_tree_opens_unmodified_and_edits_the_pages_shown() {
+    let mut s = Session::new();
+    let id = s.open("damaged.pdf", None, Arc::new(fixture_without_page_tree()), None).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.pages.len(), 2);
+    assert!(!doc.editor.as_ref().unwrap().cos.is_modified(), "the repair is a revision of the opened file, not an unsaved edit");
+    assert!(doc.repair_log().iter().any(|l| l.contains("page tree is missing")), "{:?}", doc.repair_log());
+    s.apply(id, Edit::RotatePages { pages: vec![1], degrees: 90 }).unwrap();
+    assert_eq!(s.get(id).unwrap().info.pages.iter().map(|p| p.rotation).collect::<Vec<_>>(), [0, 90]);
+}
+
+#[test]
+fn a_signed_document_rebuilt_from_object_headers_refuses_edits() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("fixture.pdf", None, Arc::new(fixture(2)), None).unwrap();
+    let opts = SignOptions { page: 1, rect: Some([20.0, 20.0, 180.0, 60.0]), ..SignOptions::default() };
+    let signed = s.sign(id, &digital_id, opts).unwrap();
+    s.mark_signed(id, signed, None).unwrap();
+    // A broken startxref: the file opens only by rebuilding from object headers, and any save
+    // of it is a full rewrite.
+    let mut bytes = s.get(id).unwrap().bytes.as_ref().clone();
+    let sx = bytes.windows(10).rposition(|w| w == b"startxref\n").unwrap() + 10;
+    let end = sx + bytes[sx..].iter().position(|b| !b.is_ascii_digit()).unwrap();
+    bytes.splice(sx..end, b"1".iter().copied());
+    let id = s.open("damaged.pdf", None, Arc::new(bytes), None).unwrap();
+    assert!(s.get(id).unwrap().is_signed());
+    assert!(s.get(id).unwrap().editor.as_ref().unwrap().cos.revisions().is_empty(), "the fixture must be rebuilt");
+    assert!(matches!(s.apply(id, rect_comment(0, [80.0, 80.0, 120.0, 120.0])), Err(EditError::SignedRewrite(_))));
+    assert!(!s.get(id).unwrap().dirty);
+}
+
 fn session_with(n: usize) -> (Session, DocId) {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
     let id = s.open("fixture.pdf", None, Arc::new(fixture(n)), None).expect("opens");
@@ -668,7 +712,8 @@ fn autosave_snapshots_only_changed_documents() {
     let snaps = s.autosave_snapshots();
     assert_eq!(snaps.len(), 1);
     assert_eq!(snaps[0].bytes, s.get(id).unwrap().bytes, "the working file");
-    assert!(s.autosave_snapshots().is_empty(), "nothing new since the last snapshot");
+    assert!(s.acknowledge_autosave(&snaps[0]));
+    assert!(s.autosave_snapshots().is_empty(), "nothing new since the persisted snapshot");
     s.undo(id).unwrap();
     assert_eq!(s.autosave_snapshots().len(), 1, "undo is a change too");
     let saved = s.save_bytes(id).unwrap();
@@ -684,9 +729,60 @@ fn autosave_snapshots_a_new_unsaved_document_once() {
     assert_eq!(snaps.len(), 1, "the new document is unsaved work");
     assert_eq!(snaps[0].doc, id);
     assert!(snaps.iter().all(|x| x.doc != clean), "the clean document stays out");
-    assert!(s.autosave_snapshots().is_empty(), "nothing new since the last snapshot");
+    assert!(s.acknowledge_autosave(&snaps[0]));
+    assert!(s.autosave_snapshots().is_empty(), "nothing new since the persisted snapshot");
     s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
     assert_eq!(s.autosave_snapshots().len(), 1, "a later edit is snapshotted again");
+}
+
+#[test]
+fn an_unacknowledged_autosave_remains_retryable_without_another_edit() {
+    let (mut s, id) = session_with(2);
+    s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
+    let first = s.autosave_snapshots().remove(0);
+    let retry = s.autosave_snapshots().remove(0);
+    assert_eq!(retry.doc, first.doc);
+    assert_eq!(retry.bytes, first.bytes, "failure must not require another edit to retry");
+    assert!(s.acknowledge_autosave(&retry));
+    assert!(s.autosave_snapshots().is_empty());
+    assert!(s.get(id).unwrap().dirty, "an autosave is not a user save");
+}
+
+#[test]
+fn a_stale_autosave_acknowledgement_cannot_suppress_newer_work() {
+    let (mut s, id) = session_with(2);
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    let old = s.autosave_snapshots().remove(0);
+    s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
+    assert!(!s.acknowledge_autosave(&old));
+    let latest = s.autosave_snapshots().remove(0);
+    assert_ne!(old.bytes, latest.bytes);
+    assert!(s.acknowledge_autosave(&latest));
+    assert!(!s.acknowledge_autosave(&old), "do not regress the persisted revision");
+    assert!(s.autosave_snapshots().is_empty());
+    s.undo(id).unwrap();
+    assert!(!s.acknowledge_autosave(&latest));
+    assert_eq!(s.autosave_snapshots().len(), 1, "undo also needs persistence");
+    let pending = s.autosave_snapshots().remove(0);
+    let saved = s.save_bytes(id).unwrap();
+    s.mark_saved(id, saved, None).unwrap();
+    assert!(!s.acknowledge_autosave(&pending), "a clean document needs no acknowledgement");
+    s.close(id);
+    assert!(!s.acknowledge_autosave(&pending), "a closed document is ignored");
+}
+
+#[test]
+fn autosave_acknowledgements_are_per_document() {
+    let mut s = Session::new();
+    let first = s.open_new("first.pdf", Arc::new(fixture(1))).unwrap();
+    let second = s.open_new("second.pdf", Arc::new(fixture(1))).unwrap();
+    let snapshots = s.autosave_snapshots();
+    assert_eq!(snapshots.len(), 2);
+    let stored = snapshots.iter().find(|snap| snap.doc == first).unwrap();
+    assert!(s.acknowledge_autosave(stored));
+    let pending = s.autosave_snapshots();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].doc, second);
 }
 
 #[test]
@@ -1206,7 +1302,7 @@ fn crop_and_duplicate_pages_show_in_the_viewer() {
     assert_eq!(d.info.pages[0].crop, [10.0, 20.0, 170.0, 260.0]);
     assert_eq!((d.info.pages[0].width, d.info.pages[0].height), (160.0, 240.0), "the viewer shows the cropped size");
     assert_eq!(d.page_boxes()[1][1], [0.0, 0.0, 200.0, 300.0]);
-    s.apply(id, Edit::DuplicatePages { pages: vec![1] }).unwrap();
+    s.apply(id, Edit::DuplicatePages { pages: vec![1], at: None }).unwrap();
     assert_eq!(page_texts(&s, id), ["Page 1", "Page 2", "Page 2"]);
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Duplicate page"));
 }
@@ -1460,6 +1556,48 @@ fn pages_export_as_png_jpeg_and_tiff() {
     let tif = ex.image(0, 144.0, ImageFormat::Tiff).unwrap();
     let decoded = image::load_from_memory_with_format(&tif, image::ImageFormat::Tiff).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (400, 600));
+    let mut tags = tiff::decoder::Decoder::new(std::io::Cursor::new(&tif)).unwrap();
+    let compression = tags.get_tag_u32(tiff::tags::Tag::Compression).unwrap();
+    let predictor = tags.get_tag_u32(tiff::tags::Tag::Predictor).unwrap();
+    assert_eq!((compression, predictor), (5, 1), "LZW, without a predictor");
+}
+
+/// A TIFF's resolution unit (2 = inch) and its horizontal and vertical resolution.
+fn tiff_resolution(bytes: &[u8]) -> (u32, f64, f64) {
+    use tiff::{decoder::ifd::Value, tags::Tag};
+    let mut d = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut res = |tag| match d.get_tag(tag).unwrap() {
+        Value::Rational(n, d) => f64::from(n) / f64::from(d),
+        v => panic!("{tag:?} is {v:?}"),
+    };
+    let (x, y) = (res(Tag::XResolution), res(Tag::YResolution));
+    (d.get_tag_u32(Tag::ResolutionUnit).unwrap(), x, y)
+}
+
+/// An exported TIFF or JPEG says the resolution it was drawn at, so other programs show and print it
+/// at the page's size. A TIFF said 1 × 1 with no unit, and a JPEG said nothing.
+#[test]
+fn exported_pages_record_the_resolution_they_were_drawn_at() {
+    use crate::export::{Exporter, ImageFormat};
+    let (s, id) = session_with(1);
+    let mut ex = Exporter::new(s.get(id).unwrap());
+    assert_eq!(tiff_resolution(&ex.image(0, 144.0, ImageFormat::Tiff).unwrap()), (2, 144.0, 144.0));
+    let jpg = ex.image(0, 144.0, ImageFormat::Jpeg { quality: 85 }).unwrap();
+    assert_eq!(&jpg[6..11], b"JFIF\0");
+    assert_eq!(jpg[13..18], [1, 0, 144, 0, 144], "JFIF density in dots per inch");
+    // pHYs counts pixels per metre: 72 dpi would read back as 72.009, and a page made from the PNG
+    // (doc_create from images) would come out 0.01% small.
+    let png = ex.image(0, 72.0, ImageFormat::Png).unwrap();
+    assert!(png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap().info().pixel_dims.is_none(), "a PNG states no resolution");
+
+    // A page too large for the renderer at the asked resolution says the one it was drawn at.
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let bytes = s.create_blank(14_400.0, 792.0, 1).unwrap();
+    let id = s.open("wide.pdf", None, bytes, None).unwrap();
+    let mut ex = Exporter::new(s.get(id).unwrap());
+    let used = ex.dpi_used(0, 600.0);
+    let (unit, x, y) = tiff_resolution(&ex.image(0, 600.0, ImageFormat::Tiff).unwrap());
+    assert!(unit == 2 && (x - used).abs() < 0.01 && (y - used).abs() < 0.01, "{x} × {y}, drawn at {used}");
 }
 
 #[test]
@@ -1984,6 +2122,63 @@ fn detecting_fields_on_a_printed_form() {
     assert!(s.detect_fields(id, &[]).is_empty(), "nothing left to detect");
 }
 
+/// A one-page file that draws `body` with /F1 available, the way a printed form is built.
+fn page_drawing(body: &str) -> Vec<u8> {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()).into_bytes(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+#[test]
+fn detecting_comb_boxes_adds_one_comb_field_per_row() {
+    // The rows from #1887: five 18 x 22 cells and ten 16 x 20 cells, each a stroked `re`.
+    let mut body = String::from("BT /F1 10 Tf 40 205 Td (Postcode A) Tj ET BT /F1 10 Tf 40 105 Td (Postcode B) Tj ET\n");
+    for i in 0..5 {
+        body.push_str(&format!("{} 200 18 22 re S\n", 120 + i * 18));
+    }
+    for i in 0..10 {
+        body.push_str(&format!("{} 100 16 20 re S\n", 120 + i * 16));
+    }
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("comb.pdf", None, Arc::new(page_drawing(&body)), None).unwrap();
+    let found: Vec<(String, pdfcraft_forms::detect::Kind)> = s.detect_fields(id, &[]).into_iter().map(|(_, c)| (c.name, c.kind)).collect();
+    assert_eq!(
+        found,
+        [
+            ("Postcode A".to_string(), pdfcraft_forms::detect::Kind::Comb { cells: 5 }),
+            ("Postcode B".to_string(), pdfcraft_forms::detect::Kind::Comb { cells: 10 })
+        ]
+    );
+    s.auto_detect_fields(id, &[]).unwrap();
+    let d = s.get(id).unwrap();
+    let combs: Vec<(&str, pdfcraft_forms::FieldKind, bool, Option<usize>)> =
+        d.form.iter().map(|f| (f.name.as_str(), f.kind, f.has(pdfcraft_forms::flags::COMB), f.max_len)).collect();
+    assert_eq!(
+        combs,
+        [("Postcode A", pdfcraft_forms::FieldKind::Text, true, Some(5)), ("Postcode B", pdfcraft_forms::FieldKind::Text, true, Some(10))]
+    );
+    assert_eq!(d.can_undo(), Some("Detect form fields"));
+}
+
 #[test]
 fn comparing_two_versions_of_a_document() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
@@ -2048,6 +2243,24 @@ fn actions_run_their_steps_on_files() {
     assert_eq!(d.info.title.as_deref(), Some("Q3"));
     assert!(page_texts(&s2, id)[0].contains("DRAFT"));
     assert!(actions::run_on(&custom, "bad.pdf", Arc::new(b"nope".to_vec()), |_, _| {}).is_err());
+}
+
+/// A removal step that fails (here: a signed file can't be rewritten without its hidden data)
+/// fails the action, so the file is not passed on as cleaned.
+#[test]
+fn actions_fail_when_hidden_information_could_not_be_removed() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("fixture.pdf", None, Arc::new(fixture(2)), None).unwrap();
+    s.apply(id, Edit::SetInfo { key: "Author".into(), value: "Private Name".into() }).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    s.mark_saved(id, saved, None).unwrap();
+    let signed = s.sign(id, &digital_id, SignOptions { page: 1, ..SignOptions::default() }).unwrap();
+    let built = actions::builtin();
+    let sanitize = built.iter().find(|a| a.name == "Sanitize Documents").unwrap();
+    let e = actions::run_on(sanitize, "signed.pdf", signed, |_, _| {}).map(|r| r.log).unwrap_err();
+    assert!(e.starts_with("Sanitize document:"), "{e}");
 }
 
 #[test]
@@ -2700,6 +2913,7 @@ fn print_sheets_render_at_target_dpi_and_preserve_paper_geometry() {
         orientation: print::Orientation::Portrait,
         layout: print::Layout::Size(print::SizeMode::Fit),
         content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
     };
     let imposed_letter = s.print_pdf(id, &letter_settings).unwrap();
     let sheets_300 = s.render_print_sheets(id, &imposed_letter, 300, false).unwrap();
@@ -2715,6 +2929,7 @@ fn print_sheets_render_at_target_dpi_and_preserve_paper_geometry() {
         orientation: print::Orientation::Portrait,
         layout: print::Layout::Size(print::SizeMode::Fit),
         content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
     };
     let imposed_a4 = s.print_pdf(id, &a4_settings).unwrap();
     let sheets_a4 = s.render_print_sheets(id, &imposed_a4, 300, true).unwrap();
@@ -3024,4 +3239,40 @@ fn recovered_user_passwords_reach_the_renderer_byte_for_byte() {
     // PDFDocEncoding bytes: ı = 0x9A, € = 0xA0, Ç = 0xC7.
     assert_eq!(crate::renderer_password(&[0x9A, b'l', 0x9A, b'k', 0xA0]), "ılık€");
     assert_eq!(crate::renderer_password(&[0xC7, b'o', b'k']), "Çok");
+}
+
+/// A 60 x 20 JPEG at 144 x 72 dpi, tagged with EXIF Orientation 6 (shown turned 90 degrees clockwise).
+fn phone_jpeg() -> Vec<u8> {
+    use image::codecs::jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit};
+    let mut jpeg = Vec::new();
+    let mut encoder = JpegEncoder::new(&mut jpeg);
+    encoder.set_pixel_density(PixelDensity { density: (144, 72), unit: PixelDensityUnit::Inches });
+    encoder.encode_image(&image::RgbImage::from_pixel(60, 20, image::Rgb([20, 20, 20]))).unwrap();
+    let mut exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+    exif.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0]);
+    let mut out = jpeg[..2].to_vec();
+    out.extend_from_slice(&[0xff, 0xe1]);
+    out.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&exif);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+#[test]
+fn a_phone_photo_used_as_a_custom_stamp_is_embedded_upright() {
+    let mut session = Session::new();
+    let blank = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open_new("form.pdf", blank).unwrap();
+    // A click places the stamp at its natural size: 30 x 20 pt as stored, 20 x 30 pt upright.
+    // Named "Signature" so `signature_image` finds its picture.
+    let file = MarkFile { name: "photo.jpg".into(), bytes: Arc::new(phone_jpeg()), page: 0 };
+    let stamp = Edit::AddCustomStamp { page: 0, rect: [100.0, 100.0, 100.0, 100.0], name: "Signature".into(), file, author: "Ada".into() };
+    session.apply(id, stamp).unwrap();
+    let cos = &session.get(id).unwrap().editor.as_ref().unwrap().cos;
+    let picture = pdfcraft_annot::signature_image(cos, 0, 0).unwrap().unwrap();
+    let obj = cos.get(picture);
+    let pdfcraft_cos::Object::Stream(s) = &*obj else { panic!() };
+    assert_eq!((s.dict.int(b"Width"), s.dict.int(b"Height")), (Some(20), Some(60)));
+    let rect = pdfcraft_annot::summaries(cos)[0].rect;
+    assert!(((rect[2] - rect[0]) - 20.0).abs() < 0.01 && ((rect[3] - rect[1]) - 30.0).abs() < 0.01, "{rect:?}");
 }

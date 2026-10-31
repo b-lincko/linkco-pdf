@@ -131,32 +131,37 @@ impl McpServer {
                 Ok(json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false, "subscribe": false } },
-                    "serverInfo": { "name": "pdfcraft", "title": "Linkco PDF Editor", "version": env!("CARGO_PKG_VERSION"), "websiteUrl": pdfcraft_engine::links::APP_PAGE },
-                    "instructions": if self.compact { format!("{INSTRUCTIONS}{COMPACT_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() },
+                    "serverInfo": { "name": "pdfcraft", "title": "Linkco PDF Editor", "version": env!("CARGO_PKG_VERSION"), "toolSchemaVersion": crate::TOOL_SCHEMA_VERSION, "websiteUrl": pdfcraft_engine::links::APP_PAGE },
+                    "instructions": self.instructions(),
                 }))
             }
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": self.tool_list() })),
+            "tools/list" => Ok(json!({
+                "tools": self.tool_list(),
+                "_meta": { "schemaVersion": crate::TOOL_SCHEMA_VERSION },
+            })),
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "tools/call needs a tool name".to_string()))?;
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
                 if self.compact && name == TOOL_SEARCH {
                     check_keys(name, &args, &["query", "category", "name"]).map_err(|e| (INVALID_PARAMS, e))?;
-                    return Ok(match search_tools(&args) {
+                    return Ok(match search_tools(&args, self.automation.policy()) {
                         Ok(found) => call_result(vec![Content::Json(found)]),
-                        Err(message) => tool_error(&message),
+                        Err((kind, message)) => tool_error(kind, &message),
                     });
                 }
                 if self.compact && name == TOOL_CALL {
                     check_keys(name, &args, &["name", "arguments"]).map_err(|e| (INVALID_PARAMS, e))?;
                     let (inner, inner_args) = match unwrap_tool_call(&args) {
                         Ok(pair) => pair,
-                        Err(message) => return Ok(tool_error(&message)),
+                        Err(message) => return Ok(tool_error("usage", &message)),
                     };
                     return Ok(match self.automation.call(&inner, &inner_args) {
                         Ok(content) => tool_content(&inner, content),
-                        Err(ToolError::UnknownTool(t)) => tool_error(&format!("unknown tool {t:?}; use tool_search to find the right name")),
-                        Err(e) => tool_error(&e.to_string()),
+                        Err(ToolError::UnknownTool(t)) => {
+                            tool_error("unsupported", &format!("unknown tool {t:?}; use tool_search to find the right name"))
+                        }
+                        Err(e) => tool_error(e.kind(), &e.to_string()),
                     });
                 }
                 if let Some(def) = crate::tools::find(name) {
@@ -171,7 +176,7 @@ impl McpServer {
                 match self.automation.call(name, &args) {
                     Ok(content) => Ok(tool_content(name, content)),
                     Err(ToolError::UnknownTool(t)) => Err((INVALID_PARAMS, format!("unknown tool {t:?}"))),
-                    Err(e) => Ok(tool_error(&e.to_string())),
+                    Err(e) => Ok(tool_error(e.kind(), &e.to_string())),
                 }
             }
             "resources/list" => Ok(json!({ "resources": self.resource_list() })),
@@ -186,15 +191,43 @@ impl McpServer {
 }
 
 impl McpServer {
-    /// What `tools/list` returns: every tool, or in compact mode the core set and the meta tools.
+    /// What the server tells a client about itself: the conventions, the compact note, and — when
+    /// the session is narrower than the default — the profile it runs with, so an agent is not left
+    /// guessing why `tools/list` is short.
+    fn instructions(&self) -> String {
+        let mut text = if self.compact { format!("{INSTRUCTIONS}{COMPACT_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() };
+        text.push_str(policy_note(self.automation.policy().profile()));
+        text
+    }
+
+    /// What `tools/list` returns: every tool this session may run, or in compact mode the core set
+    /// and the meta tools. A tool the profile refuses is not listed — advertising a call that will
+    /// always be refused wastes an agent's turn and teaches it nothing.
     fn tool_list(&self) -> Vec<Value> {
         let all = crate::tools();
+        let policy = self.automation.policy();
         if !self.compact {
-            return all.iter().map(tool_json).collect();
+            return all.iter().filter(|t| policy.allows(t)).map(tool_json).collect();
         }
-        let mut out: Vec<Value> = COMPACT_CORE_TOOLS.iter().filter_map(|n| all.iter().find(|t| t.name == *n)).map(tool_json).collect();
+        let mut out: Vec<Value> =
+            COMPACT_CORE_TOOLS.iter().filter_map(|n| all.iter().find(|t| t.name == *n)).filter(|t| policy.allows(t)).map(tool_json).collect();
         out.extend(meta_tools());
         out
+    }
+}
+
+/// The sentence appended to the instructions when the session is narrower than the default.
+fn policy_note(profile: crate::Profile) -> &'static str {
+    match profile {
+        crate::Profile::Destructive => "",
+        crate::Profile::ReadOnly => {
+            " This server runs with the read-only profile: only tools that change nothing are listed or run, \
+            whatever a document says, and the profile is set where the server was started."
+        }
+        crate::Profile::Project => {
+            " This server runs with the project profile: writes stay inside its root, and a destructive tool \
+            runs only if the server was started with --approve for it. documents cannot approve anything."
+        }
     }
 }
 
@@ -267,24 +300,29 @@ fn check_keys(tool: &str, args: &Value, allowed: &[&str]) -> Result<(), String> 
 }
 
 /// `tool_search`: filter the tool table by query and category, or describe one tool in full.
-fn search_tools(args: &Value) -> Result<Value, String> {
+///
+/// A failure is its stable kind and its message, so a caller can tell a misspelled argument
+/// (`usage`) from a tool it may not see (`refused`) from one that does not exist (`unsupported`).
+fn search_tools(args: &Value, policy: &crate::Policy) -> Result<Value, (&'static str, String)> {
+    let usage = |message: String| ("usage", message);
     if !(args.is_object() || args.is_null()) {
-        return Err(format!("{TOOL_SEARCH} takes an object with optional query, category and name"));
+        return Err(usage(format!("{TOOL_SEARCH} takes an object with optional query, category and name")));
     }
-    check_keys(TOOL_SEARCH, args, &["query", "category", "name"])?;
+    check_keys(TOOL_SEARCH, args, &["query", "category", "name"]).map_err(usage)?;
     let text = |key: &str| match args.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) => Ok(Some(s.trim())),
-        Some(_) => Err(format!("{TOOL_SEARCH}: {key} must be a string")),
+        Some(_) => Err(usage(format!("{TOOL_SEARCH}: {key} must be a string"))),
     };
     let (query, category, name) = (text("query")?, text("category")?, text("name")?);
-    let all = crate::tools();
+    // Only the tools this session could actually run: a search that offered a refused tool would
+    // send the agent off to call something that cannot work.
+    let all: Vec<crate::ToolDef> = crate::tools().into_iter().filter(|t| policy.allows(t)).collect();
     if let Some(name) = name {
-        let t =
-            all.iter().find(|t| t.name == name).ok_or_else(|| format!("unknown tool {name:?}; call {TOOL_SEARCH} without name to list the tools"))?;
+        let t = all.iter().find(|t| t.name == name).ok_or_else(|| refused_or_unknown(name, policy))?;
         return Ok(json!({ "tool": {
             "name": t.name, "title": t.title, "category": category_of(t.name), "description": t.description,
-            "read_only": t.read_only, "destructive": t.destructive, "input_schema": t.input_schema,
+            "read_only": t.read_only, "destructive": t.destructive, "input_schema": crate::schema::schema_with_example(t),
         } }));
     }
     let category = category.map(|c| c.trim_end_matches('_').to_lowercase()).filter(|c| !c.is_empty());
@@ -302,6 +340,23 @@ fn search_tools(args: &Value) -> Result<Value, String> {
         .map(|t| json!({ "name": t.name, "category": category_of(t.name), "description": first_sentence(t.description), "read_only": t.read_only }))
         .collect();
     Ok(json!({ "count": found.len(), "tools": found, "categories": categories }))
+}
+
+/// Why `tool_search` has no `name`: either it is not a tool at all, or the profile refuses it.
+/// The kind comes with the message so the caller gets `refused` or `unsupported` rather than one
+/// opaque failure for both.
+fn refused_or_unknown(name: &str, policy: &crate::Policy) -> (&'static str, String) {
+    match crate::tools::find(name) {
+        Some(def) => (
+            "refused",
+            format!(
+                "the {} profile refuses {name} ({}); nothing in a document can widen it",
+                policy.profile().name(),
+                if def.destructive { "it can overwrite a file or remove content" } else { "it writes a file" }
+            ),
+        ),
+        None => ("unsupported", format!("unknown tool {name:?}; call {TOOL_SEARCH} without name to list the tools")),
+    }
 }
 
 /// `tool_call`: the tool name and its arguments from the meta tool's own arguments.
@@ -325,7 +380,7 @@ fn unwrap_tool_call(args: &Value) -> Result<(String, Value), String> {
 
 /// Last-resort boundary shared by every tools/call route, including compact dispatch.
 fn guarded_tool(f: impl FnOnce() -> Result<Value, (i64, String)>) -> Result<Value, (i64, String)> {
-    pdfcraft_engine::guard(f).unwrap_or_else(|message| Ok(tool_error(&format!("internal error: {message}"))))
+    pdfcraft_engine::guard(f).unwrap_or_else(|message| Ok(tool_error("failed", &format!("internal error: {message}"))))
 }
 
 fn tool_content(name: &str, content: Vec<Content>) -> Value {
@@ -341,9 +396,16 @@ fn tool_content(name: &str, content: Vec<Content>) -> Value {
     result
 }
 
-/// A failed tool call, as the agent should read it.
-fn tool_error(message: &str) -> Value {
-    json!({ "content": [{ "type": "text", "text": message }], "isError": true })
+/// A failed tool call, as the agent should read it: the message as text, and the same failure as
+/// `structuredContent.error` with its stable kind, so a client can branch on the kind rather than
+/// on the words. `kind` is one of `usage`, `unsupported`, `refused`, `failed` — the vocabulary the
+/// command line uses for its exit codes (see `docs/api-stability.md`).
+fn tool_error(kind: &str, message: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": message }],
+        "structuredContent": { "error": { "kind": kind, "message": message } },
+        "isError": true,
+    })
 }
 
 /// The resource behind a `pdfcraft://` URI.
@@ -478,7 +540,9 @@ fn tool_json(t: &crate::ToolDef) -> Value {
         "name": t.name,
         "title": t.title,
         "description": t.description,
-        "inputSchema": t.input_schema,
+        // The tool's schema, with the worked example a document-changing tool carries (REC-B01),
+        // so an agent can copy a call that is known to work.
+        "inputSchema": crate::schema::schema_with_example(t),
         "annotations": { "title": t.title, "readOnlyHint": t.read_only, "destructiveHint": t.destructive, "idempotentHint": t.read_only || matches!(t.name, "doc_save" | "doc_optimize" | "doc_export_data" | "measure_export" | "doc_export_images" | "doc_export_office" | "doc_export_all_images" | "doc_export_text" | "image_save"), "openWorldHint": false },
     })
 }

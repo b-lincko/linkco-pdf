@@ -336,6 +336,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("page.insert_blank", "Insert blank page", PAGES, None, Assembly, "file-plus"),
     c("page.rotate_dialog", "Rotate pages…", PAGES, None, Assembly, "rotate-cw"),
     c("page.duplicate", "Duplicate pages", PAGES, None, Assembly, "copy-plus"),
+    c("page.reverse", "Reverse pages", PAGES, None, Assembly, "arrow-up-down"),
     c("page.crop", "Crop pages", PAGES, None, Assembly, "crop"),
     c("page.boxes", "Set page boxes…", PAGES, None, Assembly, "square-dashed-mouse-pointer"),
     c("page.insert", "Insert pages from file…", PAGES, None, Assembly, "file-input"),
@@ -412,6 +413,30 @@ mod tests {
                     if i.availability == crate::catalog::Availability::Ready {
                         assert!(command(i.command).is_some(), "catalogue item {} ({}) is Ready but not registered", i.label, i.command);
                     }
+                }
+            }
+        }
+    }
+
+    /// The other half of [`every_ready_catalogue_item_is_a_registered_command`]: a command in
+    /// the registry is reachable from the palette and from automation, so the catalogue must not
+    /// announce it as planned. Registering a command early and calling it "Planned" is how a
+    /// working tool ends up hidden behind a milestone note.
+    #[test]
+    fn a_tool_that_is_not_ready_is_not_a_command_that_already_runs() {
+        for g in crate::catalog::TOOL_GROUPS {
+            for s in g.sections {
+                for i in s.items {
+                    if i.availability == crate::catalog::Availability::Ready {
+                        continue;
+                    }
+                    assert!(
+                        command(i.command).is_none(),
+                        "catalogue item {} ({}) is not Ready, but {} is a registered command",
+                        i.label,
+                        i.command,
+                        i.command
+                    );
                 }
             }
         }

@@ -12,6 +12,8 @@ const INFO_KEYS: [&str; 4] = ["Title", "Author", "Subject", "Keywords"];
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     password(app, ctx);
     save_prompt(app, ctx);
+    #[cfg(not(target_arch = "wasm32"))]
+    conflict_prompt(app, ctx);
     link_prompt(app, ctx);
     crate::updates::dialog(app, ctx);
     let Some(dialog) = app.dialog else {
@@ -780,6 +782,9 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     close = true;
                     return;
                 };
+                if app.print_draft.handling == crate::print_ui::Handling::Label {
+                    app.read_label_crops(id);
+                }
                 let Some(doc) = app.session.get(id) else { return };
                 let sizes: Vec<(f64, f64)> = doc.info.pages.iter().map(|p| (p.width as f64, p.height as f64)).collect();
                 let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
@@ -1317,6 +1322,9 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     } else {
         app.dialog = Some(next);
     }
+    if recover == Some(true) {
+        app.show_pending_recovery();
+    }
     if let Some(cmd) = link_command {
         app.execute(cmd);
     }
@@ -1381,6 +1389,86 @@ pub(crate) fn save_prompt_key(ctx: &egui::Context) -> Option<Option<bool>> {
             None
         }
     })
+}
+
+/// The file was replaced by another program while it was open: saving it would throw that
+/// version away, so the user decides explicitly (external-file change / REC-R05).
+#[cfg(not(target_arch = "wasm32"))]
+fn conflict_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some(conflict) = app.save_conflict.clone() else { return };
+    let t = Tokens::get(ctx);
+    let shown = shorten_middle(&conflict.name, 80);
+    let mut choice: Option<ConflictChoice> = None;
+    let modal = egui::Modal::new(egui::Id::new("save_conflict")).show(ctx, |ui| {
+        ui.set_width(460.0);
+        ui.horizontal(|ui| {
+            ui.add(crate::icons::image("save", 22.0, t.accent));
+            let title = ui.add(
+                egui::Label::new(
+                    egui::RichText::new(crate::i18n::fmt(tl!("“{name}” changed on disk while you were working on it."), &[("name", &shown)]))
+                        .font(theme::semibold(16.0)),
+                )
+                .wrap(),
+            );
+            if shown != conflict.name {
+                title.on_hover_text(&conflict.name);
+            }
+        });
+        ui.add_space(6.0);
+        // What the other version holds, so the choice is made knowing what it costs.
+        if let Some(disk) = conflict.disk {
+            let line = match (disk.pages(), disk.modified()) {
+                (Some(pages), Some(when)) => Some(crate::i18n::fmt(
+                    tl!("On disk: {n} pages, written {when}."),
+                    &[("n", &pages.to_string()), ("when", &crate::combine_ui::ago(when))],
+                )),
+                (None, Some(when)) => Some(crate::i18n::fmt(tl!("On disk: written {when}."), &[("when", &crate::combine_ui::ago(when))])),
+                _ => None,
+            };
+            if let Some(line) = line {
+                ui.label(egui::RichText::new(line).color(t.text_muted));
+            }
+        }
+        ui.label(
+            egui::RichText::new(tl!("Saving over it would replace the version another program wrote. Save a copy if you need both."))
+                .color(t.text_muted),
+        );
+        ui.add_space(14.0);
+        // Right to left: the safe choice is the left-most (primary) button.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::pill_button(ui, tl!("Overwrite"), false).clicked() {
+                choice = Some(ConflictChoice::Overwrite);
+            }
+            if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+                choice = Some(ConflictChoice::Cancel);
+            }
+            if widgets::pill_button(ui, tl!("Compare"), false).clicked() {
+                choice = Some(ConflictChoice::Compare);
+            }
+            if widgets::pill_button(ui, tl!("Save As…"), true).clicked() {
+                choice = Some(ConflictChoice::SaveAs);
+            }
+        });
+    });
+    // Dismissing the prompt (Escape, click outside) keeps the file: no write happens.
+    let choice = choice.or_else(|| modal.should_close().then_some(ConflictChoice::Cancel));
+    if let Some(choice) = choice {
+        app.resolve_conflict(choice);
+    }
+}
+
+/// What the conflict prompt asked for.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConflictChoice {
+    /// Keep the file on disk and save this document somewhere else.
+    SaveAs,
+    /// Open the version on disk beside this one and show the differences, writing nothing.
+    Compare,
+    /// Replace the other program's version.
+    Overwrite,
+    /// Write nothing and keep the deferred save out of the way.
+    Cancel,
 }
 
 /// "Save changes?" when closing a tab or quitting with unsaved edits.

@@ -7,7 +7,7 @@ use pdfcraft_engine::catalog;
 use crate::theme::{self, Tokens};
 use crate::{LeftPanel, PdfCraftApp, icons, panels::human_size, widgets};
 
-const RECOMMENDED: [&str; 8] = ["organize", "edit", "combine", "compress", "export", "scan", "fill_sign", "protect"];
+const RECOMMENDED: [&str; 9] = ["organize", "edit", "combine", "compress", "export", "scan", "fill_sign", "protect", "redact"];
 
 pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());

@@ -2127,4 +2127,33 @@ key	Space	Espacio
 	Driver: {driver}	Controlador: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Estado de la impresora: {status}. Compruebe la conexión de la impresora antes de imprimir.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	No se encontró ninguna impresora. Encienda la impresora y conéctela; luego seleccione «Comprobar de nuevo». Puede seguir guardando como PDF.
+	Print both sides	Imprimir a doble cara
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Imprime por las dos caras de la hoja, girándola por su borde largo, si la impresora puede.
+	Printing on both sides of the sheet. Click to print on one side only.	Impresión por las dos caras de la hoja. Haz clic para imprimir solo por una cara.
+	Match page at 100%	Ajustar el papel a la página al 100 %
+	Print at 100% on the paper of the same size, leaving the page range alone.	Imprime al 100 % en papel del mismo tamaño, sin modificar el intervalo de páginas.
+	PDF page: {w} × {h} in	Página del PDF: {w} × {h} in
+	PDF scale: {scale}%	Escala del PDF: {scale} %
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	La escala a la que se dibuja la página; el controlador de la impresora aún puede sustituir el papel o reducir el trabajo.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	«Cortar y apilar» imprime hojas de una sola cara. Elige otro orden de páginas para imprimir a doble cara.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Recorta cada página a su área impresa, la endereza y la ajusta a la hoja sin deformarla. Una etiqueta por hoja.
+	Turn upside down (180°)	Girar boca abajo (180°)
+	the name is not a plain file name	el nombre no es un nombre de archivo simple
 	Developer: {name}	Desarrollador: {name}
+	Overwrite	Sobrescribir
+	Save As…	Guardar como…
+	“{name}” changed on disk while you were working on it.	«{name}» cambió en el disco mientras trabajaba en él.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Guardar encima reemplazaría la versión que escribió otro programa. Guarde una copia si necesita ambas.
+	“{name}” was moved or renamed to “{found}”.	«{name}» se movió o se le cambió el nombre a «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» ya no está en «{path}»; se movió a otra carpeta o se eliminó.
+	Tried {n} times. Zoom or rotate the page to try again.	Se intentó {n} veces. Amplía o gira la página para volver a intentarlo.
+	On disk: {n} pages, written {when}.	En el disco: {n} páginas, escrito {when}.
+	On disk: written {when}.	En el disco: escrito {when}.
+	The version on disk is too large to compare here.	La versión del disco es demasiado grande para compararla aquí.
+	“{name}” could not be opened to compare it.	No se pudo abrir «{name}» para compararlo.
+	{name} (on disk)	{name} (en el disco)
+	Recognize Text in Files	Reconocer texto en archivos
+	 (stopped after {done} of {total})	 (detenido tras {done} de {total})
+	file {d} of {t}	Archivo {d} de {t}
+	Export stopped after {done} of {total} files	Exportación detenida tras {done} de {total} archivos
+	and {n} more	y {n} más

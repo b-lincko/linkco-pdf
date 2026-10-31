@@ -15,13 +15,19 @@ mod a11y;
 mod comments;
 mod content;
 mod conventions;
+pub mod examples;
+mod folder;
 mod forms;
+mod limits;
 mod links;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 mod measure;
+mod plan;
+mod policy;
 mod printing;
 mod redact;
+pub mod schema;
 mod signing;
 mod tools;
 
@@ -30,10 +36,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pdfcraft_engine::{CombineSource, DocId, Document, Edit, Session, commands};
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes};
+use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, sync_staged};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
+pub use limits::{Budget, Limits, MAX_DEPTH, MAX_EXCLUDES, MAX_FILES, MIB};
+pub use policy::{Policy, Profile};
+pub use schema::TOOL_SCHEMA_VERSION;
 pub use tools::{ToolDef, tools};
 
 /// One piece of a tool's result.
@@ -54,13 +63,44 @@ pub enum ToolError {
     InvalidArgs(String),
     /// The tool ran and failed (the message is for the agent to read).
     Failed(String),
+    /// The session's profile does not run this tool. Refused before any argument is read, and
+    /// nothing in a document can change that: the profile is set where the session was started.
+    Refused(String),
+}
+
+impl ToolError {
+    /// The stable, machine-readable kind of this failure: what a caller checks instead of reading
+    /// the message.
+    ///
+    /// The names are the same vocabulary the command line uses for its exit codes (`usage`,
+    /// `unsupported`, `refused`, `failed`), so one script can act on either without learning two
+    /// sets of words. They are part of the interface: a kind's meaning is never reused for
+    /// something else, and a new kind is an addition, not a rename.
+    ///
+    /// `malformed` — input that is not a document that can be read — is not raised here: the engine
+    /// reports a damaged file as a failure, and the command line decides the kind from the command
+    /// that was running. See `docs/api-stability.md`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::UnknownTool(_) => "unsupported",
+            Self::InvalidArgs(_) => "usage",
+            Self::Failed(_) => "failed",
+            Self::Refused(_) => "refused",
+        }
+    }
+
+    /// The failure as a value a caller can serialise: its kind and its message, nothing inferred
+    /// from prose. The MCP server returns this as a failed call's `structuredContent.error`.
+    pub fn json(&self) -> Value {
+        json!({ "kind": self.kind(), "message": self.to_string() })
+    }
 }
 
 impl std::fmt::Display for ToolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ToolError::UnknownTool(t) => write!(f, "unknown tool {t:?}"),
-            ToolError::InvalidArgs(m) | ToolError::Failed(m) => f.write_str(m),
+            ToolError::InvalidArgs(m) | ToolError::Failed(m) | ToolError::Refused(m) => f.write_str(m),
         }
     }
 }
@@ -92,6 +132,11 @@ pub struct Automation {
     renderers: HashMap<DocId, (Arc<Vec<u8>>, PageRenderer)>,
     /// Extracted page text per document version (the working bytes it was taken from).
     texts: HashMap<DocId, TextCache>,
+    /// What this session may do, decided where it was started (`crate::Policy`, REC-B09).
+    policy: Policy,
+    /// How much it may read, write and do at once (`crate::Budget`, REC-B07). Shared with the
+    /// workers a batch starts, so one audit covers the whole session.
+    resources: Arc<Budget>,
 }
 
 impl Default for Automation {
@@ -102,7 +147,14 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, renderers: HashMap::new(), texts: HashMap::new() }
+        Self {
+            session: Session::new(),
+            root: None,
+            renderers: HashMap::new(),
+            texts: HashMap::new(),
+            policy: Policy::default(),
+            resources: Arc::new(Budget::default()),
+        }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -131,8 +183,9 @@ impl Automation {
     /// given, so `/dev/stdout` and the like still work. Returns where the file went.
     pub fn write_output(&self, path: &str, bytes: &[u8]) -> Result<PathBuf> {
         let target = self.resolve(path, true)?;
+        self.resources.check_output(bytes.len())?;
         if self.root.is_some() {
-            write_atomic(&target, bytes)?;
+            self.resources.write(&target, bytes)?;
         } else {
             std::fs::write(&target, bytes).map_err(|e| failed(format!("{path}: {e}")))?;
         }
@@ -147,6 +200,9 @@ impl Automation {
             return Err(ToolError::InvalidArgs("arguments must be a JSON object".into()));
         }
         let def = tools::find(name).ok_or_else(|| ToolError::UnknownTool(name.into()))?;
+        // Before the arguments are looked at: a refused tool is refused whatever it was asked to do,
+        // so no argument can talk its way past the profile.
+        self.policy.check(def)?;
         tools::check_args(def, args)?;
         let a = Args(args);
         let out = match name {
@@ -202,6 +258,13 @@ impl Automation {
                 let pages = self.pages(&a, "pages")?;
                 let to = self.position(&a, "to")?;
                 self.apply(&a, Edit::MovePages { pages, to })?
+            }
+            "page_reverse" => {
+                let pages = match a.opt_ints("pages")? {
+                    Some(_) => self.pages(&a, "pages")?,
+                    None => (0..self.doc(&a)?.info.pages.len()).collect(),
+                };
+                self.apply(&a, Edit::ReversePages { pages })?
             }
             "page_insert_blank" => self.insert_blank(&a)?,
             "page_insert_file" => self.insert_file(&a)?,
@@ -293,7 +356,8 @@ impl Automation {
             }
             "page_duplicate" => {
                 let pages = self.pages(&a, "pages")?;
-                self.apply(&a, Edit::DuplicatePages { pages })?
+                let at = self.opt_position(&a, "at")?;
+                self.apply(&a, Edit::DuplicatePages { pages, at })?
             }
             "page_set_box" => self.page_set_box(&a)?,
             "doc_create" => self.doc_create(&a)?,
@@ -312,7 +376,7 @@ impl Automation {
                 // As in the app, a copy that isn't smaller is not written (#490).
                 let written = bytes.len() < before;
                 if written {
-                    write_atomic(&path, &bytes)?;
+                    self.resources.write(&path, &bytes)?;
                 }
                 json!({ "path": path.to_string_lossy(), "written": written, "bytes_before": before, "bytes_after": bytes.len(), "merged_objects": merged })
             }
@@ -376,7 +440,7 @@ impl Automation {
                     if path.extension().is_none() {
                         path.set_extension(ext);
                     }
-                    write_atomic(&path, &bytes)?;
+                    self.resources.write(&path, &bytes)?;
                     json!({ "path": path.to_string_lossy(), "format": ext, "bytes": bytes.len() })
                 } else {
                     use pdfcraft_engine::ImageEdit;
@@ -584,6 +648,10 @@ impl Automation {
             "doc_export_office" => self.doc_export_office(&a)?,
             "pdfa_convert" => self.pdfa_convert(&a)?,
             "action_run" => self.action_run(&a)?,
+            "batch_plan" => self.batch_plan(&a)?,
+            "batch_expand" => self.batch_expand(&a)?,
+            "policy_status" => self.policy_status(&a)?,
+            "limits_status" => self.limits_status(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
             "doc_compare_mark" => self.doc_compare_mark(&a)?,
             "form_set_actions" => self.form_set_actions(&a)?,
@@ -666,6 +734,9 @@ impl Automation {
 
     fn doc_open(&mut self, a: &Args) -> Result<Value> {
         let path = self.resolve(a.str("path")?, false)?;
+        // The input quota is answered from the file's size, before a byte of it is read.
+        let size = std::fs::metadata(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?.len();
+        self.resources.check_input(size)?;
         let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let id = self.session.open(name, Some(path.to_string_lossy().into_owned()), Arc::new(bytes), a.opt_str("password")?).map_err(failed)?;
@@ -701,7 +772,7 @@ impl Automation {
             self.apply(a, Edit::FlattenFillSign)?;
         }
         let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) }.map_err(failed)?;
-        write_atomic(&target, &bytes)?;
+        self.resources.write(&target, &bytes)?;
         let path = target.to_string_lossy().into_owned();
         self.session.mark_saved(id, bytes.clone(), Some(path.clone())).map_err(failed)?;
         Ok(json!({ "path": path, "bytes": bytes.len(), "incremental": !full, "document": summary(self.doc(a)?) }))
@@ -872,7 +943,7 @@ impl Automation {
                 .collect::<Result<_>>()?,
         };
         let (bytes, r) = self.session.optimized_bytes(id, &settings, &discard).map_err(failed)?;
-        write_atomic(&path, &bytes)?;
+        self.resources.write(&path, &bytes)?;
         let o = &r.optimize;
         Ok(json!({
             "path": path.to_string_lossy(),
@@ -999,7 +1070,7 @@ impl Automation {
         if tool == "doc_export_text" {
             let path = self.resolve(a.str("path")?, true)?;
             let text = ex.text_of(&pages).map_err(failed)?;
-            write_atomic(&path, text.as_bytes())?;
+            self.resources.write(&path, text.as_bytes())?;
             return Ok(json!({ "path": path.to_string_lossy(), "pages": pages.len(), "bytes": text.len() }));
         }
         let folder = self.resolve(a.str("folder")?, true)?;
@@ -1010,7 +1081,7 @@ impl Automation {
             let mut files = Vec::new();
             for (k, img) in out.images.iter().enumerate() {
                 let path = child(&folder, &pdfcraft_engine::export::image_file_name(&stem, img, k + 1));
-                write_atomic(&path, &img.data)?;
+                self.resources.write(&path, &img.data)?;
                 files.push(json!({ "path": path.to_string_lossy(), "page": img.page + 1, "width": img.width, "height": img.height }));
             }
             let skipped: Vec<Value> = out.skipped.iter().map(|(p, r, why)| json!({ "page": p + 1, "object": r.num, "reason": why })).collect();
@@ -1029,7 +1100,7 @@ impl Automation {
         for p in pages {
             let img = ex.image(p, dpi, format).map_err(failed)?;
             let path = child(&folder, &format!("{stem}_page_{}.{}", p + 1, format.extension()));
-            write_atomic(&path, &img)?;
+            self.resources.write(&path, &img)?;
             files.push(path.to_string_lossy().into_owned());
             // A page too large for the renderer at `dpi` is drawn at the most it allows.
             let used = ex.dpi_used(p, dpi);
@@ -1200,7 +1271,7 @@ impl Automation {
         let out = a.opt_str("out")?;
         if let Some(out) = out {
             let path = self.resolve(out, true)?;
-            write_atomic(&path, &bytes)?;
+            self.resources.write(&path, &bytes)?;
             result["path"] = json!(path.to_string_lossy());
         }
         if a.opt_bool("open")?.unwrap_or(out.is_none()) {
@@ -1258,7 +1329,7 @@ impl Automation {
                 Ok((pdfcraft_engine::SourceKind::Pdf, ..)) => json!({ "path": p, "skipped": "already a PDF" }),
                 Ok((_, stem, pdf)) => {
                     let target = unused(&dir, &stem);
-                    write_atomic(&target, &pdf)?;
+                    self.resources.write(&target, &pdf)?;
                     json!({ "path": p, "output": target.to_string_lossy(), "bytes": pdf.len() })
                 }
                 Err(e) => json!({ "path": p, "error": e }),
@@ -1280,7 +1351,7 @@ impl Automation {
             for &p in &pages {
                 let bytes = self.session.extract(id, &[p]).map_err(failed)?;
                 let path = child(&dir, &format!("{stem}-page{}.pdf", p + 1));
-                write_atomic(&path, &bytes)?;
+                self.resources.write(&path, &bytes)?;
                 files.push(path.to_string_lossy().into_owned());
             }
             json!({ "files": files })
@@ -1426,7 +1497,7 @@ impl Automation {
                 unique = format!("{}-{n}.pdf", file.trim_end_matches(".pdf"));
             }
             let path = child(&dir, &unique);
-            write_atomic(&path, bytes)?;
+            self.resources.write(&path, bytes)?;
             files.push(json!({ "path": path.to_string_lossy(), "first_page": first, "last_page": last }));
         }
         Ok(json!({ "files": files }))
@@ -1455,6 +1526,16 @@ impl Automation {
             return Err(ToolError::InvalidArgs(format!("{key} must be between 1 and {} (the document has {n} pages)", n + 1)));
         }
         Ok(at as usize - 1)
+    }
+
+    /// `position`, but `None` when the key is left out.
+    fn opt_position(&self, a: &Args, key: &str) -> Result<Option<usize>> {
+        let Some(at) = a.opt_int(key)? else { return Ok(None) };
+        let n = self.doc(a)?.info.pages.len();
+        if at < 1 || at as usize > n + 1 {
+            return Err(ToolError::InvalidArgs(format!("{key} must be between 1 and {} (the document has {n} pages)", n + 1)));
+        }
+        Ok(Some(at as usize - 1))
     }
 
     fn renderer(&mut self, id: DocId) -> Result<&mut PageRenderer> {
@@ -1506,7 +1587,7 @@ impl Automation {
         let mut missing: Vec<usize> = pages.iter().copied().filter(|p| entry.1.get(*p).is_some_and(Option::is_none)).collect();
         missing.sort_unstable();
         missing.dedup();
-        for (p, text) in extract_parallel(&bytes, password, &missing) {
+        for (p, text) in extract_parallel(&bytes, password, &missing, self.resources.limits().workers) {
             let text = Arc::new(text.map_err(|e| failed(format!("page {}: {e}", p + 1)))?);
             if let Some(slot) = entry.1.get_mut(p) {
                 *slot = Some(text);
@@ -1818,6 +1899,9 @@ fn info(d: &Document) -> Value {
         "creator": i.creator, "producer": i.producer,
         "tagged": i.tagged,
         "has_javascript": i.has_javascript,
+        // Custom document properties (Document Properties > Custom): /Info entries beyond the
+        // ones the spec names, set and cleared with doc_set_info.
+        "custom": i.custom.iter().map(|(name, value)| json!({ "name": name, "value": value })).collect::<Vec<_>>(),
         // XFA forms: "static" (the PDF's own fields work; the XFA data is ignored) or "dynamic"
         // (laid out from the template by PdfCraft, see xfa_layout; placeholder pages when that failed).
         "xfa": i.xfa.map(|x| match x { pdfcraft_render::Xfa::Static => "static", pdfcraft_render::Xfa::Dynamic => "dynamic" }),
@@ -1901,7 +1985,12 @@ fn encode_png(width: u32, height: u32, premultiplied: &[u8]) -> Result<Vec<u8>> 
 }
 
 /// Extract the text of `pages` (0-based) with one renderer per worker thread.
-fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[usize]) -> Vec<(usize, std::result::Result<PageText, String>)> {
+fn extract_parallel(
+    bytes: &Arc<Vec<u8>>,
+    password: Option<Arc<str>>,
+    pages: &[usize],
+    workers: usize,
+) -> Vec<(usize, std::result::Result<PageText, String>)> {
     let extract = |r: &mut PageRenderer, p: usize| {
         let out = r.render(RenderRequest { page: p, kind: RequestKind::Text, tile: None, scale: 1.0, tag: 0 });
         match out.error {
@@ -1910,7 +1999,8 @@ fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[u
         }
     };
     let config = RenderConfig { password, ..Default::default() };
-    let workers = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(8) };
+    // The session's own worker limit decides, not the machine: that is the point of the limit.
+    let workers = if cfg!(target_arch = "wasm32") { 1 } else { workers.max(1) };
     // Small jobs aren't worth a second parse of the document.
     if workers == 1 || pages.len() < 8 {
         let mut r = PageRenderer::new(bytes.clone(), config);
@@ -1949,6 +2039,27 @@ fn child(dir: &Path, name: &str) -> PathBuf {
     dir.join(safe)
 }
 
+/// The name a batch writes an input under: the input's own file name, or `document.pdf` for a
+/// path that has none. `batch_plan` and the writers it plans both take it from here, so a plan
+/// cannot name a file the run will not write.
+fn batch_input_name(path: &str) -> String {
+    Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into())
+}
+
+/// Where `action_run` writes the result for an input called `name` in `folder`: under the input's
+/// own name, or under the first unused `<stem> (n).pdf` when that name is taken — by a file on
+/// disk, or by an earlier input of the same batch (`taken`). The plan calls this too, with the
+/// names it has already promised, so "the run will not replace anything" and "this is the name it
+/// will use" are the same statement in both.
+fn action_output(folder: &Path, name: &str, taken: &[PathBuf]) -> PathBuf {
+    let first = child(folder, name);
+    if !first.exists() && !taken.contains(&first) {
+        return first;
+    }
+    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+    (2..10_000u32).map(|n| child(folder, &format!("{stem} ({n}).pdf"))).find(|p| !p.exists() && !taken.contains(p)).unwrap_or(first)
+}
+
 /// `<stem>.pdf` in `dir`, or `<stem> (2).pdf` and so on when that name is taken.
 fn unused(dir: &Path, stem: &str) -> PathBuf {
     let first = child(dir, &format!("{stem}.pdf"));
@@ -1965,7 +2076,29 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// [`write_atomic`], trying the staging names that `suffixes` give.
 fn write_atomic_with(path: &Path, bytes: &[u8], suffixes: impl IntoIterator<Item = u64>) -> Result<()> {
-    use std::io::Write;
+    write_atomic_syncing(path, bytes, suffixes, std::fs::File::sync_all)
+}
+
+/// [`write_atomic_with`], with an injectable staging flush for deterministic failure tests.
+fn write_atomic_syncing(
+    path: &Path,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+) -> Result<()> {
+    write_atomic_using(path, bytes, suffixes, std::io::Write::write_all, sync_all, |from, to| std::fs::rename(from, to))
+}
+
+/// The save pipeline with private I/O seams for deterministic failure tests. Production callers
+/// always supply the standard file operations; these are not automation/runtime fault switches.
+fn write_atomic_using(
+    path: &Path,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    write_all: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+    rename: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+) -> Result<()> {
     // A folder can't be replaced, and staging beside it could land outside the root: "." names
     // the root itself, whose parent isn't ours to write in.
     if path.is_dir() {
@@ -1979,13 +2112,13 @@ fn write_atomic_with(path: &Path, bytes: &[u8], suffixes: impl IntoIterator<Item
     // Closed at the end of the block, before the rename.
     let written = {
         let mut file = file;
-        file.write_all(bytes)
+        write_all(&mut file, bytes).and_then(|()| sync_staged(&file, sync_all))
     };
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
         return Err(failed(format!("{}: {e}", tmp.display())));
     }
-    std::fs::rename(&tmp, path).map_err(|e| {
+    rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         failed(format!("{}: {e}", path.display()))
     })
@@ -2080,6 +2213,262 @@ mod tests {
         }
     }
 
+    /// Parent kills a real child at a verified I/O boundary; no destructors can clean staging.
+    #[test]
+    fn process_kill_preserves_atomic_save_boundary_and_retry() {
+        use std::io::Write as _;
+        const PHASE: &str = "PDFCRAFT_SAVE_KILL_PHASE";
+        const DIRECTORY: &str = "PDFCRAFT_SAVE_KILL_DIRECTORY";
+        const NEW: &[u8] = b"COMPLETE NEW FILE";
+        fn pause(ready: &Path, phase: &str) -> ! {
+            std::fs::write(ready, phase).unwrap();
+            loop {
+                std::thread::park();
+            }
+        }
+        if let Some(phase) = std::env::var_os(PHASE) {
+            let phase = phase.to_str().unwrap();
+            assert!(matches!(phase, "partial" | "flushed" | "renamed"));
+            let dir = PathBuf::from(std::env::var_os(DIRECTORY).unwrap());
+            let target = dir.join("out.pdf");
+            let ready = dir.join("ready");
+            write_atomic_using(
+                &target,
+                NEW,
+                [7],
+                |file, bytes| {
+                    if phase == "partial" {
+                        file.write_all(b"PARTIAL")?;
+                        pause(&ready, phase);
+                    }
+                    file.write_all(bytes)
+                },
+                std::fs::File::sync_all,
+                |from, to| {
+                    if phase == "flushed" {
+                        pause(&ready, phase);
+                    }
+                    std::fs::rename(from, to)?;
+                    pause(&ready, phase);
+                },
+            )
+            .unwrap();
+            panic!("the child returned instead of waiting for termination");
+        }
+        struct Reap(std::process::Child);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                // Also kill/reap on assertion failure or readiness timeout: no orphan processes.
+                if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                    let _ = self.0.kill();
+                }
+                let _ = self.0.wait();
+            }
+        }
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::process_kill_preserves_atomic_save_boundary_and_retry");
+        for phase in ["partial", "flushed", "renamed"] {
+            for existing in [false, true] {
+                let dir = staging_dir(&format!("kill-{phase}-{existing}"));
+                let target = dir.join("out.pdf");
+                let ready = dir.join("ready");
+                assert!(!ready.exists(), "a fresh case must not reuse a stale barrier");
+                if existing {
+                    std::fs::write(&target, b"ORIGINAL FILE").unwrap();
+                }
+                let mut child = Reap(
+                    std::process::Command::new(std::env::current_exe().unwrap())
+                        .args(["--exact", &test, "--nocapture"])
+                        .env(PHASE, phase)
+                        .env(DIRECTORY, &dir)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::inherit())
+                        .spawn()
+                        .unwrap(),
+                );
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    if std::fs::read(&ready).is_ok_and(|bytes| bytes == phase.as_bytes()) {
+                        break;
+                    }
+                    assert!(child.0.try_wait().unwrap().is_none(), "child exited before the {phase} barrier");
+                    assert!(std::time::Instant::now() < deadline, "child did not reach the {phase} barrier");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                child.0.kill().unwrap();
+                let status = child.0.wait().unwrap();
+                assert!(!status.success(), "termination was not a graceful successful return");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt as _;
+                    assert_eq!(status.signal(), Some(9), "the child must die from SIGKILL");
+                }
+                if phase == "renamed" {
+                    assert_eq!(std::fs::read(&target).unwrap(), NEW);
+                    assert!(!staged(&dir, 7).exists());
+                } else {
+                    if existing {
+                        assert_eq!(read(&target), "ORIGINAL FILE");
+                    } else {
+                        assert!(!target.exists(), "no partial target was published");
+                    }
+                    let orphan = std::fs::read(staged(&dir, 7)).unwrap();
+                    let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };
+                    assert_eq!(orphan, expected);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt as _;
+                        assert_eq!(std::fs::metadata(staged(&dir, 7)).unwrap().permissions().mode() & 0o777, 0o600);
+                    }
+                }
+                // Deterministic collision with an orphan: retry must skip, never overwrite it.
+                write_atomic_with(&target, b"RETRY COMPLETE", [7, 8]).unwrap();
+                assert_eq!(read(&target), "RETRY COMPLETE");
+                assert!(!staged(&dir, 8).exists());
+                if phase == "renamed" {
+                    assert!(!staged(&dir, 7).exists());
+                } else {
+                    let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };
+                    assert_eq!(std::fs::read(staged(&dir, 7)).unwrap(), expected, "orphan was not reused or overwritten");
+                }
+                std::fs::remove_dir_all(dir).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_partial_disk_full_write_never_replaces_the_target() {
+        use std::io::Write as _;
+        for existing in [false, true] {
+            let dir = staging_dir(&format!("partial-write-{existing}"));
+            let target = dir.join("out.pdf");
+            if existing {
+                std::fs::write(&target, b"ORIGINAL").unwrap();
+            }
+            let error = write_atomic_using(
+                &target,
+                b"NEW CONTENT",
+                [7],
+                |file, bytes| {
+                    assert_eq!(bytes, b"NEW CONTENT");
+                    file.write_all(b"NEW")?;
+                    assert_eq!(read(&staged(&dir, 7)), "NEW", "actual partial bytes reached staging");
+                    Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "injected disk full"))
+                },
+                |_| panic!("a failed write must not reach flush"),
+                |_, _| panic!("a failed write must not reach rename"),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("injected disk full"), "{error}");
+            if existing {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_denied_rename_keeps_original_bytes_and_cleans_staging() {
+        for existing in [false, true] {
+            let dir = staging_dir(&format!("denied-rename-{existing}"));
+            let target = dir.join("out.pdf");
+            if existing {
+                std::fs::write(&target, b"ORIGINAL").unwrap();
+            }
+            let flushed = std::cell::Cell::new(false);
+            let renamed = std::cell::Cell::new(false);
+            let error = write_atomic_using(
+                &target,
+                b"NEW CONTENT",
+                [7],
+                std::io::Write::write_all,
+                |file| {
+                    assert!(!flushed.replace(true));
+                    file.sync_all()
+                },
+                |from, to| {
+                    assert!(!renamed.replace(true));
+                    assert!(flushed.get(), "flush before rename");
+                    assert_eq!(from, staged(&dir, 7));
+                    assert_eq!(to, target);
+                    assert_eq!(read(from), "NEW CONTENT");
+                    assert_eq!(to.exists(), existing);
+                    if existing {
+                        assert_eq!(read(to), "ORIGINAL", "rename has not happened yet");
+                    }
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::fs::OpenOptionsExt as _;
+                        // Exclusive reopening would fail if the staging writer were still open.
+                        let exclusive = std::fs::OpenOptions::new().read(true).share_mode(0).open(from).unwrap();
+                        drop(exclusive);
+                    }
+                    Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected rename denial"))
+                },
+            )
+            .unwrap_err();
+            assert!(flushed.get() && renamed.get());
+            assert!(error.to_string().contains("injected rename denial"), "{error}");
+            if existing {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn interrupted_and_short_writes_can_finish_before_replacement() {
+        use std::io::Write as _;
+        struct ShortWrites<'a> {
+            file: &'a mut std::fs::File,
+            calls: usize,
+        }
+        impl std::io::Write for ShortWrites<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                if self.calls == 1 {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                self.file.write(bytes.get(..2).unwrap_or(bytes))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.file.flush()
+            }
+        }
+        let dir = staging_dir("short-interrupted");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"ORIGINAL").unwrap();
+        write_atomic_using(
+            &target,
+            b"NEW CONTENT",
+            [7],
+            |file, bytes| {
+                let mut writer = ShortWrites { file, calls: 0 };
+                writer.write_all(bytes)?;
+                assert!(writer.calls > 2, "retry interruption and multiple short writes");
+                Ok(())
+            },
+            |file| {
+                assert_eq!(read(&target), "ORIGINAL");
+                assert_eq!(read(&staged(&dir, 7)), "NEW CONTENT");
+                file.sync_all()
+            },
+            |from, to| std::fs::rename(from, to),
+        )
+        .unwrap();
+        assert_eq!(read(&target), "NEW CONTENT");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn staging_never_writes_through_a_file_planted_at_its_name() {
         let dir = staging_dir("planted");
@@ -2151,6 +2540,69 @@ mod tests {
         let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn a_failed_flush_keeps_the_original_and_removes_staging() {
+        let dir = staging_dir("flush-existing");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        let error = write_atomic_syncing(&target, b"NEW", [7], |file| {
+            assert_eq!(file.metadata().unwrap().len(), 3, "the bytes were written first");
+            assert_eq!(read(&target), "OLD", "the target is not yet replaced");
+            Err(std::io::Error::other("forced flush failure"))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("forced flush failure"), "{error}");
+        assert!(error.to_string().contains(&staged(&dir, 7).display().to_string()), "{error}");
+        assert_eq!(read(&target), "OLD");
+        assert_eq!(listing(&dir), ["out.pdf"], "the failed staging file was removed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_flush_does_not_create_a_new_target() {
+        let dir = staging_dir("flush-new");
+        let target = dir.join("out.pdf");
+        let error = write_atomic_syncing(&target, b"NEW", [7], |_| Err(std::io::Error::other("forced flush failure"))).unwrap_err();
+        assert!(error.to_string().contains("forced flush failure"), "{error}");
+        assert!(!target.exists());
+        assert!(listing(&dir).is_empty(), "the failed staging file was removed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Keep the desktop's supported-volume fallback available to headless saves too.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_automation_volume_without_full_flush_still_saves() {
+        for errno in [45, 25] {
+            let dir = staging_dir(&format!("flush-fallback-{errno}"));
+            let target = dir.join("out.pdf");
+            std::fs::write(&target, b"OLD").unwrap();
+            write_atomic_syncing(&target, b"NEW", [7], |_| Err(std::io::Error::from_raw_os_error(errno))).unwrap();
+            assert_eq!(read(&target), "NEW");
+            assert_eq!(listing(&dir), ["out.pdf"]);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn staging_is_written_then_flushed_before_replacing_the_target() {
+        let dir = staging_dir("flush-order");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        let called = std::cell::Cell::new(false);
+        write_atomic_syncing(&target, b"NEW", [7], |file| {
+            assert!(!called.replace(true), "flush exactly once");
+            assert_eq!(read(&target), "OLD", "flush before replacing the target");
+            assert_eq!(read(&staged(&dir, 7)), "NEW", "flush after writing the complete staging file");
+            file.sync_all()
+        })
+        .unwrap();
+        assert!(called.get(), "a successful save must flush its staging file");
+        assert_eq!(read(&target), "NEW");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

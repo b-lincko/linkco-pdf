@@ -638,12 +638,18 @@ mod formcalc {
         assert_eq!(calc(r#"Num2Date(45350, "YYYY-MM-DD")"#), "2024-02-29");
         assert_eq!(calc(r#"Num2Date(Date2Num("2024-02-29") + 1, "MMMM D, YYYY")"#), "March 1, 2024");
         assert_eq!(calc(r#"Time2Num("01:00:00")"#), "3600000");
+        assert_eq!(calc(r#"IsoTime2Num("12:30:45Z")"#), "45045000");
+        assert_eq!(calc(r#"IsoTime2Num("12:30:45.250")"#), "45045250");
+        assert_eq!(calc(r#"IsoTime2Num("T12:30:45")"#), "45045000");
         assert_eq!(calc(r#"Num2Time(3661000)"#), "01:01:01");
         assert_eq!(calc("Round(Pmt(10000, 0.01, 12), 2)"), "888.49");
         assert_eq!(calc("Round(FV(100, 0.01, 12), 2)"), "1268.25");
         assert_eq!(calc("Round(PV(100, 0.01, 12), 2)"), "1125.51");
         assert_eq!(calc(r#"UnitValue("2in", "mm")"#), "50.8");
         assert_eq!(calc(r#"UnitType("2.5cm")"#), "cm");
+        assert_eq!(calc(r#"UnitValue("72points", "in")"#), "1");
+        assert_eq!(calc(r#"UnitValue("25.4millimeters", "inches")"#), "1");
+        assert_eq!(calc(r#"UnitValue("1in", "points")"#), "72");
         assert_eq!(calc(r#"Encode("a b&c", "url")"#), "a%20b%26c");
         assert_eq!(calc(r#"Decode("a%20b", "url")"#), "a b");
         assert!(go(r#"Get("http://example.com")"#, "form1[0].page1[0].total[0]", "calculate").error.unwrap().contains("network"));
