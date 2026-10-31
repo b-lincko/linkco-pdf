@@ -186,9 +186,9 @@ impl Budget {
 
 /// Bytes in the units a person reads them in.
 fn human(bytes: u64) -> String {
-    if bytes >= MIB && bytes % MIB == 0 {
+    if bytes >= MIB && bytes.is_multiple_of(MIB) {
         format!("{} MiB", bytes / MIB)
-    } else if bytes >= 1024 && bytes % 1024 == 0 {
+    } else if bytes >= 1024 && bytes.is_multiple_of(1024) {
         format!("{} KiB", bytes / 1024)
     } else {
         format!("{bytes} bytes")

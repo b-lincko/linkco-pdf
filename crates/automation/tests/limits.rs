@@ -138,7 +138,7 @@ fn a_time_limit_stops_a_batch_between_items_and_keeps_what_it_finished() {
     assert_eq!(run["timed_out"], true);
     assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 1, "only the item in hand is written");
     let audit = ok(&mut a, "limits_status", json!({}))["audit"].clone();
-    assert!(audit["batches_stopped_by_time"].as_u64().unwrap() >= 1, "{audit}");
+    assert_eq!(audit["batches_stopped_by_time"].as_u64(), Some(1), "one stopped batch, not one per skipped file: {audit}");
 
     // Without a time limit the same batch finishes every file.
     let mut b = auto(&dir);

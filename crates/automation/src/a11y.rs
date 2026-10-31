@@ -171,8 +171,10 @@ impl Automation {
         let mut stopped = false;
         let mut out = Vec::new();
         for p in paths {
-            if !out.is_empty() && self.resources.timed_out(started) {
+            if !out.is_empty() && !stopped && self.resources.timed_out(started) {
                 stopped = true;
+            }
+            if stopped {
                 out.push(json!({ "path": p, "skipped": "the time limit was reached before this file started" }));
                 continue;
             }
@@ -340,9 +342,12 @@ impl Automation {
         let mut stopped = false;
         let mut out = Vec::new();
         for p in paths {
-            // Between items, not during one: the file in hand is finished (as a stop is).
-            if !out.is_empty() && self.resources.timed_out(started) {
+            // Between items, not during one: the file in hand is finished (as a stop is). Asked
+            // once per batch, so the audit counts batches stopped rather than files skipped.
+            if !out.is_empty() && !stopped && self.resources.timed_out(started) {
                 stopped = true;
+            }
+            if stopped {
                 out.push(json!({ "path": p, "skipped": "the time limit was reached before this file started" }));
                 continue;
             }

@@ -258,9 +258,10 @@ fn values<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
 /// is touched.
 fn number(args: &[String], flag_name: &str, range: std::ops::RangeInclusive<u64>) -> Result<Option<u64>, CliError> {
     let Some(value) = flag(args, flag_name) else { return Ok(None) };
-    let n: u64 = value.parse().map_err(|_| usage(format!("{flag_name} {value} is not a number of 0–{}", range.end())))?;
+    let n: u64 =
+        value.parse().map_err(|_| usage(format!("{flag_name} needs a whole number from {} to {}, not {value}", range.start(), range.end())))?;
     if !range.contains(&n) {
-        return Err(usage(format!("{flag_name} {n} is out of range: 0–{}", range.end())));
+        return Err(usage(format!("{flag_name} {n} is out of range: {} to {}", range.start(), range.end())));
     }
     Ok(Some(n))
 }
