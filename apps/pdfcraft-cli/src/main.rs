@@ -243,10 +243,10 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 fn values<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
     for (i, arg) in args.iter().enumerate() {
-        if arg == name {
-            if let Some(value) = args.get(i + 1) {
-                out.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()));
-            }
+        if arg == name
+            && let Some(value) = args.get(i + 1)
+        {
+            out.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()));
         }
     }
     out
