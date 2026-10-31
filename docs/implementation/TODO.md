@@ -1275,8 +1275,8 @@ pending: 65, scope_review: 23
 - Local evidence: The published examples appear in the same place for all three readers: pdfcraft-cli schema, pdfcraft-cli tools and the MCP server's tools/list and tool_search (schema::schema_with_example).
 - Local evidence: python3 docs/implementation/build_backlog.py --check passes, and python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes.
 - Local evidence: All recorded asset SHA-256s match their files.
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41211944172
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41211944125
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41211944118
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41211944116
-- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41211944121
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216657569
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216658391
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216657755
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216658031
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41216658508
