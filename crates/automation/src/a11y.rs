@@ -136,7 +136,9 @@ impl Automation {
 }
 
 impl Automation {
-    fn ocr_settings(&self, a: &Args) -> Result<pdfcraft_engine::ocr::OcrSettings> {
+    /// The OCR settings `ocr_recognize_files` would use, read from the same arguments by the same
+    /// code: `batch_plan` asks for them here, so a plan cannot describe other settings than the run.
+    pub(crate) fn ocr_settings(&self, a: &Args) -> Result<pdfcraft_engine::ocr::OcrSettings> {
         let mut settings = pdfcraft_engine::ocr::OcrSettings::default();
         if let Some(d) = a.opt_num("dpi")? {
             settings.dpi = d.clamp(72.0, 600.0) as f32;
