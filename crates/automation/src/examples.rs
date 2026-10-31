@@ -73,8 +73,7 @@ pub fn why_not(tool: &str) -> Option<&'static str> {
     const SESSION: &str = "acts on the session or the view, not on the document, so there is nothing to save";
     const SETUP: &str = "needs a field, comment or link that the shared fixture does not have; covered in its own test";
     const CREATES: &str = "creates a document instead of changing one; covered in its own test";
-    const PRINTS: &str = "sends the document to a printer or a preview rather than changing it";
-    const PRINTS: &str = "sends the document to a printer or rasteriser rather than changing it";
+    const PRINTS: &str = "sends the document to a printer, a preview or a rasteriser rather than changing it";
     Some(match tool {
         // Writes a file (the document is read, or a copy is written).
         "doc_save"
