@@ -119,6 +119,7 @@ pub fn tools() -> Vec<ToolDef> {
     let open = json!({ "type": "boolean", "description": "Also open the result as a new document (default: only when out is omitted)." });
     vec![
         t("doc_open", "Open a PDF", "Open a PDF file and return its document id, page count and whether it can be edited.")
+            .ro()
             .cmd("file.open")
             .with(schema(json!({ "path": { "type": "string" }, "password": { "type": "string", "description": "User or owner password for encrypted files." } }), &["path"])),
         t("doc_list", "List open documents", "List the open documents with their ids, page counts and unsaved state.").ro().with(schema(json!({}), &[])),
