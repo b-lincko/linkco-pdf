@@ -140,10 +140,16 @@ fn the_same_file_reached_twice_is_in_the_batch_once() {
     let listed = files(&expanded);
     assert_eq!(listed.iter().filter(|p| p.ends_with("a.pdf")).count(), 1, "{expanded}");
     assert_eq!(listed, ["in/a.pdf", "in/notes.txt", "in/sub/b.pdf", "in/sub/deep/c.pdf"], "the file keeps the place the folder gave it: {expanded}");
-    // The second spelling is reported rather than silently dropped.
-    let skipped: Vec<&str> = expanded["skipped"].as_array().unwrap().iter().filter_map(|s| s["path"].as_str()).collect();
-    assert_eq!(skipped.iter().filter(|p| p.ends_with("a.pdf")).count(), 1, "{expanded}");
-    assert!(why(&expanded, "in/sub/../a.pdf").unwrap_or_default().contains("already in this batch"), "{expanded}");
+    // Both repeats are reported rather than silently dropped: the copy the folder walk reached
+    // after the file was already in the list, and the spelling given by hand.
+    let dups: Vec<&str> = expanded["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["why"].as_str().unwrap_or_default().contains("already in this batch"))
+        .filter_map(|s| s["path"].as_str())
+        .collect();
+    assert_eq!(dups, ["in/a.pdf", "in/sub/../a.pdf"], "{expanded}");
 }
 
 #[test]
