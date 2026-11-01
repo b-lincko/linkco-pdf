@@ -174,7 +174,7 @@ impl Automation {
         // behind.
         let planned = crate::approval::planned(&expanded, &folder, crate::approval::Kind::Ocr);
         let approved = crate::approval::check(
-            a.opt_str("approve_token")?.as_deref(),
+            a.opt_str("approve_token")?,
             crate::approval::Kind::Ocr,
             &folder,
             &crate::plan::ocr_settings_lines(&settings),
@@ -372,7 +372,7 @@ impl Automation {
         // with no folder created and no file touched.
         let planned = crate::approval::planned(&expanded, &folder, crate::approval::Kind::Action);
         let approved = crate::approval::check(
-            a.opt_str("approve_token")?.as_deref(),
+            a.opt_str("approve_token")?,
             crate::approval::Kind::Action,
             &folder,
             &crate::plan::action_settings(&action),
