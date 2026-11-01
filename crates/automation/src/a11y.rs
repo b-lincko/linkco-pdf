@@ -3,7 +3,7 @@
 use pdfcraft_engine::a11y::{Category, Options, Report, Rule, Status};
 use serde_json::{Value, json};
 
-use crate::{Args, Automation, Result, ToolError, child, failed};
+use crate::{Args, Automation, Result, ToolError, failed};
 
 fn status_id(s: Status) -> &'static str {
     match s {
@@ -169,12 +169,23 @@ impl Automation {
         wanted.output = Some(folder.clone());
         let expanded = self.expand(&paths, &wanted)?;
         self.resources.check_batch(expanded.count())?;
+        // The approval is checked before the folder is created and before the models are looked
+        // for: a refusal must not depend on whether this machine has them, and must leave nothing
+        // behind.
+        let planned = crate::approval::planned(&expanded, &folder, crate::approval::Kind::Ocr);
+        let approved = crate::approval::check(
+            a.opt_str("approve_token")?.as_deref(),
+            crate::approval::Kind::Ocr,
+            &folder,
+            &crate::plan::ocr_settings_lines(&settings),
+            &planned,
+        )?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
-        for item in &expanded.items {
+        for (i, item) in expanded.items.iter().enumerate() {
             let p = match item {
                 crate::folder::Item::File(p) => p.as_str(),
                 crate::folder::Item::Broken(p, why) => {
@@ -195,15 +206,15 @@ impl Automation {
                 .and_then(|bytes| pdfcraft_engine::ocr::recognize_file(&name, std::sync::Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true));
             out.push(match result {
                 Ok(r) => {
-                    let target = child(&folder, &name);
-                    self.resources.write(&target, &r.bytes)?;
+                    let target = &planned[i].output;
+                    self.resources.write(target, &r.bytes)?;
                     let skipped: Vec<usize> = r.pages.iter().filter(|p| p.skipped.is_some()).map(|p| p.page + 1).collect();
                     json!({ "path": p, "output": target.to_string_lossy(), "words": r.words(), "skipped_pages": skipped })
                 }
                 Err(e) => json!({ "path": p, "error": e }),
             });
         }
-        Ok(json!({ "files": out, "skipped": expanded.skipped, "timed_out": stopped }))
+        Ok(json!({ "files": out, "skipped": expanded.skipped, "timed_out": stopped, "approved": approved }))
     }
 
     pub(crate) fn ocr_recognize(&mut self, a: &Args) -> Result<Value> {
@@ -356,11 +367,22 @@ impl Automation {
         // Quotas are answered before any of the batch is read: the size of the job, then each
         // file's size as it comes up.
         self.resources.check_batch(expanded.count())?;
+        // What the run would write, worked out before anything is written — and what an approval
+        // is checked against (see `approval`): a token made for another batch refuses the run here,
+        // with no folder created and no file touched.
+        let planned = crate::approval::planned(&expanded, &folder, crate::approval::Kind::Action);
+        let approved = crate::approval::check(
+            a.opt_str("approve_token")?.as_deref(),
+            crate::approval::Kind::Action,
+            &folder,
+            &crate::plan::action_settings(&action),
+            &planned,
+        )?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
-        for item in &expanded.items {
+        for (i, item) in expanded.items.iter().enumerate() {
             let p = match item {
                 crate::folder::Item::File(p) => p.as_str(),
                 crate::folder::Item::Broken(p, why) => {
@@ -381,17 +403,19 @@ impl Automation {
             let result = self.read_input(p).and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), |_, _| {}));
             out.push(match result {
                 Ok(r) => {
-                    let target = crate::action_output(&folder, &name, &[]);
+                    // The name this batch was planned with, not a fresh guess: an approval covered
+                    // these exact files, and a name picked now could differ from the one it named.
+                    let target = &planned[i].output;
                     if target.exists() {
                         return Err(failed(format!("{}: no unused output name available", target.display())));
                     }
-                    self.resources.write(&target, &r.bytes)?;
+                    self.resources.write(target, &r.bytes)?;
                     json!({ "path": p, "output": target.to_string_lossy(), "log": r.log })
                 }
                 Err(e) => json!({ "path": p, "error": e }),
             });
         }
-        Ok(json!({ "action": action.name, "files": out, "skipped": expanded.skipped, "timed_out": stopped }))
+        Ok(json!({ "action": action.name, "files": out, "skipped": expanded.skipped, "timed_out": stopped, "approved": approved }))
     }
 
     fn compare_ids(&self, a: &Args) -> Result<(pdfcraft_engine::DocId, pdfcraft_engine::DocId)> {

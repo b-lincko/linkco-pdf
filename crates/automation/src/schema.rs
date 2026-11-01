@@ -41,10 +41,12 @@ use crate::tools::{ToolDef, tools};
 /// 1.1 added the worked example a document-changing tool carries inside its schema
 /// (`input_schema.examples`); 1.2 the arguments that let a batch take folders (`depth`, `exclude`,
 /// `include_hidden`, `follow_links`) plus the `batch_expand` tool that reports what they would
-/// cover; and 1.3 a plan's per-file `problem` — the same word a failed call carries, before the run.
-/// All three are additive — an optional argument, a new tool, a new result field — so the minor
-/// moves and a caller written for 1.0 keeps working, which is what `docs/api-stability.md` promises.
-pub const TOOL_SCHEMA_VERSION: &str = "1.3";
+/// cover; 1.3 a plan's per-file `problem` — the same word a failed call carries, before the run;
+/// and 1.4 the approval a plan carries (`approval`), the `approve_token` argument the two batch
+/// writers accept, and their `approved` answer. All four are additive — an optional argument, a
+/// new tool, new result fields — so the minor moves and a caller written for 1.0 keeps working,
+/// which is what `docs/api-stability.md` promises.
+pub const TOOL_SCHEMA_VERSION: &str = "1.4";
 
 /// The whole table as one document, with the version that names it.
 ///

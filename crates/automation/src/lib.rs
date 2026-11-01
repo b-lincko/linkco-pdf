@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod a11y;
+mod approval;
 mod comments;
 mod content;
 mod conventions;
@@ -2068,7 +2069,7 @@ fn extract_parallel(
 /// The file `name` inside `dir`, where `name` comes from a document or an argument: separators,
 /// colons (a Windows drive or stream) and control characters become `_`, and a name of only dots
 /// gets a leading `_`, so it is one plain file name and can't lead out of `dir`.
-fn child(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn child(dir: &Path, name: &str) -> PathBuf {
     let mut safe: String = name.chars().map(|c| if matches!(c, '/' | '\\' | ':') || c.is_control() { '_' } else { c }).collect();
     if safe.chars().all(|c| c == '.') {
         safe.insert(0, '_');
@@ -2079,7 +2080,7 @@ fn child(dir: &Path, name: &str) -> PathBuf {
 /// The name a batch writes an input under: the input's own file name, or `document.pdf` for a
 /// path that has none. `batch_plan` and the writers it plans both take it from here, so a plan
 /// cannot name a file the run will not write.
-fn batch_input_name(path: &str) -> String {
+pub(crate) fn batch_input_name(path: &str) -> String {
     Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into())
 }
 
@@ -2088,7 +2089,7 @@ fn batch_input_name(path: &str) -> String {
 /// disk, or by an earlier input of the same batch (`taken`). The plan calls this too, with the
 /// names it has already promised, so "the run will not replace anything" and "this is the name it
 /// will use" are the same statement in both.
-fn action_output(folder: &Path, name: &str, taken: &[PathBuf]) -> PathBuf {
+pub(crate) fn action_output(folder: &Path, name: &str, taken: &[PathBuf]) -> PathBuf {
     let first = child(folder, name);
     if !first.exists() && !taken.contains(&first) {
         return first;

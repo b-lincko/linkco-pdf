@@ -25,8 +25,8 @@ The version is bumped like this:
 Ask the build whether it speaks your revision:
 
 ```
-$ pdfcraft-cli schema --schema-version 1.3
-{ "schema_version": "1.3", "asked": { "schema_version": "1.3", "compatible": true }, … }
+$ pdfcraft-cli schema --schema-version 1.4
+{ "schema_version": "1.4", "asked": { "schema_version": "1.4", "compatible": true }, … }
 ```
 
 A different major version is not compatible, and the command exits **3** (`unsupported`) while
@@ -79,6 +79,26 @@ disagree about a file. The field arrived with schema version 1.3.
 
 Still not typed: the per-file errors of a batch that ran (`action_run`, `ocr_recognize_files`) are
 plain messages in the result list, not kinds; the call as a whole succeeds with some files reported.
+
+## Approving a destructive batch
+
+`batch_plan` writes nothing and hands back two things: the call that would carry the plan out
+(`approve`), and an `approval` with a `token` — a digest of the batch the plan describes. Pass that
+token as `approve_token` on the call, and the run carries out **the batch the token names**, or
+refuses with `refused` and writes nothing:
+
+* the same folder (a token is bound to the folder's path, not to how it was spelled);
+* the same list (a file added to a folder that was walked, a file removed, other `paths`);
+* the same settings (an action's steps, a recognition run's resolution, language and text-page
+  handling);
+* no output that has appeared since the plan said that name was free.
+
+A call without a token is the call it always was: the argument is optional, and a run that is given
+none answers `approved: false` so a caller can tell the two apart. The token is not a secret and not
+a permission — it cannot let a call past the session's profile, and it does not decide whether a
+batch *should* run. It answers one question, "is this the batch that was approved", for a plan
+somebody read. Showing that plan to a person and asking is the interface's job, and the interface
+does not do it yet.
 
 ## Examples
 

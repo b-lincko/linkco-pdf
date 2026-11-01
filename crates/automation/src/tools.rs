@@ -107,6 +107,14 @@ fn batch_paths() -> Value {
     })
 }
 
+/// The `approve_token` argument of a batch writer: the approval `batch_plan` handed back.
+fn approve_token() -> Value {
+    json!({
+        "type": "string",
+        "description": "Optional. The `approval.token` of the batch_plan for exactly this call. Given, the run refuses (writes nothing) unless the batch it would carry out is the one the token names: same folder, same files, same settings, and no output that has since appeared where the plan said a new file would go. Omitting it keeps the call as it was.",
+    })
+}
+
 fn schema(props: Value, required: &[&str]) -> Value {
     json!({ "type": "object", "properties": props, "required": required, "additionalProperties": false })
 }
@@ -920,7 +928,7 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("actions.wizard")
             .with(schema(json!({}), &[])),
-        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log or error.")
+        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log or error. Writes files: plan it first with batch_plan and pass the plan's approval.token as approve_token, and the run refuses if the batch it would carry out is not the one that was planned.")
             .destructive()
             .cmd("actions.wizard")
             .with(schema(
@@ -929,13 +937,14 @@ pub fn tools() -> Vec<ToolDef> {
                     "steps": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string" }, "arg": { "type": "string" } }, "required": ["step"] } },
                     "paths": batch_paths(),
                     "folder": { "type": "string" },
+                    "approve_token": approve_token(),
                 })),
                 &["paths", "folder"],
             )),
         t(
             "batch_plan",
             "Plan a batch write",
-            "Before running a destructive batch, say what it would do: for each input, the file the run would write into folder (exactly the name the run picks, including a `name (2).pdf` when the name is taken), whether a file is already there and would be replaced, the input's pages, title and size, and what cannot be undone. Writes nothing and creates no folder. operation is action (an Action Wizard run: give action or steps) or ocr (a searchable copy of each file: give dpi, language, skip_text_pages). The answer's approve field holds the exact call that would carry the plan out.",
+            "Before running a destructive batch, say what it would do: for each input, the file the run would write into folder (exactly the name the run picks, including a `name (2).pdf` when the name is taken), whether a file is already there and would be replaced, the input's pages, title and size, and what cannot be undone. Writes nothing and creates no folder. operation is action (an Action Wizard run: give action or steps) or ocr (a searchable copy of each file: give dpi, language, skip_text_pages). The answer's approve field holds the exact call that would carry the plan out, and its approval object holds the token to pass back with it: give the token and the run refuses rather than carry out a batch other than this one.",
         )
         .ro()
         .cmd("actions.wizard")
@@ -999,7 +1008,7 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
-        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error.")
+        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error. Plan it first with batch_plan (operation ocr) and pass the plan's approval.token as approve_token.")
             .destructive()
             .cmd("ocr.recognize_batch")
             .with(schema(
@@ -1008,6 +1017,7 @@ pub fn tools() -> Vec<ToolDef> {
                     "folder": { "type": "string" },
                     "dpi": { "type": "number", "minimum": 72, "maximum": 600 },
                     "language": { "type": "string", "enum": ["en"] },
+                    "approve_token": approve_token(),
                 })),
                 &["paths", "folder"],
             )),

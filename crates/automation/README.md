@@ -155,6 +155,8 @@ choose their output names themselves.
 * `replaces`: the files that would be overwritten, by name.
 * `irreversible`: what cannot be undone, in plain sentences.
 * `approve`: `{tool, args}`, the call that would carry the plan out, unchanged.
+* `approval`: `{token, covers, argument, meaning}` — the token to pass back as `approve_token`
+  (see below). The plan names every file it covers, so the token can be a digest of that list.
 
 The destinations are not guessed: `batch_input_name` and `action_output` in `src/lib.rs` are the
 functions the writers call, and `plan::action_from_args` is the parser `action_run` uses, so a plan
@@ -166,6 +168,34 @@ table, which the MCP layer reports as `readOnlyHint`), and a path or folder outs
 refuses the plan before anything is read. Each input is read at most 32 MiB
 (`plan::PLAN_READ_LIMIT`); a larger one is planned from its size and destination with
 `pages: null`, rather than loaded to count them.
+
+### Approving it
+
+A plan is only half of "look before it runs"; the other half is that the run is the one that was
+looked at. `approval.token` is a SHA-256 digest of what the batch *is* — the writer, the folder's
+path, the settings that change the output (an action's steps, a recognition run's resolution,
+language and text-page handling) and every input with the file its result would go to — and both
+writers take it back as `approve_token` (`src/approval.rs`):
+
+```json
+{ "tool": "action_run", "args": { …, "approve_token": "3f2a…" } }
+```
+
+Given a token, the run works out the batch it would carry out **before it creates the folder or
+reads a file**, and refuses (`refused`, nothing written, not even the output folder) unless it
+digests to the same value. So these are refused rather than discovered halfway through: a file
+added to a folder that was walked, a file removed, another `paths` list, another folder (however it
+is spelled — a token is bound to the folder, not to the typing), another action's steps, a different
+`dpi`, and an output that has appeared since the plan said the name was free. The refusal says how
+many files this call would write; plan again and approve that.
+
+The token is not a secret and not a permission. It is not signed, it is not a capability, and it
+does not decide whether a batch should run — the session's profile and `--approve` list do that,
+and a token cannot get a call past them. It answers one question, "is this the batch that was
+approved", which is a question about drift rather than trust, and it is optional: a call without a
+token behaves exactly as it did before (`approved: false` in the answer). What is still missing, and
+what this does **not** claim, is the person: showing the plan in the interface and asking someone to
+approve it. The token is what such a prompt would hand to the run; the prompt is not built.
 
 ## Adding a tool
 

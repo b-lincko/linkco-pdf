@@ -11,10 +11,13 @@
 //! back the exact call that would carry the plan out (`approve`), so approving is mechanical
 //! rather than a re-typing of the arguments.
 //!
-//! The naming rule is not re-implemented here: [`crate::batch_input_name`] and
-//! [`crate::action_output`] are the functions the writers themselves call, so a plan cannot name a
-//! file the run would not write. A plan that lied about the destination would be worse than no
-//! plan at all, because it would be believed.
+//! The naming rule is not re-implemented here: [`crate::approval::planned`] is the list the writers
+//! themselves write, so a plan cannot name a file the run would not write. A plan that lied about
+//! the destination would be worse than no plan at all, because it would be believed.
+//!
+//! A plan also carries a token ([`crate::approval`]): the writers take it back as `approve_token`
+//! and refuse to run a batch other than the one it names, so approving a plan is not just reading
+//! it at one moment and hoping the next call agrees.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -22,8 +25,9 @@ use std::sync::Arc;
 use pdfcraft_engine::actions::{Action, Step, builtin};
 use serde_json::{Value, json};
 
-use crate::folder::{Expanded, Item};
-use crate::{Args, Automation, Result, ToolError, action_output, batch_input_name, child};
+use crate::approval;
+use crate::folder::Expanded;
+use crate::{Args, Automation, Result, ToolError};
 
 /// The most of an input `batch_plan` reads to describe it: 32 MiB, the cap the interface uses to
 /// describe the other version of a saved document. A file over it is still planned — its size,
@@ -61,28 +65,22 @@ impl Automation {
     fn plan_action(&mut self, a: &Args, expanded: &Expanded, folder: &Path) -> Result<Value> {
         let action = action_from_args(a)?;
         let steps: Vec<Value> = action.steps.iter().map(|s| json!({ "step": s.id(), "label": s.label(), "arg": s.arg() })).collect();
-        let mut targets = Vec::new();
-        // The names already promised in this plan: the run writes them in order, so a second input
-        // with the same file name gets the next free `(n)`, exactly as it would after the first.
-        let mut promised: Vec<std::path::PathBuf> = Vec::new();
-        for item in &expanded.items {
-            let p = match item {
-                Item::File(p) => p.as_str(),
+        // The list the run would write, from the code the run itself uses: a name that is taken on
+        // disk, or already promised earlier in this batch, is the same name here as there.
+        let planned = approval::planned(expanded, folder, approval::Kind::Action);
+        let targets: Vec<Value> = planned
+            .iter()
+            .map(|t| {
                 // A path the run would fail on is a target too, with the error it would give: a
                 // plan that silently dropped it would be describing a different batch.
-                Item::Broken(p, why) => {
-                    targets.push(json!({ "path": p, "error": why }));
-                    continue;
+                let mut target = self.planned_file(&t.path, &t.output, t.error.as_deref());
+                if t.error.is_none() {
+                    // The steps go on the target: this file would have them run over it.
+                    target["steps"] = Value::Array(steps.clone());
                 }
-            };
-            let name = batch_input_name(p);
-            let output = action_output(folder, &name, &promised);
-            promised.push(output.clone());
-            // The steps go on the target: this file would have them run over it.
-            let mut t = self.planned_file(p, &output);
-            t["steps"] = Value::Array(steps.clone());
-            targets.push(t);
-        }
+                target
+            })
+            .collect();
         // Approving is not a re-typing: the arguments are the files this plan was made from, by
         // name, so the run covers exactly the list that was planned even if the folder changes.
         let mut args = json!({ "paths": expanded.approve_paths(), "folder": a.str("folder")? });
@@ -90,42 +88,42 @@ impl Automation {
             Some(name) => args["action"] = json!(name),
             None => args["steps"] = a.get("steps").cloned().unwrap_or(Value::Null),
         }
-        Ok(plan_json("action", "action_run", folder, targets, args, &expanded.skipped))
+        let token = approval::token(approval::Kind::Action, folder, &action_settings(&action), &planned);
+        let mut plan = plan_json("action", "action_run", folder, targets, args, &expanded.skipped);
+        plan["approval"] = approval::describe(&token, &planned);
+        Ok(plan)
     }
 
     fn plan_ocr(&mut self, a: &Args, expanded: &Expanded, folder: &Path) -> Result<Value> {
         let settings = self.ocr_settings(a)?;
-        let mut targets = Vec::new();
         // `ocr_recognize_files` writes each result under the input's own name, so a name that is
         // already in the folder — or that an earlier input of the same batch writes — is replaced.
-        let mut promised: Vec<std::path::PathBuf> = Vec::new();
-        for item in &expanded.items {
-            let p = match item {
-                Item::File(p) => p.as_str(),
-                Item::Broken(p, why) => {
-                    targets.push(json!({ "path": p, "error": why }));
-                    continue;
+        let planned = approval::planned(expanded, folder, approval::Kind::Ocr);
+        let mut seen: Vec<std::path::PathBuf> = Vec::new();
+        let targets: Vec<Value> = planned
+            .iter()
+            .map(|t| {
+                let mut target = self.planned_file(&t.path, &t.output, t.error.as_deref());
+                if t.error.is_some() {
+                    return target;
                 }
-            };
-            let name = batch_input_name(p);
-            let output = child(folder, &name);
-            promised.push(output.clone());
-            let mut t = self.planned_file(p, &output);
-            if promised.iter().filter(|x| **x == output).count() > 1 {
-                t["replaces"] = json!(true);
-                t["replaces_note"] = json!("an earlier input in this batch writes the same file name, so this one's result replaces it");
-            }
-            t["changes"] = json!([
-                format!("reads every page at {} dpi in language {}", settings.dpi.round(), settings.language),
-                "adds an invisible text layer over each word; the page image is not changed",
-                if settings.skip_text_pages {
-                    "leaves pages that already contain text alone"
-                } else {
-                    "recognises every page, including the ones that already have text"
-                },
-            ]);
-            targets.push(t);
-        }
+                if seen.contains(&t.output) {
+                    target["replaces"] = json!(true);
+                    target["replaces_note"] = json!("an earlier input in this batch writes the same file name, so this one's result replaces it");
+                }
+                seen.push(t.output.clone());
+                target["changes"] = json!([
+                    format!("reads every page at {} dpi in language {}", settings.dpi.round(), settings.language),
+                    "adds an invisible text layer over each word; the page image is not changed",
+                    if settings.skip_text_pages {
+                        "leaves pages that already contain text alone"
+                    } else {
+                        "recognises every page, including the ones that already have text"
+                    },
+                ]);
+                target
+            })
+            .collect();
         let mut args = json!({ "paths": expanded.approve_paths(), "folder": a.str("folder")? });
         for (key, value) in
             [("dpi", a.get("dpi").cloned()), ("language", a.get("language").cloned()), ("skip_text_pages", a.get("skip_text_pages").cloned())]
@@ -134,12 +132,17 @@ impl Automation {
                 args[key] = v;
             }
         }
-        Ok(plan_json("ocr", "ocr_recognize_files", folder, targets, args, &expanded.skipped))
+        let token = approval::token(approval::Kind::Ocr, folder, &ocr_settings_lines(&settings), &planned);
+        let mut plan = plan_json("ocr", "ocr_recognize_files", folder, targets, args, &expanded.skipped);
+        plan["approval"] = approval::describe(&token, &planned);
+        Ok(plan)
     }
 
     /// One input as the run would see it: where its result goes, whether that file is already
-    /// there, and what the input file itself is.
-    fn planned_file(&self, input: &str, output: &Path) -> Value {
+    /// there, and what the input file itself is. `known` is the reason the shared list already has
+    /// for an input that cannot be read; it is used unchanged, so the plan and the run say the same
+    /// thing about the same path.
+    fn planned_file(&self, input: &str, output: &Path, known: Option<&str>) -> Value {
         let replaces = std::fs::metadata(output).is_ok();
         let mut target = json!({ "path": input, "output": output.to_string_lossy(), "replaces": replaces });
         if replaces {
@@ -147,6 +150,7 @@ impl Automation {
         }
         match self.resolve(input, false) {
             Err(e) => target["error"] = json!(e.to_string()),
+            Ok(_) if known.is_some() => target["error"] = json!(known.unwrap_or_default()),
             Ok(resolved) => match describe(&resolved) {
                 Ok(Value::Object(facts)) => {
                     if let Some(obj) = target.as_object_mut() {
@@ -161,6 +165,27 @@ impl Automation {
         }
         target
     }
+}
+
+/// What an action run does to each file, in the terms an approval is bound to: the steps, in order,
+/// with their arguments. The plan and the run both compute this from the action they are about to
+/// run, so approving one action cannot carry out another.
+pub(crate) fn action_settings(action: &Action) -> Vec<String> {
+    // One entry per field, never one joined string: the token length-prefixes each entry, so a
+    // separator that also occurs in a step's argument cannot make two actions look alike.
+    let mut out = Vec::with_capacity(action.steps.len() * 2);
+    for step in &action.steps {
+        out.push(step.id().to_string());
+        out.push(step.arg().to_string());
+    }
+    out
+}
+
+/// The same for a text-recognition run: the resolution, the language, and whether pages that
+/// already carry text are left alone. Values, not the caller's spelling of them, so `300` and
+/// `300.0` are one setting and an approval survives a re-typed call.
+pub(crate) fn ocr_settings_lines(settings: &pdfcraft_engine::ocr::OcrSettings) -> Vec<String> {
+    vec![format!("dpi {:.3}", settings.dpi), format!("language {}", settings.language), format!("skip_text_pages {}", settings.skip_text_pages)]
 }
 
 /// The action `action_run` would run, read from the same arguments by the same code, so the plan
