@@ -176,7 +176,9 @@ pub(crate) fn action_settings(action: &Action) -> Vec<String> {
     let mut out = Vec::with_capacity(action.steps.len() * 2);
     for step in &action.steps {
         out.push(step.id().to_string());
-        out.push(step.arg().to_string());
+        // A step with no argument and a step with an empty one do the same thing, so they are one
+        // setting: an approval that expired over that difference would be a nuisance, not a guard.
+        out.push(step.arg().unwrap_or_default().to_string());
     }
     out
 }
