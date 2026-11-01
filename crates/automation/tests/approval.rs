@@ -182,12 +182,12 @@ fn a_token_names_one_batch_and_nothing_else() {
 fn a_batch_that_grew_after_it_was_approved_is_not_the_one_that_runs() {
     let dir = tree("grew");
     let mut a = auto(&dir);
-    let (plan, token) = plan(&mut a, "out");
+    let (first, token) = plan(&mut a, "out");
     // A file arrives in the folder the plan walked: the run would now write four files, and the
     // fourth is one nobody approved.
     std::fs::write(dir.join("in/sub/new.pdf"), fixture(1)).unwrap();
     let before = listing(&dir);
-    match a.call("action_run", &approve(&plan, &token)) {
+    match a.call("action_run", &approve(&first, &token)) {
         Err(ToolError::Refused(message)) => {
             assert!(message.contains("4 file(s)"), "the refusal says what this call would do: {message}");
         }
