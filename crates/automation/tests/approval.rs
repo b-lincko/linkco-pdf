@@ -94,7 +94,7 @@ fn title() -> Value {
 
 /// A plan of the tree's `in` folder into `out`, and the token it carries.
 fn plan(a: &mut Automation, folder: &str) -> (Value, String) {
-    let plan = ok(&mut a, "batch_plan", json!({ "operation": "action", "steps": title(), "paths": ["in"], "folder": folder }));
+    let plan = ok(a, "batch_plan", json!({ "operation": "action", "steps": title(), "paths": ["in"], "folder": folder }));
     let token = plan["approval"]["token"].as_str().unwrap_or_else(|| panic!("no token in {plan}")).to_string();
     (plan, token)
 }
@@ -197,9 +197,9 @@ fn a_batch_that_grew_after_it_was_approved_is_not_the_one_that_runs() {
     assert!(!dir.join("out").exists());
 
     // Planning again gives a token that matches the batch as it is now, and that run goes ahead.
-    let (again, token) = plan(&mut a, "out");
-    assert_ne!(token, plan["approval"]["token"].as_str().unwrap(), "the batch changed, so the token did");
-    let run = ok(&mut a, "action_run", approve(&again, &token));
+    let (second, second_token) = plan(&mut a, "out");
+    assert_ne!(second_token, token, "the batch changed, so the token did");
+    let run = ok(&mut a, "action_run", approve(&second, &second_token));
     assert_eq!(run["approved"], true);
     assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 4);
 }
