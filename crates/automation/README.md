@@ -189,6 +189,12 @@ is spelled — a token is bound to the folder, not to the typing), another actio
 `dpi`, and an output that has appeared since the plan said the name was free. The refusal says how
 many files this call would write; plan again and approve that.
 
+That last case needs one thing said plainly: the call a plan hands back names the files it would
+write, not the folder it walked (`approve.args.paths`). So handing it back is exact — a file that
+appears in the folder afterwards is simply not in the approved batch, and the run writes the files
+that were approved. A call that names the folder again is the other half: it asks for the batch as
+it is now, so a folder that grew is refused rather than half-approved.
+
 The token is not a secret and not a permission. It is not signed, it is not a capability, and it
 does not decide whether a batch should run — the session's profile and `--approve` list do that,
 and a token cannot get a call past them. It answers one question, "is this the batch that was

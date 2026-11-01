@@ -17,6 +17,12 @@
 //! * a file that is now in the way — an output that exists now and did not when the plan was made,
 //!   which turns a write into a replacement.
 //!
+//! The token is a digest of the *list*, not of the arguments that made it, which is what lets the
+//! two be asked for separately: the call `batch_plan` hands back names the files it planned (so it
+//! is exact, and a file that arrives in the folder afterwards is not in the approved batch), while
+//! a call that names the folder again asks for the batch as it is now — and a folder that grew is
+//! then refused, because the batch it would carry out is not the one the token names.
+//!
 //! What the token is not: a secret, and not a permission. It is not signed and anyone holding this
 //! crate could compute one; it cannot grant a call the session's permission profile refuses, and it
 //! does not decide *whether* a batch may run — the profile and the `--approve` list do that. Its

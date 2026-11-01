@@ -158,9 +158,10 @@ fn a_token_names_one_batch_and_nothing_else() {
     mismatch(&mut a, other_folder, "another folder");
     assert!(!dir.join("out2").exists(), "a refused run does not even create its folder");
 
-    // Another action's steps.
+    // Another action's steps: a real step, so the refusal is about the batch and not about a
+    // step id that does not exist (which would be a usage error, a different answer entirely).
     let mut other_steps = approve(&plan, &token);
-    other_steps["steps"] = json!([{ "step": "set_author", "arg": "Someone Else" }]);
+    other_steps["steps"] = json!([{ "step": "add_watermark", "arg": "Draft" }]);
     mismatch(&mut a, other_steps, "another action");
 
     // Another list.
@@ -183,25 +184,36 @@ fn a_batch_that_grew_after_it_was_approved_is_not_the_one_that_runs() {
     let dir = tree("grew");
     let mut a = auto(&dir);
     let (first, token) = plan(&mut a, "out");
-    // A file arrives in the folder the plan walked: the run would now write four files, and the
-    // fourth is one nobody approved.
+    // A file arrives in the folder the plan walked. There are two ways to call the run, and the
+    // approval has an answer for each: name the folder again and the batch has grown — four files,
+    // one nobody approved — so it is refused; hand back the plan's own call and it names the three
+    // files that were approved, so the fourth is simply not part of it.
     std::fs::write(dir.join("in/sub/new.pdf"), fixture(1)).unwrap();
     let before = listing(&dir);
-    match a.call("action_run", &approve(&first, &token)) {
+    let again = json!({ "steps": title(), "paths": ["in"], "folder": "out", "approve_token": token.clone() });
+    match a.call("action_run", &again) {
         Err(ToolError::Refused(message)) => {
             assert!(message.contains("4 file(s)"), "the refusal says what this call would do: {message}");
         }
-        other => panic!("expected a refusal, got {other:?}"),
+        other => panic!("a batch that grew: expected a refusal, got {other:?}"),
     }
     assert_eq!(listing(&dir), before, "nothing was written, not even for the files that were approved");
     assert!(!dir.join("out").exists());
 
-    // Planning again gives a token that matches the batch as it is now, and that run goes ahead.
+    let run = ok(&mut a, "action_run", approve(&first, &token));
+    assert_eq!(run["approved"], true, "{run}");
+    let approved: Vec<&str> = first["targets"].as_array().unwrap().iter().map(|t| t["output"].as_str().unwrap()).collect();
+    let ran: Vec<&str> = run["files"].as_array().unwrap().iter().map(|f| f["output"].as_str().unwrap()).collect();
+    assert_eq!(ran, approved, "the approved run is the batch the plan named: {run}");
+    assert!(!dir.join("out/new.pdf").exists(), "the file that arrived after the plan was never approved");
+
+    // Planning again names the fourth file, and the batch that grew has a token of its own.
     let (second, second_token) = plan(&mut a, "out");
+    assert_eq!(second["approval"]["covers"], 4, "{second}");
     assert_ne!(second_token, token, "the batch changed, so the token did");
     let run = ok(&mut a, "action_run", approve(&second, &second_token));
     assert_eq!(run["approved"], true);
-    assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 4);
+    assert!(dir.join("out/new.pdf").exists(), "the run the new plan approves writes the file it names: {run}");
 }
 
 #[test]
