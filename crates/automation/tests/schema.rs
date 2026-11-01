@@ -58,7 +58,8 @@ fn every_failure_kind_is_the_one_documented() {
         (ToolError::UnknownTool("nope".into()), "unsupported"),
         (ToolError::InvalidArgs("page 0 is out of range".into()), "usage"),
         (ToolError::Refused("the read-only profile refuses doc_save".into()), "refused"),
-        (ToolError::Failed("in.pdf: not a PDF".into()), "failed"),
+        (ToolError::Malformed("in.pdf: the file is not a readable PDF".into()), "malformed"),
+        (ToolError::Failed("in.pdf: the document is protected by a password".into()), "failed"),
     ];
     for (error, kind) in &documented {
         assert_eq!(error.kind(), *kind, "{error}");

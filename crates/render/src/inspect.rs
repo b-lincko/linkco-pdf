@@ -416,7 +416,9 @@ pub fn inspect(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Result<DocInfo, O
         Ok(())
     });
     if info.pages.is_empty() {
-        return Err(OpenError::Invalid("the document has no pages".into()));
+        // A valid document that holds no pages: nothing is wrong with the bytes, there is just
+        // nothing to show, so this is not "not a readable PDF".
+        return Err(OpenError::Empty);
     }
     Ok(info)
 }

@@ -2235,8 +2235,9 @@ impl Session {
 
     pub fn open(&mut self, name: impl Into<String>, path: Option<String>, bytes: Arc<Vec<u8>>, password: Option<&str>) -> Result<DocId, OpenError> {
         let name = name.into();
-        guard(|| self.open_unguarded(name, path, bytes, password))
-            .unwrap_or_else(|m| Err(OpenError::Invalid(format!("reading it failed unexpectedly ({m})"))))
+        // A panic inside the open is a fault of ours, not of the file: it is reported as
+        // `Internal`, so nothing downstream can call the document damaged on our behalf.
+        guard(|| self.open_unguarded(name, path, bytes, password)).unwrap_or_else(|m| Err(OpenError::Internal(m)))
     }
 
     fn open_unguarded(&mut self, name: String, path: Option<String>, bytes: Arc<Vec<u8>>, password: Option<&str>) -> Result<DocId, OpenError> {

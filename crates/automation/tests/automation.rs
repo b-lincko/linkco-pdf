@@ -331,6 +331,39 @@ fn combine_extract_and_split() {
     }
 }
 
+/// A file that is not a document says so (`malformed`), and nothing else does: a missing file, a
+/// locked one and a document with no pages keep their own words. The kind is what a script branches
+/// on, so blaming a file for our failure — or for the caller's missing password — would send it
+/// looking in the wrong place.
+#[test]
+fn a_file_that_is_not_a_document_is_malformed() {
+    let dir = workdir("malformed");
+    let mut a = auto(&dir);
+    std::fs::write(dir.join("garbage.pdf"), b"this is not a PDF at all").unwrap();
+    // A PNG that someone renamed: the bytes say what they are, and they are not a document.
+    std::fs::write(dir.join("picture.pdf"), b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01").unwrap();
+
+    for bad in ["garbage.pdf", "picture.pdf"] {
+        let error = a.call("doc_open", &json!({ "path": bad })).unwrap_err();
+        assert_eq!(error.kind(), "malformed", "{bad}: {error}");
+        assert!(error.to_string().contains(bad), "the message names the file: {error}");
+        assert_eq!(error.json()["kind"], "malformed", "{bad}");
+    }
+
+    // Nothing was opened by either attempt, so the session still has no documents.
+    assert_eq!(ok(&mut a, "doc_list", json!({}))["documents"], json!([]));
+
+    // A file that is not there is not a damaged one: reading it failed, which is a plain failure.
+    let missing = a.call("doc_open", &json!({ "path": "missing.pdf" })).unwrap_err();
+    assert_eq!(missing.kind(), "failed", "{missing}");
+
+    // A document with no pages is a real document; it is not called damaged either.
+    std::fs::write(dir.join("empty.pdf"), fixture(0)).unwrap();
+    let no_pages = a.call("doc_open", &json!({ "path": "empty.pdf" })).unwrap_err();
+    assert_eq!(no_pages.kind(), "failed", "{no_pages}");
+    assert!(no_pages.to_string().contains("no pages"), "{no_pages}");
+}
+
 #[test]
 fn errors_are_specific_and_safe() {
     let dir = workdir("errors");
@@ -1279,7 +1312,12 @@ fn protecting_through_tools() {
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "locked.pdf" }));
     // Another session: the open password is required, and the restrictions hold.
     let mut b = auto(&dir);
-    assert!(matches!(b.call("doc_open", &json!({ "path": "locked.pdf" })), Err(ToolError::Failed(_))));
+    // Locked is not damaged: the caller can open it by saying the password, so the file is not
+    // blamed for it.
+    assert!(matches!(
+        b.call("doc_open", &json!({ "path": "locked.pdf" })),
+        Err(ToolError::Failed(m)) if m.contains("protected by a password")
+    ));
     let re = ok(&mut b, "doc_open", json!({ "path": "locked.pdf", "password": "open" }))["doc"].as_u64().unwrap();
     assert!(matches!(b.call("page_delete", &json!({ "doc": re, "pages": [1] })), Err(ToolError::Failed(_))));
     assert!(matches!(b.call("doc_unprotect", &json!({ "doc": re })), Err(ToolError::Failed(_))));

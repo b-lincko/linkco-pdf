@@ -120,10 +120,14 @@ that has never seen it, and checks the change is still there. A tool that change
 has no example has a stated reason instead (`examples::why_not`), and a test holds the table to
 that, so a new writer cannot ship without someone deciding how it is shown.
 
-`ToolError::kind()` gives every failure a stable kind — `usage`, `unsupported`, `refused`,
-`failed` — using the vocabulary the command line uses for its exit codes, and `ToolError::json()`
-returns it with the message. The MCP server returns that object as a failed call's
-`structuredContent.error`. See `docs/api-stability.md`.
+`ToolError::kind()` gives every failure a stable kind — `usage`, `unsupported`, `malformed`,
+`refused`, `failed` — using the vocabulary the command line uses for its exit codes, and
+`ToolError::json()` returns it with the message. The MCP server returns that object as a failed
+call's `structuredContent.error`. `malformed` is decided by the engine's own reason for refusing an
+open (`open_problem`): bytes that are not a readable document, and nothing else. A locked document,
+one with no pages, one whose encryption this build cannot read, and a fault of ours stay `failed`,
+each saying which it is; a plan marks the same file `problem` before the run. See
+`docs/api-stability.md`.
 
 ## MCP server
 

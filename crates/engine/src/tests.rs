@@ -40,6 +40,20 @@ fn fixture_without_page_tree() -> Vec<u8> {
     out
 }
 
+/// A document whose page tree is real and holds nothing is not a damaged file: the bytes are a
+/// readable PDF and there is simply no page to show. The open says so, so nothing downstream can
+/// report the file as unreadable — and a panic of our own says that instead, never this.
+#[test]
+fn a_document_with_no_pages_is_empty_rather_than_damaged() {
+    let mut s = Session::new();
+    let empty = Arc::new(fixture(0));
+    assert!(matches!(s.open("empty.pdf", None, empty, None), Err(OpenError::Empty)));
+    // Bytes that are not a PDF at all stay in the other class, so nothing downstream can confuse
+    // "there is nothing in it" with "this is not a document".
+    let junk = Arc::new(b"this is not a PDF at all".to_vec());
+    assert!(matches!(s.open("junk.pdf", None, junk, None), Err(OpenError::Invalid(_))));
+}
+
 #[test]
 fn a_recovered_page_tree_opens_unmodified_and_edits_the_pages_shown() {
     let mut s = Session::new();

@@ -906,6 +906,9 @@ fn tool_failure(error: pdfcraft_automation::ToolError) -> CliError {
     match error {
         ToolError::UnknownTool(name) => unsupported(format!("unknown tool {name:?} (see `pdfcraft-cli tools`)")),
         ToolError::InvalidArgs(message) => usage(message),
+        // A file that is not a document is exit 4 wherever it is met, including a step of a
+        // `--script` (docs/api-stability.md promises it for damaged input, not only for `info`).
+        ToolError::Malformed(message) => malformed(message),
         ToolError::Failed(message) => CliError::Message(exit::Failure::new(exit::Kind::Failed, message)),
         ToolError::Refused(message) => refused(message),
     }

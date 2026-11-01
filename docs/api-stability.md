@@ -25,8 +25,8 @@ The version is bumped like this:
 Ask the build whether it speaks your revision:
 
 ```
-$ pdfcraft-cli schema --schema-version 1.2
-{ "schema_version": "1.2", "asked": { "schema_version": "1.2", "compatible": true }, … }
+$ pdfcraft-cli schema --schema-version 1.3
+{ "schema_version": "1.3", "asked": { "schema_version": "1.3", "compatible": true }, … }
 ```
 
 A different major version is not compatible, and the command exits **3** (`unsupported`) while
@@ -60,15 +60,25 @@ call, so a client can branch on the kind instead of parsing the message:
 |---|---|
 | `usage` | The arguments do not match the tool's schema, or a value is out of range. |
 | `unsupported` | No tool has that name, or this build cannot do what was asked at all. |
+| `malformed` | A file named in the call is not a document that can be read: the parser rejects it — not a PDF at all, or damaged past what it can repair. Nothing about the call was wrong, and retrying it as written cannot help. |
 | `refused` | The session's permission profile, or a resource limit, declines the call. Nothing was read and nothing was written. |
-| `failed` | The tool ran and failed: an I/O error, a damaged document, an engine refusal. |
+| `failed` | The tool ran and failed for any other reason: an I/O error, a document that is locked or has no pages, an engine refusal. |
 
-A kind's meaning is never reused for something else, and a new kind is an addition.
+A kind's meaning is never reused for something else, and a new kind is an addition: a client must
+treat a kind it does not know as `failed` rather than assume it cannot happen within a major version.
 
-**Not typed yet:** `malformed` exists on the command line but not at the tool boundary — a damaged
-document reaches an agent as `failed` with the engine's message, because the engine does not type
-the difference. Adding it would be additive (a new kind a client may branch on) rather than a
-break; it is not claimed here.
+`malformed` is not a guess from the message. The engine's own reason for refusing to open a file
+decides it (`OpenError`): bytes that are not a readable document are `malformed`, while a document
+that is locked by a password, one that holds no pages, one whose encryption this build cannot read,
+and a failure of ours are all `failed`, each with a message that says which.
+
+A batch plan reports the same reason before the run, as `targets[].problem` on a file it could not
+open: `malformed`, `password`, `empty`, `unsupported` or `internal` — the plan's word for the
+state, with only the first being a `malformed` call. So a plan and the run that follows it cannot
+disagree about a file. The field arrived with schema version 1.3.
+
+Still not typed: the per-file errors of a batch that ran (`action_run`, `ocr_recognize_files`) are
+plain messages in the result list, not kinds; the call as a whole succeeds with some files reported.
 
 ## Examples
 

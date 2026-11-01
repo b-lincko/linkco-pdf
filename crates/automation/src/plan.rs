@@ -212,7 +212,10 @@ fn describe(path: &Path) -> std::result::Result<Value, String> {
         },
         Err(e) => {
             facts["pages"] = Value::Null;
-            facts["note"] = json!(format!("not a PDF this build can open without a password ({e}); the run would fail on it"));
+            // The same word the failed call would carry (`malformed`, `password`, …), so what the
+            // plan says about a file and what the run then reports about it agree.
+            facts["problem"] = json!(crate::open_problem(&e));
+            facts["note"] = json!(format!("{e}; the run would fail on it"));
         }
     }
     Ok(facts)

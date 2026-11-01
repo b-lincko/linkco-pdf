@@ -77,6 +77,27 @@ fn a_file_that_is_not_a_document_is_malformed() {
 }
 
 #[test]
+fn a_file_that_is_not_a_document_reaches_a_script_as_malformed() {
+    // The exit-code table promises 4 for input that is not a document; a step of a `--script` is
+    // not exempt from it. Before the tool boundary carried the engine's reason, this step reached
+    // the script as `failed` (1), which told it to retry something that can never work.
+    let scratch = Scratch::new("script-malformed");
+    let path = scratch.0.join("broken.pdf");
+    std::fs::write(&path, b"this is not a PDF at all").unwrap();
+    let script = scratch.0.join("steps.json");
+    let steps = serde_json::json!([{ "tool": "doc_open", "args": { "path": path.to_string_lossy() } }]);
+    std::fs::write(&script, serde_json::to_vec(&steps).unwrap()).unwrap();
+    let out = run(&["--error-format=json", "run", "--script", script.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
+    let value: serde_json::Value = serde_json::from_str(stderr(&out).trim_end()).expect("one JSON line");
+    assert_eq!(value["error"]["kind"], "malformed", "{value}");
+    assert_eq!(value["error"]["exit_code"], 4, "{value}");
+    let message = value["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("step 1 (doc_open)"), "the failing step is named: {message}");
+    assert!(message.contains("broken.pdf"), "the file is named: {message}");
+}
+
+#[test]
 fn a_tool_this_build_does_not_have_is_unsupported() {
     // Asking for a tool that does not exist is not a failed operation: nothing ran.
     let out = run(&["run", "no_such_tool"]);

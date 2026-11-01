@@ -229,6 +229,37 @@ fn a_plan_and_a_run_cover_the_same_files_and_approving_writes_exactly_them() {
     }
 }
 
+/// What a plan says about a file it could not read is the word the run would fail with, and it says
+/// it before anything is written. The plan is the place a person decides; a file that cannot be
+/// read has to be visible there, not only in the run's result afterwards.
+#[test]
+fn a_plan_says_which_file_it_could_not_read_and_why() {
+    let dir = tree("plan-problem");
+    std::fs::write(dir.join("in/broken.pdf"), b"this is not a PDF at all").unwrap();
+    std::fs::write(dir.join("in/blank.pdf"), fixture(0)).unwrap();
+    let mut a = auto(&dir);
+    let before = listing(&dir);
+    let plan = ok(
+        &mut a,
+        "batch_plan",
+        json!({ "operation": "action", "steps": [{ "step": "set_title", "arg": "P" }], "paths": ["in"], "exclude": ["*.txt", "*.draft.pdf"], "folder": "out" }),
+    );
+    let fact = |name: &str| {
+        plan["targets"].as_array().unwrap().iter().find(|t| t["path"] == name).cloned().unwrap_or_else(|| panic!("{name} is not in the plan"))
+    };
+    let broken = fact("in/broken.pdf");
+    assert_eq!(broken["problem"], "malformed", "{broken}");
+    assert_eq!(broken["pages"], Value::Null, "{broken}");
+    assert!(broken["note"].as_str().unwrap_or_default().contains("would fail"), "{broken}");
+    // A document with no pages is a document: its problem is not being called damaged.
+    let blank = fact("in/blank.pdf");
+    assert_eq!(blank["problem"], "empty", "{blank}");
+    // A file that reads fine has no problem to report at all.
+    assert!(fact("in/a.pdf").get("problem").is_none(), "{plan}");
+    // And the plan itself changed nothing, not even the folder it would write into.
+    assert_eq!(listing(&dir), before);
+}
+
 #[test]
 fn a_run_processes_a_file_once_even_when_the_list_names_it_twice() {
     let dir = tree("run-twice");

@@ -63,6 +63,11 @@ pub enum ToolError {
     InvalidArgs(String),
     /// The tool ran and failed (the message is for the agent to read).
     Failed(String),
+    /// The file named in the call is not a document that can be read: the parser rejects it, either
+    /// because it is not a PDF at all or because it is damaged past what the reader's repair can
+    /// recover. Nothing about the call was wrong, nothing in the session refused it, and the same
+    /// call on a readable file would work — so retrying it as written cannot help.
+    Malformed(String),
     /// The session's profile does not run this tool. Refused before any argument is read, and
     /// nothing in a document can change that: the profile is set where the session was started.
     Refused(String),
@@ -73,18 +78,20 @@ impl ToolError {
     /// the message.
     ///
     /// The names are the same vocabulary the command line uses for its exit codes (`usage`,
-    /// `unsupported`, `refused`, `failed`), so one script can act on either without learning two
-    /// sets of words. They are part of the interface: a kind's meaning is never reused for
-    /// something else, and a new kind is an addition, not a rename.
+    /// `unsupported`, `refused`, `failed`, `malformed`), so one script can act on either without
+    /// learning two sets of words. They are part of the interface: a kind's meaning is never reused
+    /// for something else, and a new kind is an addition, not a rename.
     ///
-    /// `malformed` — input that is not a document that can be read — is not raised here: the engine
-    /// reports a damaged file as a failure, and the command line decides the kind from the command
-    /// that was running. See `docs/api-stability.md`.
+    /// `malformed` is answered from the engine's own reason for refusing to open a file
+    /// (`open_problem`): a file that is not a readable document is `malformed`, and a locked or
+    /// empty one is not — those are `failed`, with a message that says which. See
+    /// `docs/api-stability.md`.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::UnknownTool(_) => "unsupported",
             Self::InvalidArgs(_) => "usage",
             Self::Failed(_) => "failed",
+            Self::Malformed(_) => "malformed",
             Self::Refused(_) => "refused",
         }
     }
@@ -100,7 +107,7 @@ impl std::fmt::Display for ToolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ToolError::UnknownTool(t) => write!(f, "unknown tool {t:?}"),
-            ToolError::InvalidArgs(m) | ToolError::Failed(m) | ToolError::Refused(m) => f.write_str(m),
+            ToolError::InvalidArgs(m) | ToolError::Failed(m) | ToolError::Malformed(m) | ToolError::Refused(m) => f.write_str(m),
         }
     }
 }
@@ -111,6 +118,33 @@ type Result<T> = std::result::Result<T, ToolError>;
 
 fn failed(e: impl std::fmt::Display) -> ToolError {
     ToolError::Failed(e.to_string())
+}
+
+/// Why an engine open failed, in the interface's own words: `malformed` when the bytes are not a
+/// document that can be read, `password` when it is one but locked, `empty` when it is a document
+/// with no pages, `unsupported` when this build cannot read it, and `internal` when the failure was
+/// ours. The distinction is the engine's (`OpenError`'s variants say whose problem it is); this
+/// only renames it, so the tool boundary and a plan's per-file facts cannot disagree about a file.
+pub(crate) fn open_problem(e: &pdfcraft_render::OpenError) -> &'static str {
+    use pdfcraft_render::OpenError as E;
+    match e {
+        E::Invalid(_) => "malformed",
+        E::NeedsPassword | E::WrongPassword => "password",
+        E::Empty => "empty",
+        E::Unsupported(_) => "unsupported",
+        E::Internal(_) => "internal",
+    }
+}
+
+/// An open that failed, said to the caller: `what` names the file, because the engine's message
+/// does not. Only a file that is not a document is `malformed`; a locked, empty, unsupported or
+/// self-inflicted failure stays `failed` and carries the engine's own words for it.
+fn open_failed(what: &str, e: pdfcraft_render::OpenError) -> ToolError {
+    let message = format!("{what}: {e}");
+    match open_problem(&e) {
+        "malformed" => ToolError::Malformed(message),
+        _ => ToolError::Failed(message),
+    }
 }
 
 /// Default and maximum resolution for `page_render`.
@@ -739,7 +773,10 @@ impl Automation {
         self.resources.check_input(size)?;
         let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let id = self.session.open(name, Some(path.to_string_lossy().into_owned()), Arc::new(bytes), a.opt_str("password")?).map_err(failed)?;
+        let id = self
+            .session
+            .open(name, Some(path.to_string_lossy().into_owned()), Arc::new(bytes), a.opt_str("password")?)
+            .map_err(|e| open_failed(&path.to_string_lossy(), e))?;
         let doc = self.session.get(id).ok_or_else(|| failed("the document vanished"))?;
         Ok(summary(doc))
     }
