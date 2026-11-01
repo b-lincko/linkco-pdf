@@ -671,7 +671,7 @@ fn render(args: &[String]) -> Result<(), CliError> {
             pam
         }
     };
-    save_output(Path::new(out), bytes)?;
+    save_output(Path::new(out), &bytes)?;
     let _ = writeln!(std::io::stderr().lock(), "rendered page {page} at {dpi} dpi: {}×{} px in {} ms", p.width, p.height, p.millis);
     for warning in &p.warnings {
         match warning {
@@ -736,7 +736,7 @@ fn preview(args: &[String]) -> Result<(), CliError> {
     }
 
     let png_bytes = pdfcraft_engine::export::encode_image(p.width, p.height, &p.rgba, ImageFormat::Png, f64::from(scale) * 72.0)?;
-    save_output(Path::new(out), png_bytes)?;
+    save_output(Path::new(out), &png_bytes)?;
     stdout_line(format_args!("STATUS\tOK\t{total_pages}\t{clamped_page}\t{}\t{}", p.width, p.height))?;
     Ok(())
 }
@@ -1092,7 +1092,7 @@ fn ui(args: &[String]) -> Result<(), CliError> {
     if let (Some(out), Some(data)) = (flag(args, "--out"), result.get("png_base64").and_then(|d| d.as_str())) {
         use base64::Engine as _;
         let png = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
-        save_output(Path::new(out), png)?;
+        save_output(Path::new(out), &png)?;
         result["png_base64"] = serde_json::json!(format!("written to {out}"));
     }
     stdout_line(format_args!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()))?;
