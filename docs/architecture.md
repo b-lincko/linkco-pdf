@@ -50,7 +50,9 @@ The PDF object graph *is* the model (`crates/engine/README.md` §The editing mod
    revision); the view is refreshed from those bytes, so what you see is what Save writes.
 4. Saves are incremental and atomic. A full rewrite happens only where it must: redaction, PDF/A
    conversion, print imposition, a changed password, Save As to another file (garbage-collected,
-   unless the document is signed).
+   unless the document is signed). The command line writes every file it produces the same way —
+   private staging file beside the target, flushed, then renamed over it — so a script that runs
+   unattended cannot leave an empty or half-written document behind.
 5. Autosave and crash recovery keep encrypted documents encrypted. Signed documents are protected
    from rewrites.
 

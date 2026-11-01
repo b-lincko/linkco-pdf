@@ -1,6 +1,11 @@
 //! Staging files for atomic saves: a new, unpredictably named file beside the target, written and
-//! then renamed over it. Creation and flushing are shared; writing, closing, renaming and cleaning
-//! up stay with the caller.
+//! then renamed over it.
+//!
+//! [`replace_file`] does the whole sequence for a caller that has nothing to prove about the
+//! individual steps. The desktop app's save and the automation tools keep their own sequencing
+//! instead, because their tests inject a failure at the write, the flush and the rename in turn
+//! and need those seams; the pieces they share with [`replace_file`] are [`create_staging`] and
+//! [`sync_staged`].
 
 use std::path::{Path, PathBuf};
 
@@ -106,9 +111,70 @@ pub fn staging_suffixes() -> impl Iterator<Item = u64> {
     (0u64..).map(move |i| state.hash_one(i))
 }
 
+/// Replace `path` with `bytes`, or leave whatever was there exactly as it was.
+///
+/// The bytes go to a private staging file in the same folder and are flushed to the disk before
+/// anything is renamed, so a reader of the target — and the file that survives a crash, a full
+/// volume or a denied rename — sees either the old contents whole or the new contents whole, never
+/// a half-written file. The staging file is removed if any step fails, and a target that is a
+/// folder (or whose folder is missing or unwritable) fails before a byte is written.
+///
+/// On Unix the staging file is created `0o600` and keeps that mode once renamed into place, so a
+/// file this writes is private to its owner regardless of the umask; on other platforms the
+/// operating system's defaults apply, as they do to [`create_staging`].
+pub fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    // A folder is not something to replace, and staging beside it could land outside the folder
+    // this is allowed to write in.
+    if path.is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::IsADirectory, "is a folder, not a file"));
+    }
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let name = path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file path"))?;
+    let (tmp, mut file) = create_staging(dir, &name.to_string_lossy(), StagingName::SuffixThenTag, staging_suffixes())?;
+    // Written, flushed and closed before the rename: the file handle is dropped at the end of the
+    // block, which is what Windows needs before a file can be renamed over.
+    let written = file.write_all(bytes).and_then(|()| sync_staged(&file, std::fs::File::sync_all));
+    drop(file);
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_file_writes_replaces_and_leaves_no_staging_file() {
+        let dir = test_dir("replace-writes");
+        let target = dir.join("out.pdf");
+        replace_file(&target, b"first").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"first");
+        replace_file(&target, b"second, longer than the first").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"second, longer than the first");
+        // Nothing but the target: a staging file left behind is a full copy of a document sitting
+        // in the user's folder under a name they did not choose.
+        let left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["out.pdf"]);
+    }
+
+    #[test]
+    fn replace_file_refuses_a_folder_and_writes_nothing_beside_it() {
+        let dir = test_dir("replace-folder");
+        let folder = dir.join("out");
+        std::fs::create_dir(&folder).unwrap();
+        let error = replace_file(&folder, b"bytes").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::IsADirectory, "{error}");
+        // The folder is still a folder, and no staging file was created in its place or beside it.
+        assert!(folder.is_dir());
+        let left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["out"]);
+    }
 
     /// A fresh, empty folder for one test.
     fn test_dir(test: &str) -> PathBuf {
