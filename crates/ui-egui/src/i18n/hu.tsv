@@ -2241,3 +2241,11 @@ key	Space	Szóköz
 	and {n} more	és további {n}
 	The job stopped without finishing	A feladat befejezés nélkül állt le
 	The job couldn't start: {e}	A feladatot nem sikerült elindítani: {e}
+	Run {name} on {n} files?	Futtatja a(z) {name} műveletet {n} fájlon?
+	Recognize text in {n} files?	Szöveg felismerése {n} fájlban?
+	Results go to {folder}	Az eredmények ide kerülnek: {folder}
+	Writes {n} file(s).	{n} fájl íródik.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Lecserél {n} már meglévő fájlt. A lecserélt fájl nem állítható vissza.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} fájl egy már meglévő mellé íródik, amely érintetlen marad.
+	Nothing that is already in the folder is replaced.	Semmi, ami már a mappában van, nem cserélődik le.
+	The folder changed since this was shown; check what this batch would write now	A mappa megváltozott, mióta ez megjelent; nézze meg, mit írna most ez a köteg

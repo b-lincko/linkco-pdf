@@ -2264,3 +2264,11 @@ key	Space	Пробіл
 	and {n} more	і ще {n}
 	The job stopped without finishing	Завдання зупинилося, не завершившись
 	The job couldn't start: {e}	Не вдалося запустити завдання: {e}
+	Run {name} on {n} files?	Виконати «{name}» для {n} файлів?
+	Recognize text in {n} files?	Розпізнати текст у {n} файлах?
+	Results go to {folder}	Результати буде збережено до {folder}
+	Writes {n} file(s).	Записує {n} файл(ів).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Замінює {n} наявних файлів. Замінений файл відновити неможливо.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файлів буде записано поруч із наявним, який лишиться як є.
+	Nothing that is already in the folder is replaced.	Нічого з наявного в теці не замінюється.
+	The folder changed since this was shown; check what this batch would write now	Тека змінилася після показу цього плану; перевірте, що цей пакет запише зараз

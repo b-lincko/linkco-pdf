@@ -2173,3 +2173,11 @@ key	Space	స్పేస్
 	and {n} more	మరో {n}
 	The job stopped without finishing	పని పూర్తికాకుండా ఆగిపోయింది
 	The job couldn't start: {e}	పనిని ప్రారంభించలేకపోయాం: {e}
+	Run {name} on {n} files?	{n} ఫైళ్లపై {name} ను అమలు చేయాలా?
+	Recognize text in {n} files?	{n} ఫైళ్లలో వచనాన్ని గుర్తించాలా?
+	Results go to {folder}	ఫలితాలు {folder} కి వెళ్తాయి
+	Writes {n} file(s).	{n} ఫైల్(లు) రాస్తుంది.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	ఇప్పటికే ఉన్న {n} ఫైల్(ల)ను భర్తీ చేస్తుంది. భర్తీ చేసిన ఫైల్ తిరిగి రాదు.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} ఫైల్(లు) ఇప్పటికే ఉన్న దాని పక్కన రాయబడతాయి, అది మారదు.
+	Nothing that is already in the folder is replaced.	ఫోల్డర్‌లో ఇప్పటికే ఉన్నది ఏదీ భర్తీ చేయబడదు.
+	The folder changed since this was shown; check what this batch would write now	ఇది చూపిన తర్వాత ఫోల్డర్ మారింది; ఈ బ్యాచ్ ఇప్పుడు ఏమి రాస్తుందో చూడండి

@@ -2159,3 +2159,11 @@ key	Space	Espacio
 	and {n} more	y {n} más
 	The job stopped without finishing	La tarea se detuvo sin terminar
 	The job couldn't start: {e}	No se pudo iniciar la tarea: {e}
+	Run {name} on {n} files?	¿Ejecutar {name} en {n} archivos?
+	Recognize text in {n} files?	¿Reconocer texto en {n} archivos?
+	Results go to {folder}	Los resultados van a {folder}
+	Writes {n} file(s).	Escribe {n} archivo(s).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Reemplaza {n} archivo(s) que ya están ahí. Un archivo reemplazado no se puede recuperar.
+	{n} file(s) are written beside one that is already there, which is left as it is.	Se escriben {n} archivo(s) junto a uno que ya está ahí, que queda intacto.
+	Nothing that is already in the folder is replaced.	No se reemplaza nada de lo que ya hay en la carpeta.
+	The folder changed since this was shown; check what this batch would write now	La carpeta cambió desde esta vista; compruebe lo que escribiría ahora este lote

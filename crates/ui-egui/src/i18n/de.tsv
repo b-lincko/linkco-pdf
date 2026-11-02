@@ -2243,3 +2243,11 @@ key	Space	Leertaste
 	and {n} more	und {n} weitere
 	The job stopped without finishing	Der Vorgang wurde beendet, ohne fertig zu werden
 	The job couldn't start: {e}	Der Vorgang konnte nicht gestartet werden: {e}
+	Run {name} on {n} files?	{name} auf {n} Dateien ausführen?
+	Recognize text in {n} files?	Text in {n} Dateien erkennen?
+	Results go to {folder}	Die Ergebnisse kommen nach {folder}
+	Writes {n} file(s).	Schreibt {n} Datei(en).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Ersetzt {n} bereits vorhandene Datei(en). Eine ersetzte Datei kann nicht wiederhergestellt werden.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} Datei(en) werden neben eine bereits vorhandene geschrieben, die unverändert bleibt.
+	Nothing that is already in the folder is replaced.	Nichts, was bereits im Ordner liegt, wird ersetzt.
+	The folder changed since this was shown; check what this batch would write now	Der Ordner hat sich seither geändert; prüfen Sie, was dieser Stapel jetzt schreiben würde

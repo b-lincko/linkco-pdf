@@ -53,6 +53,21 @@ pub struct BatchProgress {
     pub message: Option<String>,
 }
 
+/// Where a searchable copy goes: the destination the approved plan named (see
+/// [`crate::batch_plan`]), or — on the web build, which has no folder — a download.
+fn write_copy(destination: Option<&std::path::Path>, name: &str, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = destination.ok_or_else(|| format!("{name}: this run has no destination"))?;
+        crate::editing::write_atomically(&path.to_string_lossy(), bytes).map_err(|e| format!("{name}: {e}"))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = destination;
+        crate::editing::download(name, bytes).map_err(|e| format!("{name}: {e}"))
+    }
+}
+
 /// A run over several files: its progress and its row in the job centre.
 #[derive(Clone)]
 pub struct OcrBatchRun {
@@ -229,12 +244,33 @@ impl PdfCraftApp {
     }
 
     /// [`Self::ocr_files`] once the folder for the searchable files is known.
+    ///
+    /// On the desktop this no longer starts anything: it works out what the batch would write (see
+    /// [`crate::batch_plan`]) and asks the reader. The run itself is [`Self::start_recognize_files`].
     fn ocr_files_into(&mut self, files: Vec<(String, Vec<u8>)>, settings: OcrSettings, #[cfg(not(target_arch = "wasm32"))] dir: std::path::PathBuf) {
         // Another batch may have started while the folder picker was open.
         if self.ocr_batch.is_some() {
             self.notify_tr("Text recognition is already running");
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let names: Vec<String> = files.iter().map(|(name, _)| name.clone()).collect();
+            let plan = crate::batch_plan::plan(&dir, crate::batch_plan::Kind::Recognize, &names);
+            self.ask_batch(crate::batch_plan::Pending { plan, work: crate::batch_plan::Work::Recognize { files, settings } });
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.start_recognize_files(files, settings, None);
+    }
+
+    /// Recognize text in each file, writing each copy where `plan` said it would go.
+    ///
+    /// `plan` is the approved plan (the desktop path) or `None` on the web build, where each copy
+    /// is a download.
+    pub(crate) fn start_recognize_files(&mut self, files: Vec<(String, Vec<u8>)>, settings: OcrSettings, plan: Option<crate::batch_plan::Plan>) {
+        let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
+        let files: Vec<(Option<std::path::PathBuf>, (String, Vec<u8>))> = files.into_iter().map(|file| (destinations.next(), file)).collect();
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::RecognizeFiles, tl!("Recognize Text in Files").to_string(), files.len());
         let progress = Arc::new(Mutex::new(BatchProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();
@@ -257,13 +293,11 @@ impl PdfCraftApp {
                         s.done = done;
                     }
                 },
-                |(name, bytes)| {
+                |(destination, (name, bytes))| {
                     let ocr = engine.as_ref().map_err(|e| e.clone())?;
                     let r = pdfcraft_engine::ocr::recognize_file(&name, Arc::new(bytes), None, settings.clone(), ocr, |_, _| true)?;
-                    #[cfg(not(target_arch = "wasm32"))]
-                    crate::editing::write_atomically(&dir.join(&name).to_string_lossy(), &r.bytes).map_err(|e| format!("{name}: {e}"))?;
-                    #[cfg(target_arch = "wasm32")]
-                    crate::editing::download(&name, &r.bytes).map_err(|e| format!("{name}: {e}"))?;
+                    // The file written is the file that was approved.
+                    write_copy(destination.as_deref(), &name, &r.bytes)?;
                     words += r.words();
                     Ok::<(), String>(())
                 },

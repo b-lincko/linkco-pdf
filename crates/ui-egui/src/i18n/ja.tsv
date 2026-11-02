@@ -2243,3 +2243,11 @@ key	Space	スペース
 	and {n} more	他 {n} 件
 	The job stopped without finishing	処理は完了せずに終了しました
 	The job couldn't start: {e}	処理を開始できませんでした: {e}
+	Run {name} on {n} files?	{name} を {n} ファイルに実行しますか？
+	Recognize text in {n} files?	{n} ファイルのテキストを認識しますか？
+	Results go to {folder}	結果の保存先: {folder}
+	Writes {n} file(s).	{n} ファイルを書き込みます。
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	既にある {n} ファイルを置き換えます。置き換えたファイルは元に戻せません。
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} ファイルは既にあるファイルの横に書き込まれ、元のファイルはそのまま残ります。
+	Nothing that is already in the folder is replaced.	フォルダーに既にあるものは置き換えません。
+	The folder changed since this was shown; check what this batch would write now	この表示の後にフォルダーが変わりました。このバッチが今書き込む内容を確認してください

@@ -38,34 +38,23 @@ pub struct RunProgress {
     pub message: Option<String>,
 }
 
-/// Keep each desktop result, including when input basenames repeat or an earlier run already
-/// used the name. The search is bounded and never falls back to an occupied destination.
-#[cfg(not(target_arch = "wasm32"))]
-fn write_result(dir: &std::path::Path, name: &str, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
-    use std::io::{Error, ErrorKind};
-    let source = std::path::Path::new(name);
-    let filename = source.file_name().ok_or_else(|| Error::from(ErrorKind::InvalidInput))?;
-    let stem = source.file_stem().unwrap_or(filename).to_string_lossy();
-    for number in 1..=10_000 {
-        let path = if number == 1 {
-            dir.join(filename)
-        } else {
-            let suffix = match source.extension() {
-                Some(ext) => format!("{stem} ({number}).{}", ext.to_string_lossy()),
-                None => format!("{stem} ({number})"),
-            };
-            dir.join(suffix)
-        };
-        match std::fs::symlink_metadata(&path) {
-            Ok(_) => continue,
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                crate::editing::write_atomically(&path.to_string_lossy(), bytes)?;
-                return Ok(path);
-            }
-            Err(e) => return Err(e),
-        }
+/// Where a result goes: the destination the approved plan named (see [`crate::batch_plan`]), or —
+/// on the web build, which has no folder — a download.
+///
+/// The naming rule is not repeated here: it is the plan's, so the file written is the file the
+/// reader was shown. A destination is always present on the desktop path; the web build passes
+/// none because a download cannot replace anything.
+fn write_to(destination: Option<&std::path::Path>, name: &str, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = destination.ok_or_else(|| format!("{name}: this run has no destination"))?;
+        crate::editing::write_atomically(&path.to_string_lossy(), bytes).map_err(|e| format!("{name}: {e}"))
     }
-    Err(Error::from(ErrorKind::AlreadyExists))
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = destination;
+        crate::editing::download(name, bytes)
+    }
 }
 
 impl PdfCraftApp {
@@ -96,12 +85,35 @@ impl PdfCraftApp {
     }
 
     /// [`Self::run_action_on`] once the folder for the results is known.
+    ///
+    /// On the desktop this no longer starts anything: it works out what the run would write (see
+    /// [`crate::batch_plan`]) and asks the reader. The run itself is [`Self::start_action`], called
+    /// with the plan that was approved.
     fn run_action_into(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, #[cfg(not(target_arch = "wasm32"))] dir: std::path::PathBuf) {
         // Another run may have started while the folder picker was open.
         if self.action_run.is_some() {
             self.notify_tr("An action is already running");
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let names: Vec<String> = files.iter().map(|(name, _)| name.clone()).collect();
+            let plan = crate::batch_plan::plan(&dir, crate::batch_plan::Kind::Action, &names);
+            self.ask_batch(crate::batch_plan::Pending { plan, work: crate::batch_plan::Work::Action { action, files } });
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.start_action(action, files, None);
+    }
+
+    /// Run `action` over `files`, writing each result where `plan` said it would go.
+    ///
+    /// `plan` is the approved plan (the desktop path) or `None` on the web build, where each result
+    /// is a download and nothing on disk can be replaced.
+    pub(crate) fn start_action(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, plan: Option<crate::batch_plan::Plan>) {
+        // Where each result goes, in the order the files are offered (`None` on the web build).
+        let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
+        let files: Vec<(Option<std::path::PathBuf>, (String, Vec<u8>))> = files.into_iter().map(|file| (destinations.next(), file)).collect();
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Action, action.name.clone(), files.len());
         let progress = Arc::new(Mutex::new(RunProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();
@@ -123,13 +135,10 @@ impl PdfCraftApp {
                         s.done = done;
                     }
                 },
-                |(name, bytes)| {
+                |(destination, (name, bytes))| {
                     pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| {}).and_then(|r| {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        write_result(&dir, &name, &r.bytes).map_err(|e| e.to_string())?;
-                        #[cfg(target_arch = "wasm32")]
-                        crate::editing::download(&name, &r.bytes)?;
-                        Ok(())
+                        // The file written is the file that was approved.
+                        write_to(destination.as_deref(), &name, &r.bytes)
                     })
                 },
             );

@@ -2205,3 +2205,11 @@ key	Space	Интервал
 	and {n} more	и още {n}
 	The job stopped without finishing	Задачата спря, без да завърши
 	The job couldn't start: {e}	Задачата не можа да започне: {e}
+	Run {name} on {n} files?	Да се изпълни „{name}“ за {n} файла?
+	Recognize text in {n} files?	Разпознаване на текст в {n} файла?
+	Results go to {folder}	Резултатите отиват в {folder}
+	Writes {n} file(s).	Записва {n} файл(а).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Заменя {n} вече налични файла. Заменен файл не може да бъде възстановен.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файла се записват до вече наличен, който остава непроменен.
+	Nothing that is already in the folder is replaced.	Нищо, което вече е в папката, не се заменя.
+	The folder changed since this was shown; check what this batch would write now	Папката се промени, след като това беше показано; проверете какво би записал пакетът сега

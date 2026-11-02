@@ -9169,7 +9169,7 @@ milestone = "M13"
 status = "shipped"
 commands = ["actions.wizard"]
 tools = ["action_list", "action_run"]
-evidence = ["crates/ui-egui/tests/actions.rs::desktop_actions_preserve_duplicate_names_and_results_from_earlier_runs", "crates/engine/src/tests.rs::actions_run_their_steps_on_files", "crates/automation/tests/automation.rs::actions_through_tools", "crates/ui-egui/tests/actions.rs::run_and_create_actions"]
+evidence = ["crates/ui-egui/tests/actions.rs::desktop_actions_preserve_duplicate_names_and_results_from_earlier_runs", "crates/engine/src/tests.rs::actions_run_their_steps_on_files", "crates/automation/tests/automation.rs::actions_through_tools", "crates/ui-egui/tests/actions.rs::run_and_create_actions", "crates/ui-egui/tests/batch_approval.rs::the_batch_is_shown_and_writes_nothing_until_it_is_approved", "crates/ui-egui/tests/batch_approval.rs::a_folder_that_changed_under_the_question_is_not_the_batch_that_runs", "crates/ui-egui/tests/batch_approval.rs::a_recognition_batch_names_the_file_it_would_replace_before_it_does"]
 notes = "Desktop output filenames receive numbered suffixes when occupied, preserving every batch result and previous outputs. Pick an action and files; results go to a chosen folder, in the background with progress."
 
 [[feature]]
@@ -9254,7 +9254,7 @@ status = "partial"
 commands = ["actions.wizard", "ocr.recognize_batch"]
 tools = ["action_run", "ocr_recognize_files", "batch_expand", "batch_plan"]
 evidence = ["crates/automation/tests/automation.rs::actions_through_tools", "crates/automation/tests/batch_folder.rs::a_folder_is_walked_in_name_order_and_says_what_it_left_out", "crates/automation/tests/batch_folder.rs::the_same_file_reached_twice_is_in_the_batch_once", "crates/automation/tests/batch_folder.rs::a_plan_and_a_run_cover_the_same_files_and_approving_writes_exactly_them", "crates/automation/tests/approval.rs::the_run_a_plan_approves_is_the_batch_it_describes", "crates/automation/tests/approval.rs::a_token_names_one_batch_and_nothing_else", "crates/ui-egui/tests/actions.rs::run_and_create_actions"]
-notes = "Actions and OCR run over chosen files and over whole folders with their subfolders, with exclusion patterns, and each file once however it was reached. A batch can be planned before it runs (what it would write, what it would replace, and a token that makes the run refuse any batch other than the one planned). A folder is not watched for changes yet, a batch over a folder is not resumed after a crash, and nothing yet shows a plan to a person and asks."
+notes = "Actions and OCR run over chosen files and over whole folders with their subfolders, with exclusion patterns, and each file once however it was reached. A batch can be planned before it runs (what it would write, what it would replace, and a token that makes the run refuse any batch other than the one planned). In the app the same plan is shown before either batch runs — what would be written, and which files would be replaced — and the answer is checked: the plan is worked out again when it is accepted, so a folder that changed under the question is not the batch that runs. A folder is not watched for changes yet, and a batch over a folder is not resumed after a crash."
 
 [[feature]]
 id = "misc.action-prompt-steps"

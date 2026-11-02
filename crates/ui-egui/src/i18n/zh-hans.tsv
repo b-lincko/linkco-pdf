@@ -2207,3 +2207,11 @@ key	Space	空格
 	and {n} more	另有 {n} 项
 	The job stopped without finishing	任务中途停止，未能完成
 	The job couldn't start: {e}	无法启动任务：{e}
+	Run {name} on {n} files?	对 {n} 个文件运行“{name}”？
+	Recognize text in {n} files?	识别 {n} 个文件中的文本？
+	Results go to {folder}	结果保存到 {folder}
+	Writes {n} file(s).	将写入 {n} 个文件。
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	将替换已存在的 {n} 个文件。被替换的文件无法恢复。
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} 个文件将写在已有文件旁边，原文件保持不变。
+	Nothing that is already in the folder is replaced.	文件夹中已有的内容不会被替换。
+	The folder changed since this was shown; check what this batch would write now	文件夹在显示后已发生变化；请检查此批次现在会写入什么

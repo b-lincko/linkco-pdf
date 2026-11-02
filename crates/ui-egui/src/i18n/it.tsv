@@ -2250,3 +2250,11 @@ key	Space	Spazio
 	and {n} more	e altri {n}
 	The job stopped without finishing	L'operazione si è fermata senza finire
 	The job couldn't start: {e}	Impossibile avviare l'operazione: {e}
+	Run {name} on {n} files?	Eseguire {name} su {n} file?
+	Recognize text in {n} files?	Riconoscere il testo in {n} file?
+	Results go to {folder}	I risultati vanno in {folder}
+	Writes {n} file(s).	Scrive {n} file.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Sostituisce {n} file già presenti. Un file sostituito non può essere recuperato.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} file vengono scritti accanto a uno già presente, che resta com'è.
+	Nothing that is already in the folder is replaced.	Niente di ciò che è già nella cartella viene sostituito.
+	The folder changed since this was shown; check what this batch would write now	La cartella è cambiata da quando è stato mostrato; controlla cosa scriverebbe ora questo lotto

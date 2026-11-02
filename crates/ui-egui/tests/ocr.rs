@@ -57,6 +57,9 @@ fn recognize_text_in_multiple_files_writes_searchable_copies() {
     app.run_inline = true;
     app.export_dir_override = Some(dir.to_string_lossy().into_owned());
     app.use_files(pdfcraft_ui_egui::FilePurpose::Ocr, vec![("one.pdf".into(), scan()), ("two.pdf".into(), scan())]);
+    // The batch is planned and waiting for its answer; approving it runs it.
+    assert!(app.pending_batch.is_some(), "the batch is planned before it runs");
+    app.run_pending_batch();
     assert!(app.ocr_batch.is_none(), "finished");
     let toast = app.toast.clone().unwrap().0;
     assert!(toast.starts_with("Recognized ") && toast.ends_with("in 2 files"), "{toast}");

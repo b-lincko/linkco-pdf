@@ -2244,3 +2244,11 @@ key	Space	Espaço
 	and {n} more	e mais {n}
 	The job stopped without finishing	A tarefa parou sem terminar
 	The job couldn't start: {e}	Não foi possível iniciar a tarefa: {e}
+	Run {name} on {n} files?	Executar {name} em {n} arquivos?
+	Recognize text in {n} files?	Reconhecer texto em {n} arquivos?
+	Results go to {folder}	Os resultados vão para {folder}
+	Writes {n} file(s).	Grava {n} arquivo(s).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Substitui {n} arquivo(s) que já estão lá. Um arquivo substituído não pode ser recuperado.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} arquivo(s) são gravados ao lado de um que já está lá, que permanece como está.
+	Nothing that is already in the folder is replaced.	Nada do que já está na pasta é substituído.
+	The folder changed since this was shown; check what this batch would write now	A pasta mudou desde que isto foi mostrado; confira o que este lote gravaria agora

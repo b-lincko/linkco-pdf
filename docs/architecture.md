@@ -97,6 +97,11 @@ Every user-facing feature is reachable headlessly (`AGENTS.md` §3):
 - `unsafe_code = "forbid"` workspace-wide; crates deny `unwrap`/`expect`/`panic!`; engine entry
   points keep a last-resort `catch_unwind` (`AGENTS.md` §4).
 - Every input-derived size is bounded (decompression, images, recursion, content per page).
+- A batch of files is planned before it writes anything: Action Wizard and Recognize Text in Files
+  show what would be written, into which folder, and which files would be replaced, and start
+  nothing until that is answered. The plan is the writer's own naming rule, and it is worked out
+  again when the answer is given, so a folder that changed under the question is not the batch
+  that runs (`crates/ui-egui/src/batch_plan.rs`).
 - A background job's worker holds a lifetime handle (`crates/ui-egui/src/jobs.rs`, `Alive`) and
   drops it when it ends, so a worker that panics or returns early ends its job instead of leaving
   the interface waiting for a report that will never come: the card retires, the document is left

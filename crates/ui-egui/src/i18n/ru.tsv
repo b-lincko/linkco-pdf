@@ -2167,3 +2167,11 @@ key	Space	Пробел
 	and {n} more	и ещё {n}
 	The job stopped without finishing	Задача остановилась, не завершившись
 	The job couldn't start: {e}	Не удалось запустить задачу: {e}
+	Run {name} on {n} files?	Выполнить «{name}» для {n} файлов?
+	Recognize text in {n} files?	Распознать текст в {n} файлах?
+	Results go to {folder}	Результаты будут в {folder}
+	Writes {n} file(s).	Записывает {n} файл(ов).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Заменяет {n} уже существующих файл(ов). Заменённый файл восстановить нельзя.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файл(ов) будут записаны рядом с существующим, который останется как есть.
+	Nothing that is already in the folder is replaced.	Ничего из уже лежащего в папке не заменяется.
+	The folder changed since this was shown; check what this batch would write now	Папка изменилась после показа этого плана; проверьте, что этот пакет запишет сейчас

@@ -2243,3 +2243,11 @@ key	Space	Espace
 	and {n} more	et {n} de plus
 	The job stopped without finishing	La tâche s'est arrêtée sans finir
 	The job couldn't start: {e}	La tâche n'a pas pu démarrer : {e}
+	Run {name} on {n} files?	Exécuter {name} sur {n} fichiers ?
+	Recognize text in {n} files?	Reconnaître le texte dans {n} fichiers ?
+	Results go to {folder}	Les résultats vont dans {folder}
+	Writes {n} file(s).	Écrit {n} fichier(s).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Remplace {n} fichier(s) déjà présent(s). Un fichier remplacé ne peut pas être récupéré.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} fichier(s) sont écrits à côté d'un fichier déjà présent, qui reste intact.
+	Nothing that is already in the folder is replaced.	Rien de ce qui est déjà dans le dossier n'est remplacé.
+	The folder changed since this was shown; check what this batch would write now	Le dossier a changé depuis cet aperçu ; vérifiez ce que ce lot écrirait maintenant

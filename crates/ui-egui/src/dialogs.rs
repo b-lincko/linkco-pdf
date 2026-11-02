@@ -70,6 +70,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             Dialog::Print => 820.0,
             Dialog::FieldProps | Dialog::BulkFieldProps => 600.0,
             Dialog::About => 780.0,
+            Dialog::BatchApprove => 560.0,
             _ => 520.0,
         });
         // Dialog controls are outlined (radio buttons, check boxes, combo boxes and number fields
@@ -891,6 +892,19 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 close = crate::actions_ui::body(ui, app, &t);
                 return;
             }
+            Dialog::BatchApprove => {
+                let (run, cancel) = crate::batch_plan::body(ui, app);
+                if run {
+                    // Runs the batch, or — if it is no longer the batch that was shown — says so
+                    // and leaves the question open with the plan as it is now.
+                    app.run_pending_batch();
+                }
+                if cancel {
+                    app.pending_batch = None;
+                }
+                close = app.pending_batch.is_none();
+                return;
+            }
             Dialog::CompareFiles => {
                 let (go, cancel) = crate::compare_ui::body(ui, app, &t);
                 compare_now = go;
@@ -1314,11 +1328,22 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     // Protect / Remove security replace the Properties dialog.
     let replaces = link_command.is_some_and(|c| c.starts_with("protect.")) || open_revision.is_some();
+    // A surface may have opened a different dialog while this frame was drawing — the Action
+    // Wizard's Start opens the batch question, for one. That one is the dialog now.
+    let opened = app.dialog.is_some_and(|shown| shown != dialog);
     if modal.should_close() || close || replaces {
-        app.dialog = None;
-        app.props_draft = None;
-        app.view_draft = None;
-        app.bulk_field_props = None;
+        if opened {
+            app.props_draft = None;
+            app.view_draft = None;
+            app.bulk_field_props = None;
+        } else {
+            app.dialog = None;
+            app.props_draft = None;
+            app.view_draft = None;
+            app.bulk_field_props = None;
+            // A batch question dismissed without an answer drops its batch: nothing runs.
+            app.pending_batch = None;
+        }
     } else {
         app.dialog = Some(next);
     }

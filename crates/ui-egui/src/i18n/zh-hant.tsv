@@ -2129,3 +2129,11 @@ key	Space	空格
 	and {n} more	另有 {n} 項
 	The job stopped without finishing	工作已停止，未完成
 	The job couldn't start: {e}	無法啟動工作：{e}
+	Run {name} on {n} files?	對 {n} 個檔案執行「{name}」？
+	Recognize text in {n} files?	辨識 {n} 個檔案中的文字？
+	Results go to {folder}	結果儲存到 {folder}
+	Writes {n} file(s).	將寫入 {n} 個檔案。
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	將取代已存在的 {n} 個檔案。被取代的檔案無法復原。
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} 個檔案會寫在現有檔案旁邊，原檔案維持不變。
+	Nothing that is already in the folder is replaced.	資料夾中既有的內容不會被取代。
+	The folder changed since this was shown; check what this batch would write now	資料夾在顯示後已變更；請檢查此批次現在會寫入什麼

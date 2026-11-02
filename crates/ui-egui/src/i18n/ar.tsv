@@ -2263,3 +2263,11 @@ key	Space	مسافة
 	and {n} more	و{n} أخرى
 	The job stopped without finishing	انتهت المهمة دون أن تكتمل
 	The job couldn't start: {e}	تعذّر بدء المهمة: {e}
+	Run {name} on {n} files?	هل تريد تشغيل {name} على {n} ملفات؟
+	Recognize text in {n} files?	هل تريد التعرف على النص في {n} ملفات؟
+	Results go to {folder}	تذهب النتائج إلى {folder}
+	Writes {n} file(s).	يكتب {n} ملف.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	يستبدل {n} ملفات موجودة بالفعل. لا يمكن استعادة الملف المستبدل.
+	{n} file(s) are written beside one that is already there, which is left as it is.	تُكتب {n} ملفات بجانب ملف موجود بالفعل، ويبقى كما هو.
+	Nothing that is already in the folder is replaced.	لا يتم استبدال أي شيء موجود بالفعل في المجلد.
+	The folder changed since this was shown; check what this batch would write now	تغيّر المجلد منذ عرض هذا؛ تحقق مما ستكتبه هذه الدفعة الآن

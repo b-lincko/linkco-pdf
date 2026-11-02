@@ -33,6 +33,10 @@ pub const DEVELOPER: &str = "Muhammad Bilal (Linkco)";
 
 mod a11y_ui;
 mod actions_ui;
+// The plan and its question are the desktop's: on the web build each result is a download and
+// nothing can be replaced, so the remaining surface is allowed to go unused there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub mod batch_plan;
 pub mod canvas;
 mod chrome;
 mod combine_grid;
@@ -322,6 +326,8 @@ pub enum Dialog {
     AuditSpace,
     /// Signatures ▸ Show certificate.
     CertificateViewer,
+    /// A batch of files waiting to be approved before it writes anything (REC-B03).
+    BatchApprove,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -593,6 +599,9 @@ pub struct PdfCraftApp {
     /// The background jobs that are running, drawn by the card at the bottom of the window
     /// (see [`widgets::jobs_card`]) and reported on the control channel.
     pub jobs: jobs::Jobs,
+    /// A batch waiting for its reader: what it would write, and the work that would write it
+    /// (see [`batch_plan`]). Only one question is asked at a time.
+    pub pending_batch: Option<batch_plan::Pending>,
     /// Pages copied or cut in Organize Pages, ready to paste (into any document).
     pub page_clipboard: Option<PageClip>,
     /// Files dropped on the page grid, waiting for the pointer to say which gap they go to.
@@ -871,6 +880,7 @@ impl PdfCraftApp {
             optimize_draft: OptimizeDraft::default(),
             optimize_run: None,
             jobs: jobs::Jobs::default(),
+            pending_batch: None,
             page_clipboard: None,
             grid_drop: None,
             last_snapshot: None,

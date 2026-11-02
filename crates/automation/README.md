@@ -199,9 +199,15 @@ The token is not a secret and not a permission. It is not signed, it is not a ca
 does not decide whether a batch should run — the session's profile and `--approve` list do that,
 and a token cannot get a call past them. It answers one question, "is this the batch that was
 approved", which is a question about drift rather than trust, and it is optional: a call without a
-token behaves exactly as it did before (`approved: false` in the answer). What is still missing, and
-what this does **not** claim, is the person: showing the plan in the interface and asking someone to
-approve it. The token is what such a prompt would hand to the run; the prompt is not built.
+token behaves exactly as it did before (`approved: false` in the answer).
+
+The person is the other half, and it lives in the app rather than here (B035): Action Wizard and
+Recognize Text in Files work out the same kind of plan when the results folder is chosen, show it —
+how many files, into which folder, and which of them would replace something — and start nothing
+until it is answered. The answer is checked the same way this token is: the plan is worked out again
+when it is accepted, so a folder that changed under the question is not the batch that runs. The two
+halves do not share code (this crate cannot depend on the interface, and the interface does not
+depend on this crate): they share the shape of the answer, and each has its own tests.
 
 ## Adding a tool
 

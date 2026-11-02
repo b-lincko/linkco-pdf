@@ -30,6 +30,11 @@ fn run_and_create_actions() {
     h.get_by_label("1. Remove hidden information");
     h.get_by_label("Start").click();
     h.run_steps(3);
+    // Nothing runs before the plan is answered: the question names the file it would write.
+    h.get_by_label("Run Prepare for Distribution on 1 files?");
+    assert!(std::fs::read_dir(dir.join("out")).unwrap().next().is_none(), "the plan wrote nothing");
+    h.get_by_label("Run").click();
+    h.run_steps(3);
     assert_eq!(h.state().toast.clone().unwrap().0, "Prepare for Distribution: 1 file done");
     assert!(std::fs::read(dir.join("out/r.pdf")).unwrap().starts_with(b"%PDF"));
 
@@ -54,6 +59,8 @@ fn run_and_create_actions() {
     fresh.restore(&saved);
     assert_eq!(fresh.custom_actions, h.state().custom_actions);
     h.get_by_label("Start").click();
+    h.run_steps(2);
+    h.get_by_label("Run").click();
     h.run_steps(3);
     assert_eq!(h.state().toast.clone().unwrap().0, "Stamp drafts: 1 file done");
 }
@@ -87,6 +94,8 @@ fn desktop_actions_preserve_duplicate_names_and_results_from_earlier_runs() {
         h.state_mut().execute("actions.distribution");
         h.run_steps(2);
         h.get_by_label("Start").click();
+        h.run_steps(2);
+        h.get_by_label("Run").click();
         h.run_steps(3);
         assert_eq!(h.state().toast.clone().unwrap().0, "Prepare for Distribution: 2 files done");
         for (number, pages) in [(first, 3), (second, 1)] {

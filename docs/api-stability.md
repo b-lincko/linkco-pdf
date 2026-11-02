@@ -97,8 +97,14 @@ A call without a token is the call it always was: the argument is optional, and 
 none answers `approved: false` so a caller can tell the two apart. The token is not a secret and not
 a permission — it cannot let a call past the session's profile, and it does not decide whether a
 batch *should* run. It answers one question, "is this the batch that was approved", for a plan
-somebody read. Showing that plan to a person and asking is the interface's job, and the interface
-does not do it yet.
+somebody read.
+
+Showing that plan to a person and asking is the interface's job, and since B035 the interface does
+it: Action Wizard and Recognize Text in Files plan the batch when the results folder is chosen, show
+what it would write and what it would replace, and start nothing until that is answered — and the
+answer is checked against the batch as it is at that moment, so a folder that changed under the
+question is asked about again rather than run. That prompt is the app's; no tool, argument or
+schema version changed with it.
 
 ## Examples
 
