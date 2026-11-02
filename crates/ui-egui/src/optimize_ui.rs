@@ -343,10 +343,12 @@ impl PdfCraftApp {
         let Some(run) = self.optimize_run.as_ref() else { return };
         let (doc, kind, progress, job) = (run.doc, run.kind, run.progress.clone(), run.job);
         let Ok(mut s) = progress.lock() else {
-            // The worker panicked while holding the lock: it will never report back.
+            // The worker panicked while holding the lock: it will never report back. One sentence
+            // for one situation, the same one the other four kinds of work use (see jobs::Alive),
+            // not the one for an optimization that ran and refused.
             self.optimize_run = None;
             self.jobs.finish(job);
-            self.notify_tr("Couldn't optimize the file");
+            self.notify_tr("The job stopped without finishing");
             return;
         };
         let Some(result) = s.result.take() else {
@@ -359,7 +361,7 @@ impl PdfCraftApp {
                 // refused for the life of the session; the document is untouched either way.
                 self.optimize_run = None;
                 self.jobs.finish(job);
-                self.notify_tr("Couldn't optimize the file");
+                self.notify_tr("The job stopped without finishing");
                 return;
             }
             self.jobs.stage(job, stage_label(stage), stage.fraction());
