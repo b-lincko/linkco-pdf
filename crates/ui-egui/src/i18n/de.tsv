@@ -2241,3 +2241,5 @@ key	Space	Leertaste
 	file {d} of {t}	Datei {d} von {t}
 	Export stopped after {done} of {total} files	Export nach {done} von {total} Dateien angehalten
 	and {n} more	und {n} weitere
+	The job stopped without finishing	Der Vorgang wurde beendet, ohne fertig zu werden
+	The job couldn't start: {e}	Der Vorgang konnte nicht gestartet werden: {e}

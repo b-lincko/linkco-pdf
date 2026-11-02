@@ -2239,3 +2239,5 @@ key	Space	Szóköz
 	file {d} of {t}	{d}. fájl / {t}
 	Export stopped after {done} of {total} files	Az exportálás {done} / {total} fájl után leállt
 	and {n} more	és további {n}
+	The job stopped without finishing	A feladat befejezés nélkül állt le
+	The job couldn't start: {e}	A feladatot nem sikerült elindítani: {e}

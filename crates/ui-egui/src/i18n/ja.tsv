@@ -2241,3 +2241,5 @@ key	Space	スペース
 	file {d} of {t}	ファイル {d} / {t}
 	Export stopped after {done} of {total} files	書き出しを {total} ファイル中 {done} ファイルで中止しました
 	and {n} more	他 {n} 件
+	The job stopped without finishing	処理は完了せずに終了しました
+	The job couldn't start: {e}	処理を開始できませんでした: {e}

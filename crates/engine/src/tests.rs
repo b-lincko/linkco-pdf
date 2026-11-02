@@ -301,6 +301,53 @@ fn failed_edit_changes_nothing() {
     assert_eq!(doc.bytes, before);
 }
 
+/// One document's refused edit changes neither that document nor the one beside it: a batch that
+/// fails partway lands nothing at all, the other tab keeps its own dirty state and history, and
+/// both stay usable (REC-R06: one bad operation must not spoil the rest).
+#[test]
+fn a_refused_batch_leaves_this_document_and_the_one_beside_it_alone() {
+    let (mut s, a) = session_with(2);
+    // A second document with a change of its own, so "untouched" is something to check.
+    let bytes = s.create_from_text("Report", "Quarterly numbers").unwrap();
+    let b = s.open("report.pdf", None, bytes, None).unwrap();
+    s.apply(b, Edit::SetInfo { key: "Title".into(), value: "Quarterly".into() }).unwrap();
+
+    let a_before = (s.get(a).unwrap().bytes.clone(), s.get(a).unwrap().edit_generation());
+    let b_before = (s.get(b).unwrap().bytes.clone(), s.get(b).unwrap().edit_generation());
+
+    // The first half would set a title; the second would remove every page, which the engine
+    // refuses. Neither half may land, and the refusal may not leak into the other tab.
+    let refused = s.apply(
+        a,
+        Edit::Batch {
+            label: "Prepare".into(),
+            edits: vec![Edit::SetInfo { key: "Title".into(), value: "Approved".into() }, Edit::DeletePages { pages: vec![0, 1] }],
+        },
+    );
+    assert!(refused.is_err(), "removing every page is refused: {refused:?}");
+    {
+        let doc = s.get(a).unwrap();
+        assert_eq!((doc.bytes.clone(), doc.edit_generation()), a_before, "the batch was undone whole");
+        assert!(!doc.dirty, "a refused edit is not a change");
+        assert_eq!(doc.can_undo(), None, "and it leaves no step to undo");
+        assert_eq!(doc.info_value("Title"), None, "the half that would have worked did not land either");
+    }
+    {
+        let doc = s.get(b).unwrap();
+        assert_eq!((doc.bytes.clone(), doc.edit_generation()), b_before, "the other tab was not touched");
+        assert_eq!(doc.can_undo(), Some("Change Title"), "and kept its own history");
+    }
+
+    // Both documents are still usable: the refused one takes an edit, the other one saves.
+    s.apply(a, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    assert!(s.get(a).unwrap().dirty);
+    let saved = s.save_bytes(b).unwrap();
+    assert!(saved.len() >= b_before.0.len());
+    s.mark_saved(b, saved, Some("/tmp/report.pdf".into())).unwrap();
+    assert!(!s.get(b).unwrap().dirty, "the other tab saved its own change");
+    assert_eq!(s.get(b).unwrap().info_value("Title").as_deref(), Some("Quarterly"));
+}
+
 #[test]
 fn save_is_incremental_stamps_mod_date_and_rebases() {
     let (mut s, id) = session_with(2);

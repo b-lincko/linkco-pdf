@@ -2261,3 +2261,5 @@ key	Space	مسافة
 	file {d} of {t}	الملف {d} من {t}
 	Export stopped after {done} of {total} files	توقف التصدير بعد {done} من {total} ملفًا
 	and {n} more	و{n} أخرى
+	The job stopped without finishing	انتهت المهمة دون أن تكتمل
+	The job couldn't start: {e}	تعذّر بدء المهمة: {e}

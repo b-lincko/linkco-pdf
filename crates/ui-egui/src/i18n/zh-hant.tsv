@@ -2127,3 +2127,5 @@ key	Space	空格
 	file {d} of {t}	第 {d} 個檔案，共 {t} 個
 	Export stopped after {done} of {total} files	匯出已在 {done}/{total} 個檔案後停止
 	and {n} more	另有 {n} 項
+	The job stopped without finishing	工作已停止，未完成
+	The job couldn't start: {e}	無法啟動工作：{e}

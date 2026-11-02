@@ -25,6 +25,9 @@ pub struct Wizard {
 pub struct ActionRun {
     pub progress: Arc<Mutex<RunProgress>>,
     pub job: crate::jobs::JobId,
+    /// Whether the worker is still going, so a poll can tell a slow run from one that ended
+    /// without reporting (REC-R06).
+    pub alive: crate::jobs::Alive,
 }
 
 /// Progress of a run: files done, total, and the summary once finished.
@@ -102,9 +105,14 @@ impl PdfCraftApp {
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Action, action.name.clone(), files.len());
         let progress = Arc::new(Mutex::new(RunProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
         // The summary is written on the worker thread: draw it in the UI's language.
         let lang = crate::i18n::current();
         let work = move || {
+            // Dropped however this ends, a panic included: the poll reads that as "no report is
+            // coming" and ends the job instead of leaving it running for the session.
+            let _worker = worker;
             crate::i18n::set_current(lang);
             let total = files.len();
             let outcome = crate::jobs::run_batch(
@@ -148,12 +156,16 @@ impl PdfCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         if self.run_inline {
             work();
-        } else {
-            std::thread::Builder::new().name("pdfcraft-action".into()).spawn(work).ok();
+        } else if let Err(e) = std::thread::Builder::new().name("pdfcraft-action".into()).spawn(work) {
+            // No worker thread: the run never starts, so say that rather than wait for it.
+            if let Ok(mut s) = progress.lock() {
+                s.done = s.total;
+                s.message = Some(crate::i18n::fmt(tl!("The job couldn't start: {e}"), &[("e", &e.to_string())]));
+            }
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.action_run = Some(ActionRun { progress, job });
+        self.action_run = Some(ActionRun { progress, job, alive });
         self.poll_action();
     }
 
@@ -161,6 +173,15 @@ impl PdfCraftApp {
     pub(crate) fn poll_action(&mut self) {
         let Some(run) = self.action_run.clone() else { return };
         let state = run.progress.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
+        // A worker that ended without a summary — it panicked, or a thread could not be made —
+        // would otherwise leave this run marked in progress for the session, refusing every later
+        // action. The handle says whether one is still coming.
+        if run.alive.ended_without_report(matches!(state, Some(Ok(_)))) {
+            self.action_run = None;
+            self.jobs.finish(run.job);
+            self.notify_tr("The job stopped without finishing");
+            return;
+        }
         match state {
             Some(Ok(m)) => {
                 self.action_run = None;
@@ -402,4 +423,51 @@ fn edit_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
         app.wizard.selected = Some(name);
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run whose worker never reports — a panic inside the action, or no thread at all — used
+    /// to stay "running" for the life of the session, refusing every later action (REC-R06).
+    #[test]
+    fn an_action_whose_worker_ended_without_reporting_ends_here() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let progress = Arc::new(Mutex::new(RunProgress { total: 3, ..Default::default() }));
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Action, "Prepare for Distribution".into(), 3);
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        app.action_run = Some(ActionRun { progress: progress.clone(), job, alive });
+
+        // Still going: the card stays and nothing is claimed about the run.
+        app.poll_action();
+        assert_eq!(app.jobs.jobs().len(), 1);
+        assert!(app.toast.is_none());
+
+        // Ended without a summary.
+        drop(worker);
+        app.poll_action();
+        assert!(app.action_run.is_none(), "the run is over");
+        assert!(app.jobs.is_empty(), "and its row in the centre with it");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job stopped without finishing"));
+        // Nothing is left holding the slot: the next run may start.
+        app.poll_action();
+    }
+
+    /// A worker that ended and did write its summary is the ordinary path.
+    #[test]
+    fn an_action_that_reports_is_shown_as_it_always_was() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let progress = Arc::new(Mutex::new(RunProgress { total: 1, done: 0, message: Some("Prepare for Distribution: 1 file done".into()) }));
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Action, "Prepare for Distribution".into(), 1);
+        let alive = crate::jobs::Alive::new();
+        app.action_run = Some(ActionRun { progress, job, alive });
+        app.poll_action();
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Prepare for Distribution: 1 file done"));
+        assert!(app.action_run.is_none());
+        assert!(app.jobs.is_empty());
+    }
 }

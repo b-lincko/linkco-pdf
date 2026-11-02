@@ -2241,3 +2241,5 @@ key	Space	Espace
 	file {d} of {t}	Fichier {d} sur {t}
 	Export stopped after {done} of {total} files	Exportation arrêtée après {done} fichiers sur {total}
 	and {n} more	et {n} de plus
+	The job stopped without finishing	La tâche s'est arrêtée sans finir
+	The job couldn't start: {e}	La tâche n'a pas pu démarrer : {e}

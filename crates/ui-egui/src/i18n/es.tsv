@@ -2157,3 +2157,5 @@ key	Space	Espacio
 	file {d} of {t}	Archivo {d} de {t}
 	Export stopped after {done} of {total} files	Exportación detenida tras {done} de {total} archivos
 	and {n} more	y {n} más
+	The job stopped without finishing	La tarea se detuvo sin terminar
+	The job couldn't start: {e}	No se pudo iniciar la tarea: {e}

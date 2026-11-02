@@ -97,6 +97,10 @@ Every user-facing feature is reachable headlessly (`AGENTS.md` §3):
 - `unsafe_code = "forbid"` workspace-wide; crates deny `unwrap`/`expect`/`panic!`; engine entry
   points keep a last-resort `catch_unwind` (`AGENTS.md` §4).
 - Every input-derived size is bounded (decompression, images, recursion, content per page).
+- A background job's worker holds a lifetime handle (`crates/ui-egui/src/jobs.rs`, `Alive`) and
+  drops it when it ends, so a worker that panics or returns early ends its job instead of leaving
+  the interface waiting for a report that will never come: the card retires, the document is left
+  as it was, and the next job of that kind can start.
 - `cargo xtask fuzz` runs nightly; every finding becomes a synthetic regression test.
 
 ## Build and quality gates

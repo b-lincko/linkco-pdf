@@ -2171,3 +2171,5 @@ key	Space	స్పేస్
 	file {d} of {t}	ఫైల్ {d} / {t}
 	Export stopped after {done} of {total} files	ఎగుమతి {total} ఫైళ్లలో {done} వద్ద ఆగిపోయింది
 	and {n} more	మరో {n}
+	The job stopped without finishing	పని పూర్తికాకుండా ఆగిపోయింది
+	The job couldn't start: {e}	పనిని ప్రారంభించలేకపోయాం: {e}

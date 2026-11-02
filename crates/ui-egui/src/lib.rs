@@ -647,6 +647,8 @@ pub struct PdfCraftApp {
     export_status: Option<export_ui::ExportStatus>,
     /// The card row of the export in flight, retired when the worker reports.
     export_job: Option<jobs::JobId>,
+    /// The export worker, so a poll can tell "not done yet" from "ended without a word" (REC-R06).
+    export_alive: Option<jobs::Alive>,
     /// The saved Fill & Sign signature and initials (drawn or typed).
     pub signature: Option<fill_sign::SavedSig>,
     pub initials: Option<fill_sign::SavedSig>,
@@ -899,6 +901,7 @@ impl PdfCraftApp {
             export_draft: Default::default(),
             export_status: None,
             export_job: None,
+            export_alive: None,
             signature: None,
             initials: None,
             signature_draft: Default::default(),

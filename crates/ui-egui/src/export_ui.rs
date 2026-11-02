@@ -38,6 +38,11 @@ impl Default for ExportDraft {
 /// Progress of a background export: (done, total, final message once finished).
 pub type ExportStatus = Arc<Mutex<Option<(usize, usize, Option<String>)>>>;
 
+/// A fresh report for an export of `pages` pages, before its worker says anything.
+fn job_status(pages: usize) -> ExportStatus {
+    Arc::new(Mutex::new(Some((0, pages, None))))
+}
+
 pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: ExportKind) -> (bool, bool) {
     let count = app.active_ids().and_then(|(_, id)| app.session.get(id)).map(|d| d.info.pages.len()).unwrap_or(0);
     let d = &mut app.export_draft;
@@ -237,7 +242,62 @@ fn run(
     }
 }
 
+/// Everything an export worker needs, owned, so the work can move to a thread.
+#[cfg(not(target_arch = "wasm32"))]
+struct ExportWork {
+    src: ExportSource,
+    kind: ExportKind,
+    dpi: f64,
+    format: ImageFormat,
+    min_side: u32,
+    pages: Vec<usize>,
+    stem: String,
+    dir: std::path::PathBuf,
+}
+
 impl PdfCraftApp {
+    /// Register an export, hand it to a worker and start that worker — the one path every export
+    /// takes, so the card, the state and the worker's own lifetime cannot disagree.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn begin_export(&mut self, status: ExportStatus, work: ExportWork, inline: bool) {
+        let ExportWork { src, kind, dpi, format, min_side, pages, stem, dir } = work;
+        let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Export, export_job_name(kind), pages.len());
+        self.export_job = Some(job);
+        // Held for the length of the work and dropped at its end, so the poll can tell a worker
+        // that is still going from one that ended without reporting (REC-R06).
+        let alive = crate::jobs::Alive::new();
+        self.export_alive = Some(alive.clone());
+        let worker = alive.worker();
+        let st = status.clone();
+        let shown = dir.display().to_string();
+        let lang = crate::i18n::current();
+        let stop = cancel.clone();
+        let job_work = move || {
+            // Whatever happens below, the end of this closure says the worker has ended.
+            let _worker = worker;
+            let sink = |name: &str, bytes: Vec<u8>| {
+                crate::editing::write_atomically(&dir.join(name).to_string_lossy(), &bytes).map_err(|e| format!("{name}: {e}"))
+            };
+            let msg = run(src, kind, dpi, format, min_side, pages, stem, sink, &st, lang, &stop);
+            if let Ok(mut s) = st.lock() {
+                let (done, total) = s.as_ref().map_or((0, 0), |(d, t, _)| (*d, *t));
+                let done_msg = crate::i18n::fmt(tl!("{msg} to {dir}"), &[("msg", &msg), ("dir", &shown)]);
+                *s = Some((done.max(total), total, Some(done_msg)));
+            }
+        };
+        if inline {
+            job_work(); // tests and automation: synchronous
+        } else if let Err(e) = std::thread::Builder::new().name("pdfcraft-export".into()).spawn(job_work) {
+            // No worker thread: say so now rather than leave a card waiting for a report that will
+            // never come, and end the job here so the next export can start.
+            if let Ok(mut s) = status.lock() {
+                *s = Some((0, 0, Some(crate::i18n::fmt(tl!("The job couldn't start: {e}"), &[("e", &e.to_string())]))));
+            }
+            self.export_alive = None;
+        }
+        self.export_status = Some(status);
+    }
+
     /// Start exporting the active document with the dialog's settings.
     pub(crate) fn start_export(&mut self, kind: ExportKind) {
         // What's typed in a form field is part of the document (#166).
@@ -252,34 +312,11 @@ impl PdfCraftApp {
         let dpi = self.export_draft.dpi;
         let format = self.export_draft.format;
         let min_side = self.export_draft.min_side;
-        let status: ExportStatus = Arc::new(Mutex::new(Some((0, pages.len(), None))));
         #[cfg(not(target_arch = "wasm32"))]
         {
             let start = move |app: &mut Self, dir: std::path::PathBuf, inline: bool| {
                 // Registered here, not before: until the folder is chosen there is nothing to stop.
-                let (job, cancel) = app.jobs.begin(crate::jobs::Kind::Export, export_job_name(kind), pages.len());
-                app.export_job = Some(job);
-                let st = status.clone();
-                let shown = dir.display().to_string();
-                let lang = crate::i18n::current();
-                let stop = cancel.clone();
-                let work = move || {
-                    let sink = |name: &str, bytes: Vec<u8>| {
-                        crate::editing::write_atomically(&dir.join(name).to_string_lossy(), &bytes).map_err(|e| format!("{name}: {e}"))
-                    };
-                    let msg = run(src, kind, dpi, format, min_side, pages, stem, sink, &st, lang, &stop);
-                    if let Ok(mut s) = st.lock() {
-                        let (done, total) = s.as_ref().map_or((0, 0), |(d, t, _)| (*d, *t));
-                        let done_msg = crate::i18n::fmt(tl!("{msg} to {dir}"), &[("msg", &msg), ("dir", &shown)]);
-                        *s = Some((done.max(total), total, Some(done_msg)));
-                    }
-                };
-                if inline {
-                    work(); // tests and automation: synchronous
-                } else {
-                    std::thread::Builder::new().name("pdfcraft-export".into()).spawn(work).ok();
-                }
-                app.export_status = Some(status);
+                app.begin_export(job_status(pages.len()), ExportWork { src, kind, dpi, format, min_side, pages, stem, dir }, inline);
             };
             match self.export_dir_override.clone() {
                 Some(d) => start(self, d.into(), true),
@@ -291,6 +328,9 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            // The web build renders inline on this thread; there is no worker that could outlive
+            // the report, so the lifetime handle is not needed and the report is written here.
+            let status = job_status(pages.len());
             let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Export, export_job_name(kind), pages.len());
             self.export_job = Some(job);
             let msg = run(
@@ -310,18 +350,36 @@ impl PdfCraftApp {
                 *s = Some((0, 0, Some(msg)));
             }
             self.export_status = Some(status);
+            // The web build renders inline, so by here the report is written and the poll retires
+            // the card in the same call. There is no thread to outlive it.
+            self.export_alive = None;
         }
     }
 
     /// Show export progress, and the result once it is done.
     pub(crate) fn poll_export(&mut self) {
         let Some(st) = self.export_status.clone() else { return };
+        // A worker that ended without writing a report — it panicked, or returned early — would
+        // otherwise leave this card spinning and the next export refused for the session. The
+        // handle is only trusted once the worker is gone, so a slow export is left alone.
+        let reported = st.lock().is_ok_and(|s| s.as_ref().is_some_and(|(_, _, msg)| msg.is_some()));
+        if self.export_alive.as_ref().is_some_and(|a| a.ended_without_report(reported)) {
+            self.export_status = None;
+            let job = self.export_job.take();
+            self.export_alive = None;
+            if let Some(job) = job {
+                self.jobs.finish(job);
+            }
+            self.notify_tr("The job stopped without finishing");
+            return;
+        }
         let snapshot = st.lock().ok().and_then(|s| s.clone());
         let job = self.export_job;
         match snapshot {
             Some((_, _, Some(msg))) => {
                 self.export_status = None;
                 self.export_job = None;
+                self.export_alive = None;
                 if let Some(job) = job {
                     self.jobs.finish(job);
                 }
@@ -336,6 +394,7 @@ impl PdfCraftApp {
             _ => {
                 self.export_status = None;
                 self.export_job = None;
+                self.export_alive = None;
                 if let Some(job) = job {
                     self.jobs.finish(job);
                 }
@@ -421,5 +480,45 @@ mod tests {
         );
         assert_eq!(written, 0);
         assert_eq!(msg, "Export stopped after 0 of 2 files");
+    }
+
+    /// An export whose worker never reports — it panicked, or no thread could be made — used to
+    /// leave the card spinning for ever and the next export refused for the session (REC-R06).
+    /// The worker's lifetime handle is what tells the two apart.
+    #[test]
+    fn an_export_whose_worker_ended_without_reporting_ends_here() {
+        let status: ExportStatus = std::sync::Arc::new(std::sync::Mutex::new(Some((0, 2, None))));
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.export_status = Some(status);
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Export, "Export".into(), 2);
+        app.export_job = Some(job);
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        app.export_alive = Some(alive);
+
+        // The worker is still going: however long it takes, its card stays and nothing is said.
+        app.poll_export();
+        assert!(app.export_status.is_some(), "a slow export is not a dead one");
+        assert_eq!(app.jobs.jobs().len(), 1, "{:?}", app.jobs.jobs());
+        assert!(app.toast.is_none(), "{:?}", app.toast);
+
+        // It ends without writing anything.
+        drop(worker);
+        app.poll_export();
+        assert!(app.export_status.is_none(), "the card is retired");
+        assert!(app.jobs.is_empty(), "and its row in the centre with it");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job stopped without finishing"));
+
+        // A worker that ended and did report is the ordinary path, not this one.
+        let done: ExportStatus = std::sync::Arc::new(std::sync::Mutex::new(Some((2, 2, Some("Exported 2 pages".into())))));
+        app.export_status = Some(done);
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Export, "Export".into(), 2);
+        app.export_job = Some(job);
+        let alive = crate::jobs::Alive::new();
+        app.export_alive = Some(alive);
+        app.poll_export();
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Exported 2 pages"), "the report is what is shown");
+        assert!(app.jobs.is_empty());
     }
 }

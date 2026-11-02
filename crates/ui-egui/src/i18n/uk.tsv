@@ -2262,3 +2262,5 @@ key	Space	Пробіл
 	file {d} of {t}	Файл {d} із {t}
 	Export stopped after {done} of {total} files	Експорт зупинено після {done} із {total} файлів
 	and {n} more	і ще {n}
+	The job stopped without finishing	Завдання зупинилося, не завершившись
+	The job couldn't start: {e}	Не вдалося запустити завдання: {e}

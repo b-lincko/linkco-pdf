@@ -2248,3 +2248,5 @@ key	Space	Spazio
 	file {d} of {t}	File {d} di {t}
 	Export stopped after {done} of {total} files	Esportazione interrotta dopo {done} di {total} file
 	and {n} more	e altri {n}
+	The job stopped without finishing	L'operazione si è fermata senza finire
+	The job couldn't start: {e}	Impossibile avviare l'operazione: {e}

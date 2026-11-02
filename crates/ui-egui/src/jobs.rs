@@ -16,7 +16,8 @@
 //! Bounded on purpose: a stop is cooperative and is answered between items, so a single item that
 //! takes a long time (one huge page at 600 dpi) still has to finish. Nothing here kills a thread,
 //! and a job whose worker has died is removed by the poll that was waiting for it, not by a
-//! watchdog.
+//! watchdog: the worker holds an [`Alive`] handle and drops it when it ends, so the poll can tell
+//! "not finished yet" from "never going to say anything" (REC-R06).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,6 +46,63 @@ impl Cancel {
     /// Whether a stop has been asked for. Workers read this between items, never inside one.
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Whether a job's worker is still running (REC-R06).
+///
+/// A worker reports by writing its outcome where the poll looks for it, and a poll cannot tell
+/// "not there yet" from "never coming". A worker that panicked on one awkward page, or that
+/// returned early, wrote nothing — so the card spun for ever, and the slot that keeps a second run
+/// of the same kind from starting stayed closed for the life of the session, on a document that
+/// was otherwise fine. This is the other half of that answer: the worker holds a [`Worker`] for as
+/// long as it runs and drops it when it ends — a return and an unwind both drop it — so the poll
+/// can tell the two apart and end the job itself when nothing is coming.
+///
+/// It is published as a handle rather than a deadline on purpose: a worker that is slow is not a
+/// worker that is gone, and a job given up on after N seconds would end real work on a large
+/// document. It says what is true — that the worker that was going to report has ended.
+#[derive(Clone, Debug)]
+pub struct Alive(Arc<AtomicBool>);
+
+impl Alive {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+
+    /// Whether the worker is still running: false once the [`Worker`] it holds was dropped.
+    pub fn is_running(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// Whether the worker that holds a copy has ended without saying anything: it is gone, and
+    /// `reported` — what the poll found in the place the worker writes its outcome — is false.
+    /// Both halves are needed: a worker that ended properly leaves its report behind before its
+    /// handle goes, and a worker that is still going has not ended.
+    pub fn ended_without_report(&self, reported: bool) -> bool {
+        !self.is_running() && !reported
+    }
+
+    /// The worker's end of this. One per worker, held for the length of the work, dropped at the
+    /// end of it — and dropped by an unwind as well, which is the whole point.
+    pub fn worker(&self) -> Worker {
+        Worker(self.0.clone())
+    }
+}
+
+impl Default for Alive {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A worker's end of [`Alive`]: dropping it says the worker has ended, however it ended.
+#[derive(Debug)]
+pub struct Worker(Arc<AtomicBool>);
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
@@ -322,6 +380,38 @@ mod tests {
         assert_eq!(touched, 0, "a stop that arrives first means no work at all");
         assert_eq!(outcome.done, 0);
         assert!(outcome.cancelled);
+    }
+
+    #[test]
+    fn a_worker_is_running_until_its_own_handle_is_dropped() {
+        let alive = Alive::new();
+        let held = alive.clone();
+        assert!(alive.is_running(), "nothing has ended yet");
+        let worker = held.worker();
+        assert!(alive.is_running(), "having a handle is not having ended");
+        drop(worker);
+        assert!(!alive.is_running(), "the worker ended, and the copy the card holds says so");
+        // A fresh one is a fresh worker, not the end of the old one.
+        assert!(Alive::new().is_running());
+    }
+
+    #[test]
+    fn a_worker_that_unwinds_has_ended_too() {
+        // The case that made this type necessary: a panic on one awkward page used to leave the
+        // card spinning and the next run of that kind refused for the life of the session.
+        let alive = Alive::new();
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe({
+            let alive = alive.clone();
+            move || {
+                let _worker = alive.worker();
+                panic!("the page could not be rendered");
+            }
+        }));
+        std::panic::set_hook(hook);
+        assert!(unwound.is_err(), "the panic is the test's own");
+        assert!(!alive.is_running(), "an unwind drops the worker's handle like a return does");
     }
 
     #[test]

@@ -2203,3 +2203,5 @@ key	Space	Интервал
 	file {d} of {t}	Файл {d} от {t}
 	Export stopped after {done} of {total} files	Експортирането спря след {done} от {total} файла
 	and {n} more	и още {n}
+	The job stopped without finishing	Задачата спря, без да завърши
+	The job couldn't start: {e}	Задачата не можа да започне: {e}
