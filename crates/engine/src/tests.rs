@@ -3050,8 +3050,8 @@ fn print_sheets_can_be_stopped_between_sheets() {
     assert!(stopped.is_none(), "a stop is not a finished job");
     assert_eq!(asked, vec![(0, 3)], "asked once, before the first sheet");
 
-    // Stopped before the third: two sheets rendered, then the ask refuses, and the third is never
-    // rendered nor asked about.
+    // Stopped before the third: two sheets are rendered, the ask is called for the third with two
+    // done, refuses it, and the call answers stopped without rendering it.
     let mut asked = Vec::new();
     let stopped = render_imposed_sheets_with(&imposed, 72, 600, false, |done, total| {
         asked.push((done, total));
@@ -3059,7 +3059,7 @@ fn print_sheets_can_be_stopped_between_sheets() {
     })
     .unwrap();
     assert!(stopped.is_none());
-    assert_eq!(asked, vec![(0, 3), (1, 3)], "the third sheet is not rendered");
+    assert_eq!(asked, vec![(0, 3), (1, 3), (2, 3)], "the ask says how many are done, and refuses the third");
 
     // Nobody stops: every sheet, exactly as render_imposed_sheets gives them.
     let mut asked = Vec::new();
