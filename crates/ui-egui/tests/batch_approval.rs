@@ -55,7 +55,7 @@ fn the_batch_is_shown_and_writes_nothing_until_it_is_approved() {
     assert!(h.state_mut().execute("actions.distribution"));
     h.run_steps(2);
     h.get_by_label("Start").click();
-    h.run_steps(2);
+    h.run_steps(3);
 
     // The question: what it would run, and how many files that writes.
     h.get_by_label("Run Prepare for Distribution on 1 files?");
@@ -77,9 +77,9 @@ fn a_question_that_is_cancelled_writes_nothing_and_leaves_the_slot_free() {
     h.state_mut().execute("actions.distribution");
     h.run_steps(2);
     h.get_by_label("Start").click();
-    h.run_steps(2);
+    h.run_steps(3);
     h.get_by_label("Cancel").click();
-    h.run_steps(2);
+    h.run_steps(3);
 
     assert!(h.state().pending_batch.is_none(), "the question is gone");
     assert!(h.state().dialog.is_none(), "and so is the dialog");
@@ -90,7 +90,7 @@ fn a_question_that_is_cancelled_writes_nothing_and_leaves_the_slot_free() {
     h.state_mut().execute("actions.distribution");
     h.run_steps(2);
     h.get_by_label("Start").click();
-    h.run_steps(2);
+    h.run_steps(3);
     h.get_by_label("Run").click();
     h.run_steps(3);
     assert_eq!(written(&dir), vec!["a.pdf".to_string()]);
@@ -103,7 +103,7 @@ fn a_folder_that_changed_under_the_question_is_not_the_batch_that_runs() {
     h.state_mut().execute("actions.distribution");
     h.run_steps(2);
     h.get_by_label("Start").click();
-    h.run_steps(2);
+    h.run_steps(3);
     // The plan names `out/a.pdf`: it was free when the question was drawn.
     let shown = h.state().pending_batch.clone().unwrap().plan;
     assert_eq!(shown.targets[0].output, dir.join("out/a.pdf"), "the plan names the free name");
@@ -111,7 +111,7 @@ fn a_folder_that_changed_under_the_question_is_not_the_batch_that_runs() {
     // Someone else writes that file while the question is on screen.
     std::fs::write(dir.join("out/a.pdf"), b"not this document").unwrap();
     h.get_by_label("Run").click();
-    h.run_steps(2);
+    h.run_steps(3);
 
     // The answer is refused, and the question stays up with the batch as it now is: `a (2).pdf`.
     assert_eq!(

@@ -169,7 +169,7 @@ pub fn plan(folder: &Path, kind: Kind, names: &[String]) -> Plan {
         promised.push(output.clone());
         targets.push(Target { input: name.clone(), output, replaces });
     }
-    Plan { folder, kind, targets }
+    Plan { folder: folder.to_path_buf(), kind, targets }
 }
 
 impl crate::PdfCraftApp {
@@ -309,11 +309,11 @@ mod tests {
     fn a_name_with_no_extension_or_no_file_name_still_gets_somewhere_to_go() {
         let dir = dir("odd-names");
         std::fs::write(dir.join("notes"), b"taken").unwrap();
-        let plan = plan(&dir, Kind::Action, &["notes".into(), "".into()]);
-        assert_eq!(file_name(&plan.targets[0].output), "notes (2)", "no extension: the counter is the whole difference");
-        assert_eq!(file_name(&plan.targets[1].output), "document.pdf", "an empty name still names a file");
+        let stepped = plan(&dir, Kind::Action, &["notes".into(), "".into()]);
+        assert_eq!(file_name(&stepped.targets[0].output), "notes (2)", "no extension: the counter is the whole difference");
+        assert_eq!(file_name(&stepped.targets[1].output), "document.pdf", "an empty name still names a file");
         // A path with separators is reduced to its file name, so nothing is written outside the folder.
-        let plan = plan(&dir, Kind::Recognize, &["../escape.pdf".into()]);
-        assert_eq!(plan.targets[0].output, dir.join("escape.pdf"));
+        let recognize = plan(&dir, Kind::Recognize, &["../escape.pdf".into()]);
+        assert_eq!(recognize.targets[0].output, dir.join("escape.pdf"));
     }
 }

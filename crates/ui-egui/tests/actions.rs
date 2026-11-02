@@ -59,7 +59,7 @@ fn run_and_create_actions() {
     fresh.restore(&saved);
     assert_eq!(fresh.custom_actions, h.state().custom_actions);
     h.get_by_label("Start").click();
-    h.run_steps(2);
+    h.run_steps(3);
     h.get_by_label("Run").click();
     h.run_steps(3);
     assert_eq!(h.state().toast.clone().unwrap().0, "Stamp drafts: 1 file done");
@@ -94,7 +94,7 @@ fn desktop_actions_preserve_duplicate_names_and_results_from_earlier_runs() {
         h.state_mut().execute("actions.distribution");
         h.run_steps(2);
         h.get_by_label("Start").click();
-        h.run_steps(2);
+        h.run_steps(3);
         h.get_by_label("Run").click();
         h.run_steps(3);
         assert_eq!(h.state().toast.clone().unwrap().0, "Prepare for Distribution: 2 files done");
