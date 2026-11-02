@@ -2342,6 +2342,30 @@ fn exporting_office_files_keeps_images() {
     assert!(String::from_utf8(d.export_office(compare::OfficeFormat::Html)).unwrap().contains("data:image/png;base64,"));
 }
 
+/// REC-R04: the export can leave the interface thread, because the work is in the pages — and it
+/// asks before each one, so a stop leaves no file rather than a half-read one.
+#[test]
+fn an_office_export_asks_between_pages_and_writes_nothing_when_stopped() {
+    let mut s = Session::new();
+    let bytes = s.create_blank(200.0, 300.0, 4).unwrap();
+    let id = s.open("four.pdf", None, bytes, None).unwrap();
+    // Run to the end: the job writes what the document itself writes.
+    let all = s.office_job(id, compare::OfficeFormat::Docx).unwrap().run(|_, _| true).unwrap().unwrap();
+    assert_eq!(all, s.get(id).unwrap().export_office(compare::OfficeFormat::Docx), "the job and the document agree");
+    // Asked before every page, with the page's index and how many there are.
+    let mut asked = Vec::new();
+    let stopped = s
+        .office_job(id, compare::OfficeFormat::Html)
+        .unwrap()
+        .run(|done, total| {
+            asked.push((done, total));
+            done < 2
+        })
+        .unwrap();
+    assert!(stopped.is_none(), "a stop means no file");
+    assert_eq!(asked, vec![(0, 4), (1, 4), (2, 4)]);
+}
+
 /// #314: a page whose content is drawn through a form XObject exports its text (the file from
 /// the report: no xref table, wrong stream lengths).
 #[test]

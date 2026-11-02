@@ -2167,3 +2167,7 @@ key	Space	Espacio
 	{n} file(s) are written beside one that is already there, which is left as it is.	Se escriben {n} archivo(s) junto a uno que ya está ahí, que queda intacto.
 	Nothing that is already in the folder is replaced.	No se reemplaza nada de lo que ya hay en la carpeta.
 	The folder changed since this was shown; check what this batch would write now	La carpeta cambió desde esta vista; compruebe lo que escribiría ahora este lote
+	Export to {format}	Exportar a {format}
+	Exporting… page {d} of {t}	Exportando… página {d} de {t}
+	Export cancelled	Exportación cancelada
+	An export is already running	Ya hay una exportación en curso

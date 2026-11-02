@@ -2251,3 +2251,7 @@ key	Space	スペース
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} ファイルは既にあるファイルの横に書き込まれ、元のファイルはそのまま残ります。
 	Nothing that is already in the folder is replaced.	フォルダーに既にあるものは置き換えません。
 	The folder changed since this was shown; check what this batch would write now	この表示の後にフォルダーが変わりました。このバッチが今書き込む内容を確認してください
+	Export to {format}	{format} へエクスポート
+	Exporting… page {d} of {t}	エクスポート中… {t} ページ中 {d} ページ
+	Export cancelled	エクスポートを中止しました
+	An export is already running	すでにエクスポートを実行中です

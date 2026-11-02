@@ -701,12 +701,19 @@ impl PdfCraftApp {
         let Some(doc) = self.session.get(id) else { return };
         let stem = doc.name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
         let ext = format.extension();
-        let bytes = doc.export_office(format);
+        // Desktop: where to save first, then the conversion — on a worker, with a card and a stop,
+        // rather than on this thread with the window frozen (REC-R04).
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let write = move |app: &mut Self, path: std::path::PathBuf| match crate::editing::write_atomically(&path.to_string_lossy(), &bytes) {
-                Ok(()) => app.notify_fmt("Exported to {path}", &[("path", &path.display().to_string())]),
-                Err(e) => app.notify_fmt("Couldn't write {name}: {e}", &[("name", &path.display().to_string()), ("e", &e.to_string())]),
+            let write = move |app: &mut Self, path: std::path::PathBuf| {
+                // What the export reads is taken here, where the document is; the pages are read
+                // and the file built on the worker.
+                let job = match app.session.office_job(id, format) {
+                    Ok(j) => j,
+                    Err(e) => return app.notify_error(e),
+                };
+                let name = path.display().to_string();
+                app.start_office_export(job, path, name, format);
             };
             match self.save_override.clone() {
                 Some(p) => write(self, p.into()),
@@ -720,8 +727,11 @@ impl PdfCraftApp {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        if let Err(e) = crate::editing::download(&format!("{stem}.{ext}"), &bytes) {
-            self.notify_error(e);
+        {
+            let bytes = doc.export_office(format);
+            if let Err(e) = crate::editing::download(&format!("{stem}.{ext}"), &bytes) {
+                self.notify_error(e);
+            }
         }
     }
 

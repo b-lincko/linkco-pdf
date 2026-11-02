@@ -2251,3 +2251,7 @@ key	Space	Leertaste
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} Datei(en) werden neben eine bereits vorhandene geschrieben, die unverändert bleibt.
 	Nothing that is already in the folder is replaced.	Nichts, was bereits im Ordner liegt, wird ersetzt.
 	The folder changed since this was shown; check what this batch would write now	Der Ordner hat sich seither geändert; prüfen Sie, was dieser Stapel jetzt schreiben würde
+	Export to {format}	Export nach {format}
+	Exporting… page {d} of {t}	Exportiere… Seite {d} von {t}
+	Export cancelled	Export abgebrochen
+	An export is already running	Es läuft bereits ein Export

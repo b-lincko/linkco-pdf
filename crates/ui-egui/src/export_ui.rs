@@ -406,6 +406,151 @@ impl PdfCraftApp {
     }
 }
 
+/// A Word, HTML or RTF export running in the background.
+///
+/// The other exports write a file per page as they go; this one writes a single file when it is
+/// done, so the worker keeps its bytes until then. Everything else is the same: a row in the job
+/// centre, a stage as each page is read, and a stop that is answered between pages — a stop leaves
+/// no file at all, rather than a half-written one.
+pub struct OfficeRun {
+    job: crate::jobs::JobId,
+    path: std::path::PathBuf,
+    name: String,
+    status: Arc<Mutex<OfficeStatus>>,
+    alive: crate::jobs::Alive,
+}
+
+/// Where an office export has got to, and what it ended with.
+#[derive(Default)]
+struct OfficeStatus {
+    /// Pages read so far, and how many there are.
+    read: usize,
+    total: usize,
+    /// The file's bytes, a stop (`None`), or what went wrong.
+    result: Option<Result<Option<Vec<u8>>, String>>,
+}
+
+/// The format's own name: "Word", "HTML", "RTF" — a product name, not a word to translate.
+fn office_format_name(format: pdfcraft_engine::compare::OfficeFormat) -> &'static str {
+    match format {
+        pdfcraft_engine::compare::OfficeFormat::Docx => "Word",
+        pdfcraft_engine::compare::OfficeFormat::Html => "HTML",
+        pdfcraft_engine::compare::OfficeFormat::Rtf => "RTF",
+    }
+}
+
+impl PdfCraftApp {
+    /// Export to Word, HTML or RTF in the background, into `path`.
+    ///
+    /// Taking what the export needs from the document is the only part that happens here (see
+    /// `Session::office_job`); reading the pages, which is the slow part on a long document, is
+    /// the worker's, and it asks between pages whether to go on.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn start_office_export(
+        &mut self,
+        job: pdfcraft_engine::compare::OfficeJob,
+        path: std::path::PathBuf,
+        name: String,
+        format: pdfcraft_engine::compare::OfficeFormat,
+    ) {
+        if self.office_export.is_some() {
+            self.notify_tr("An export is already running");
+            return;
+        }
+        let label = crate::i18n::fmt(tl!("Export to {format}"), &[("format", office_format_name(format))]);
+        let total = job.pages();
+        // Registered before the worker starts, so the card shows the job from this frame on.
+        let (id, cancel) = self.jobs.begin(crate::jobs::Kind::Export, label, total);
+        let status = Arc::new(Mutex::new(OfficeStatus { total, ..Default::default() }));
+        let st = status.clone();
+        let showing = st.clone();
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        let lang = crate::i18n::current();
+        let work = move || {
+            // Dropped however this ends, a panic included (see `jobs::Alive`).
+            let _worker = worker;
+            crate::i18n::set_current(lang);
+            let result = job.run(move |read, total| {
+                if let Ok(mut s) = showing.lock() {
+                    s.read = read;
+                    s.total = total;
+                }
+                !cancel.is_cancelled()
+            });
+            if let Ok(mut s) = st.lock() {
+                s.result = Some(result);
+            }
+        };
+        if self.run_inline {
+            work(); // tests and automation: synchronous
+        } else if let Err(e) = std::thread::Builder::new().name("pdfcraft-office".into()).spawn(work) {
+            // No worker thread: say so now rather than leave a card waiting for a report that will
+            // never come.
+            if let Ok(mut s) = status.lock() {
+                s.result = Some(Err(e.to_string()));
+            }
+        }
+        self.office_export = Some(OfficeRun { job: id, path, name, status, alive });
+        self.poll_office_export();
+    }
+
+    /// Stop a running Word/HTML/RTF export: the worker stops before the next page, and no file is
+    /// written.
+    pub fn cancel_office_export(&mut self) {
+        if let Some(run) = &self.office_export {
+            let job = run.job;
+            self.jobs.cancel(job);
+        }
+    }
+
+    /// Show the export's progress, then write the file — or say why there is none.
+    pub(crate) fn poll_office_export(&mut self) {
+        let Some(run) = self.office_export.as_ref() else { return };
+        let (job, path, name) = (run.job, run.path.clone(), run.name.clone());
+        let status = run.status.clone();
+        let alive = run.alive.clone();
+        let Ok(mut s) = status.lock() else {
+            // The worker panicked while holding the lock: it will never report back.
+            self.office_export = None;
+            self.jobs.finish(job);
+            self.notify_tr("The job stopped without finishing");
+            return;
+        };
+        let Some(result) = s.result.take() else {
+            let (read, total) = (s.read, s.total);
+            drop(s);
+            if !alive.is_running() {
+                // The worker ended without a result: it panicked, and a panic writes nothing.
+                self.office_export = None;
+                self.jobs.finish(job);
+                self.notify_tr("The job stopped without finishing");
+                return;
+            }
+            let stage = crate::i18n::fmt(
+                tl!("Exporting… page {d} of {t}"),
+                &[("d", &(read + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())],
+            );
+            self.jobs.stage(job, stage, if total == 0 { 0.0 } else { read as f32 / total as f32 });
+            if let Some(ctx) = &self.ctx {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            return;
+        };
+        drop(s);
+        self.office_export = None;
+        self.jobs.finish(job);
+        match result {
+            Ok(Some(bytes)) => match crate::editing::write_atomically(&path.to_string_lossy(), &bytes) {
+                Ok(()) => self.notify_fmt("Exported to {path}", &[("path", &path.display().to_string())]),
+                Err(e) => self.notify_fmt("Couldn't write {name}: {e}", &[("name", &name), ("e", &e.to_string())]),
+            },
+            Ok(None) => self.notify_tr("Export cancelled"),
+            Err(e) => self.notify_fmt("Export stopped: {e}", &[("e", &e)]),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +625,77 @@ mod tests {
         );
         assert_eq!(written, 0);
         assert_eq!(msg, "Export stopped after 0 of 2 files");
+    }
+
+    /// REC-R04: a Word export is a job like the others — one file, written when it finishes — and
+    /// it runs off the interface thread.
+    #[test]
+    fn a_word_export_runs_as_a_job_and_writes_one_file() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-office-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.run_inline = true;
+        let pages = pdfcraft_engine::Session::new().create_blank(200.0, 300.0, 3).unwrap();
+        app.open_bytes("doc.pdf", None, pages.to_vec()).unwrap();
+        let id = app.active_ids().unwrap().1;
+        let format = pdfcraft_engine::compare::OfficeFormat::Docx;
+        let job = app.session.office_job(id, format).unwrap();
+        let path = dir.join("doc.docx");
+        app.start_office_export(job, path.clone(), path.display().to_string(), format);
+
+        assert!(app.office_export.is_none(), "an inline export is finished when it returns");
+        assert!(app.jobs.is_empty(), "and its row in the centre is gone with it");
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"PK"), "a Word file");
+        assert!(app.toast.clone().unwrap().0.starts_with("Exported to "), "{:?}", app.toast);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A stop before the last page leaves no file, and the row ends with the reason rather than
+    /// spinning (the file is only written at the end, so there is nothing to undo).
+    #[test]
+    fn a_stopped_export_writes_nothing_and_says_so() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-office-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let path = dir.join("out.rtf");
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Export, "Export to RTF".into(), 3);
+        let status = Arc::new(Mutex::new(OfficeStatus { read: 1, total: 3, result: Some(Ok(None)) }));
+        app.office_export = Some(OfficeRun { job, path: path.clone(), name: "out.rtf".into(), status, alive: crate::jobs::Alive::new() });
+        app.poll_office_export();
+
+        assert!(!path.exists(), "a stopped export writes no file");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Export cancelled"));
+        assert!(app.office_export.is_none(), "the run is over");
+        assert!(app.jobs.is_empty(), "and so is its row");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A worker that ends without reporting — it panicked — ends the job here rather than leaving
+    /// the card spinning and the next export refused for the session (REC-R06), and writes nothing.
+    #[test]
+    fn an_office_export_whose_worker_died_writes_nothing_and_retires() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Export, "Export to Word".into(), 3);
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        let status = Arc::new(Mutex::new(OfficeStatus { read: 0, total: 3, ..Default::default() }));
+        app.office_export = Some(OfficeRun { job, path: "out.docx".into(), name: "out.docx".into(), status, alive });
+
+        app.poll_office_export();
+        assert!(app.office_export.is_some(), "a slow export is not a dead one");
+        assert_eq!(app.jobs.jobs()[0].stage, "Exporting… page 1 of 3");
+
+        drop(worker);
+        app.poll_office_export();
+        assert!(app.office_export.is_none(), "the run is retired");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job stopped without finishing"));
+        assert!(app.jobs.is_empty());
     }
 
     /// An export whose worker never reports — it panicked, or no thread could be made — used to

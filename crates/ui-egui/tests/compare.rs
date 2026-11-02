@@ -97,6 +97,8 @@ fn export_to_word_html_and_rtf() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut app = PdfCraftApp::new();
     app.set_option("language", "en").unwrap();
+    // The export is a job on a worker since REC-R04; inline, it is done when the command returns.
+    app.run_inline = true;
     app.open_bytes("e.pdf", None, doc).unwrap();
     for ext in ["docx", "html", "rtf"] {
         let out = dir.join(format!("e.{ext}"));

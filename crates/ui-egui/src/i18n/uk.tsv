@@ -2272,3 +2272,7 @@ key	Space	Пробіл
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файлів буде записано поруч із наявним, який лишиться як є.
 	Nothing that is already in the folder is replaced.	Нічого з наявного в теці не замінюється.
 	The folder changed since this was shown; check what this batch would write now	Тека змінилася після показу цього плану; перевірте, що цей пакет запише зараз
+	Export to {format}	Експорт у {format}
+	Exporting… page {d} of {t}	Експортування… сторінка {d} з {t}
+	Export cancelled	Експорт скасовано
+	An export is already running	Експорт уже виконується

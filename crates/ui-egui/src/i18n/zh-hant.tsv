@@ -2137,3 +2137,7 @@ key	Space	空格
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} 個檔案會寫在現有檔案旁邊，原檔案維持不變。
 	Nothing that is already in the folder is replaced.	資料夾中既有的內容不會被取代。
 	The folder changed since this was shown; check what this batch would write now	資料夾在顯示後已變更；請檢查此批次現在會寫入什麼
+	Export to {format}	匯出為 {format}
+	Exporting… page {d} of {t}	正在匯出…第 {d} 頁，共 {t} 頁
+	Export cancelled	匯出已取消
+	An export is already running	已有匯出正在進行

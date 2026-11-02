@@ -2213,3 +2213,7 @@ key	Space	Интервал
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файла се записват до вече наличен, който остава непроменен.
 	Nothing that is already in the folder is replaced.	Нищо, което вече е в папката, не се заменя.
 	The folder changed since this was shown; check what this batch would write now	Папката се промени, след като това беше показано; проверете какво би записал пакетът сега
+	Export to {format}	Експортиране към {format}
+	Exporting… page {d} of {t}	Експортиране… страница {d} от {t}
+	Export cancelled	Експортирането е отменено
+	An export is already running	Вече тече експортиране

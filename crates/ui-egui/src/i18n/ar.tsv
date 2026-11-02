@@ -2271,3 +2271,7 @@ key	Space	مسافة
 	{n} file(s) are written beside one that is already there, which is left as it is.	تُكتب {n} ملفات بجانب ملف موجود بالفعل، ويبقى كما هو.
 	Nothing that is already in the folder is replaced.	لا يتم استبدال أي شيء موجود بالفعل في المجلد.
 	The folder changed since this was shown; check what this batch would write now	تغيّر المجلد منذ عرض هذا؛ تحقق مما ستكتبه هذه الدفعة الآن
+	Export to {format}	تصدير إلى {format}
+	Exporting… page {d} of {t}	جارٍ التصدير… الصفحة {d} من {t}
+	Export cancelled	أُلغي التصدير
+	An export is already running	يوجد تصدير قيد التشغيل بالفعل

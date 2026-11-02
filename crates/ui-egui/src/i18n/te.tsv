@@ -2181,3 +2181,7 @@ key	Space	స్పేస్
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} ఫైల్(లు) ఇప్పటికే ఉన్న దాని పక్కన రాయబడతాయి, అది మారదు.
 	Nothing that is already in the folder is replaced.	ఫోల్డర్‌లో ఇప్పటికే ఉన్నది ఏదీ భర్తీ చేయబడదు.
 	The folder changed since this was shown; check what this batch would write now	ఇది చూపిన తర్వాత ఫోల్డర్ మారింది; ఈ బ్యాచ్ ఇప్పుడు ఏమి రాస్తుందో చూడండి
+	Export to {format}	{format} కు ఎగుమతి
+	Exporting… page {d} of {t}	ఎగుమతి అవుతోంది… పేజీ {d} / {t}
+	Export cancelled	ఎగుమతి రద్దు చేయబడింది
+	An export is already running	ఇప్పటికే ఎగుమతి నడుస్తోంది

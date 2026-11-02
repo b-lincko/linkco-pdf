@@ -2175,3 +2175,7 @@ key	Space	Пробел
 	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файл(ов) будут записаны рядом с существующим, который останется как есть.
 	Nothing that is already in the folder is replaced.	Ничего из уже лежащего в папке не заменяется.
 	The folder changed since this was shown; check what this batch would write now	Папка изменилась после показа этого плана; проверьте, что этот пакет запишет сейчас
+	Export to {format}	Экспорт в {format}
+	Exporting… page {d} of {t}	Экспорт… страница {d} из {t}
+	Export cancelled	Экспорт отменён
+	An export is already running	Экспорт уже выполняется

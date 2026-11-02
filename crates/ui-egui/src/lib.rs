@@ -658,6 +658,8 @@ pub struct PdfCraftApp {
     export_job: Option<jobs::JobId>,
     /// The export worker, so a poll can tell "not done yet" from "ended without a word" (REC-R06).
     export_alive: Option<jobs::Alive>,
+    /// A Word, HTML or RTF export in flight (REC-R04): one file, written when it finishes.
+    pub office_export: Option<export_ui::OfficeRun>,
     /// The saved Fill & Sign signature and initials (drawn or typed).
     pub signature: Option<fill_sign::SavedSig>,
     pub initials: Option<fill_sign::SavedSig>,
@@ -912,6 +914,7 @@ impl PdfCraftApp {
             export_status: None,
             export_job: None,
             export_alive: None,
+            office_export: None,
             signature: None,
             initials: None,
             signature_draft: Default::default(),
@@ -2183,6 +2186,7 @@ impl eframe::App for PdfCraftApp {
             }
         }
         self.poll_export();
+        self.poll_office_export();
         self.poll_ocr();
         self.poll_optimize();
         self.poll_action();
