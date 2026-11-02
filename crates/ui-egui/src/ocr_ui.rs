@@ -253,13 +253,14 @@ impl PdfCraftApp {
             self.notify_tr("Text recognition is already running");
             return;
         }
+        // Desktop: nothing runs until the plan is answered (see [`crate::batch_plan`]).
         #[cfg(not(target_arch = "wasm32"))]
         {
             let names: Vec<String> = files.iter().map(|(name, _)| name.clone()).collect();
             let plan = crate::batch_plan::plan(&dir, crate::batch_plan::Kind::Recognize, &names);
             self.ask_batch(crate::batch_plan::Pending { plan, work: crate::batch_plan::Work::Recognize { files, settings } });
-            return;
         }
+        // Web: each copy is a download, so there is nothing to approve.
         #[cfg(target_arch = "wasm32")]
         self.start_recognize_files(files, settings, None);
     }
@@ -270,7 +271,7 @@ impl PdfCraftApp {
     /// is a download.
     pub(crate) fn start_recognize_files(&mut self, files: Vec<(String, Vec<u8>)>, settings: OcrSettings, plan: Option<crate::batch_plan::Plan>) {
         let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
-        let files: Vec<(Option<std::path::PathBuf>, (String, Vec<u8>))> = files.into_iter().map(|file| (destinations.next(), file)).collect();
+        let files: Vec<crate::batch_plan::RunItem> = files.into_iter().map(|file| (destinations.next(), file)).collect();
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::RecognizeFiles, tl!("Recognize Text in Files").to_string(), files.len());
         let progress = Arc::new(Mutex::new(BatchProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();

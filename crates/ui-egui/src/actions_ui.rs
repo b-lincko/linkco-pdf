@@ -95,13 +95,14 @@ impl PdfCraftApp {
             self.notify_tr("An action is already running");
             return;
         }
+        // Desktop: nothing runs until the plan is answered (see [`crate::batch_plan`]).
         #[cfg(not(target_arch = "wasm32"))]
         {
             let names: Vec<String> = files.iter().map(|(name, _)| name.clone()).collect();
             let plan = crate::batch_plan::plan(&dir, crate::batch_plan::Kind::Action, &names);
             self.ask_batch(crate::batch_plan::Pending { plan, work: crate::batch_plan::Work::Action { action, files } });
-            return;
         }
+        // Web: each result is a download, so there is nothing to approve.
         #[cfg(target_arch = "wasm32")]
         self.start_action(action, files, None);
     }
@@ -113,7 +114,7 @@ impl PdfCraftApp {
     pub(crate) fn start_action(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, plan: Option<crate::batch_plan::Plan>) {
         // Where each result goes, in the order the files are offered (`None` on the web build).
         let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
-        let files: Vec<(Option<std::path::PathBuf>, (String, Vec<u8>))> = files.into_iter().map(|file| (destinations.next(), file)).collect();
+        let files: Vec<crate::batch_plan::RunItem> = files.into_iter().map(|file| (destinations.next(), file)).collect();
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Action, action.name.clone(), files.len());
         let progress = Arc::new(Mutex::new(RunProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();

@@ -81,6 +81,11 @@ pub struct Pending {
     pub work: Work,
 }
 
+/// One file of a batch being written: where its result goes — the destination the approved plan
+/// named, or nothing on the web build, where the result is a download — and the file with the name
+/// it was given.
+pub(crate) type RunItem = (Option<PathBuf>, (String, Vec<u8>));
+
 /// What to run once the plan is approved.
 #[derive(Clone, Debug)]
 pub enum Work {
