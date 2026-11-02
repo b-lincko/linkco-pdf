@@ -2217,3 +2217,7 @@ key	Space	Интервал
 	Exporting… page {d} of {t}	Експортиране… страница {d} от {t}
 	Export cancelled	Експортирането е отменено
 	An export is already running	Вече тече експортиране
+	Print to {printer}	Печат към {printer}
+	Preparing the print job	Подготовка на задачата за печат
+	Rendering sheet {d} of {t}	Изобразяване на лист {d} от {t}
+	Print cancelled: nothing was sent to {printer}	Печатът е отменен: нищо не беше изпратено към {printer}

@@ -213,3 +213,7 @@ key	Space	Mezerník
 	The version on disk is too large to compare here.	Verze na disku je pro porovnání zde příliš velká.
 	“{name}” could not be opened to compare it.	Soubor „{name}“ se nepodařilo otevřít k porovnání.
 	{name} (on disk)	{name} (na disku)
+	Print to {printer}	Tisk na {printer}
+	Preparing the print job	Příprava tiskové úlohy
+	Rendering sheet {d} of {t}	Vykreslování listu {d} z {t}
+	Print cancelled: nothing was sent to {printer}	Tisk zrušen: na {printer} nebylo nic odesláno

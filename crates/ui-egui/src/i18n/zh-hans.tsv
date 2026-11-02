@@ -2219,3 +2219,7 @@ key	Space	空格
 	Exporting… page {d} of {t}	正在导出…第 {d} 页，共 {t} 页
 	Export cancelled	导出已取消
 	An export is already running	已有导出正在进行
+	Print to {printer}	打印到 {printer}
+	Preparing the print job	正在准备打印任务
+	Rendering sheet {d} of {t}	正在呈现第 {d} 张，共 {t} 张
+	Print cancelled: nothing was sent to {printer}	打印已取消：未向 {printer} 发送任何内容

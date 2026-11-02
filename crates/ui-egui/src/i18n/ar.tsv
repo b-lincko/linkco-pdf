@@ -2275,3 +2275,7 @@ key	Space	مسافة
 	Exporting… page {d} of {t}	جارٍ التصدير… الصفحة {d} من {t}
 	Export cancelled	أُلغي التصدير
 	An export is already running	يوجد تصدير قيد التشغيل بالفعل
+	Print to {printer}	طباعة إلى {printer}
+	Preparing the print job	جارٍ تحضير مهمة الطباعة
+	Rendering sheet {d} of {t}	جارٍ عرض الورقة {d} من {t}
+	Print cancelled: nothing was sent to {printer}	أُلغيت الطباعة: لم يُرسل شيء إلى {printer}

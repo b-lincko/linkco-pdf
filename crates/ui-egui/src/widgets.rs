@@ -212,7 +212,9 @@ pub fn jobs_card(app: &PdfCraftApp, ctx: &egui::Context) -> Option<crate::jobs::
                         }
                     }
                     // A stop already asked for is not asked twice, and says what is happening.
-                    if !job.stopping {
+                    // A job the app has handed over (a print the spooler has taken) cannot be
+                    // stopped, so it offers nothing rather than a Cancel that would do nothing.
+                    if job.stoppable && !job.stopping {
                         ui.add_space(4.0);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let b = egui::Button::new(egui::RichText::new(tl!("Cancel")).font(theme::medium(12.5)).color(text)).frame(false);

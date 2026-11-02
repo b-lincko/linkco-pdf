@@ -3537,6 +3537,23 @@ pub fn comment_summary(name: &str, all: &[pdfcraft_render::Annotation], sort: Su
 /// the bytes, so the Print dialog runs it on a worker thread: at 600 dpi a long document takes a
 /// while, and the interface stays responsive meanwhile.
 pub fn render_imposed_sheets(imposed_pdf: &[u8], dpi: u32, max_dpi: u32, grayscale: bool) -> Result<Vec<print::spool::RenderedSheet>, EditError> {
+    Ok(render_imposed_sheets_with(imposed_pdf, dpi, max_dpi, grayscale, |_, _| true)?.unwrap_or_default())
+}
+
+/// [`render_imposed_sheets`], asking before each sheet whether to go on.
+///
+/// `ask` is called with how many sheets are done and how many there are in all, before each one is
+/// rendered; `false` stops there and the answer is `Ok(None)` — the sheets already rendered are
+/// dropped, because there is nothing to do with part of a print job. This is the boundary a print
+/// can be stopped at: between sheets, never inside one. Once the sheets are handed to the spooler
+/// the system queue owns the job and this module cannot call it back.
+pub fn render_imposed_sheets_with(
+    imposed_pdf: &[u8],
+    dpi: u32,
+    max_dpi: u32,
+    grayscale: bool,
+    mut ask: impl FnMut(usize, usize) -> bool,
+) -> Result<Option<Vec<print::spool::RenderedSheet>>, EditError> {
     let effective_dpi = dpi.clamp(print::spool::MIN_PRINT_DPI, max_dpi.max(print::spool::MIN_PRINT_DPI));
     let scale = effective_dpi as f32 / 72.0;
 
@@ -3550,6 +3567,10 @@ pub fn render_imposed_sheets(imposed_pdf: &[u8], dpi: u32, max_dpi: u32, graysca
     let mut renderer = pdfcraft_render::PageRenderer::new(arc_bytes, pdfcraft_render::RenderConfig::default());
     let mut out = Vec::with_capacity(sizes.len());
     for (page_idx, &(width_pt, height_pt)) in sizes.iter().enumerate() {
+        // The caller's boundary: a sheet that has not started is not rendered.
+        if !ask(page_idx, sizes.len()) {
+            return Ok(None);
+        }
         let mut rendered =
             renderer.render(pdfcraft_render::RenderRequest { page: page_idx, kind: pdfcraft_render::RequestKind::Pixels, tile: None, scale, tag: 0 });
         if let Some(err) = rendered.error {
@@ -3562,7 +3583,7 @@ pub fn render_imposed_sheets(imposed_pdf: &[u8], dpi: u32, max_dpi: u32, graysca
             .map_err(EditError::Write)?;
         out.push(print::spool::RenderedSheet { width_pt, height_pt, width_px: rendered.width, height_px: rendered.height, dpi: effective_dpi, png });
     }
-    Ok(out)
+    Ok(Some(out))
 }
 
 #[cfg(test)]

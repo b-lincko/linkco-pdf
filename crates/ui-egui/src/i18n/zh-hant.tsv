@@ -2141,3 +2141,7 @@ key	Space	空格
 	Exporting… page {d} of {t}	正在匯出…第 {d} 頁，共 {t} 頁
 	Export cancelled	匯出已取消
 	An export is already running	已有匯出正在進行
+	Print to {printer}	列印到 {printer}
+	Preparing the print job	正在準備列印工作
+	Rendering sheet {d} of {t}	正在呈現第 {d} 張，共 {t} 張
+	Print cancelled: nothing was sent to {printer}	列印已取消：未向 {printer} 傳送任何內容

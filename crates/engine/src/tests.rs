@@ -3022,6 +3022,60 @@ fn print_sheets_render_at_target_dpi_and_preserve_paper_geometry() {
     assert_eq!((sheets_a4[0].width_px, sheets_a4[0].height_px), (2481, 3508));
 }
 
+/// A print can be stopped between sheets, and a stop is answered before the sheet it stops: the
+/// sheets are what take the time (a long document at 600 dpi), and part of a print job is worth
+/// nothing, so the answer says stopped rather than handing back what was rendered.
+#[test]
+fn print_sheets_can_be_stopped_between_sheets() {
+    let mut s = Session::new();
+    let pdf = s.create_blank(612.0, 792.0, 3).unwrap();
+    let id = s.open("print-stop.pdf", None, pdf, None).unwrap();
+    let settings = print::Settings {
+        pages: vec![0, 1, 2],
+        paper: (612.0, 792.0),
+        orientation: print::Orientation::Portrait,
+        layout: print::Layout::Size(print::SizeMode::Fit),
+        content: print::Content::DocumentAndMarkups,
+        crops: Vec::new(),
+    };
+    let imposed = s.print_pdf(id, &settings).unwrap();
+
+    // Stopped before the first sheet: asked once, and nothing rendered.
+    let mut asked = Vec::new();
+    let stopped = render_imposed_sheets_with(&imposed, 72, 600, false, |done, total| {
+        asked.push((done, total));
+        false
+    })
+    .unwrap();
+    assert!(stopped.is_none(), "a stop is not a finished job");
+    assert_eq!(asked, vec![(0, 3)], "asked once, before the first sheet");
+
+    // Stopped before the third: two sheets rendered, then the ask refuses, and the third is never
+    // rendered nor asked about.
+    let mut asked = Vec::new();
+    let stopped = render_imposed_sheets_with(&imposed, 72, 600, false, |done, total| {
+        asked.push((done, total));
+        done < 2
+    })
+    .unwrap();
+    assert!(stopped.is_none());
+    assert_eq!(asked, vec![(0, 3), (1, 3)], "the third sheet is not rendered");
+
+    // Nobody stops: every sheet, exactly as render_imposed_sheets gives them.
+    let mut asked = Vec::new();
+    let all = render_imposed_sheets_with(&imposed, 72, 600, false, |done, total| {
+        asked.push((done, total));
+        true
+    })
+    .unwrap()
+    .expect("finished");
+    assert_eq!(all.len(), 3);
+    assert_eq!(asked, vec![(0, 3), (1, 3), (2, 3)]);
+    let plain = render_imposed_sheets(&imposed, 72, 600, false).unwrap();
+    assert_eq!(all.len(), plain.len());
+    assert!(all.iter().zip(plain.iter()).all(|(a, b)| a.png == b.png), "the same sheets either way");
+}
+
 /// The page view's raster of `page` at 1 px/pt (the document's own render pool).
 fn shown(s: &Session, id: DocId, page: usize) -> pdfcraft_render::RenderedPage {
     let doc = s.get(id).unwrap();

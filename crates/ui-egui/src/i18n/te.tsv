@@ -2185,3 +2185,7 @@ key	Space	స్పేస్
 	Exporting… page {d} of {t}	ఎగుమతి అవుతోంది… పేజీ {d} / {t}
 	Export cancelled	ఎగుమతి రద్దు చేయబడింది
 	An export is already running	ఇప్పటికే ఎగుమతి నడుస్తోంది
+	Print to {printer}	{printer}కు ముద్రించు
+	Preparing the print job	ముద్రణ పనిని సిద్ధం చేస్తోంది
+	Rendering sheet {d} of {t}	షీట్ {d} / {t} రెండర్ అవుతోంది
+	Print cancelled: nothing was sent to {printer}	ముద్రణ రద్దు చేయబడింది: {printer}కు ఏమీ పంపలేదు

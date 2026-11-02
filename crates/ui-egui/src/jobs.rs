@@ -1,8 +1,9 @@
 //! The background jobs the shell is running: what each one is, where it has got to, and how to
 //! stop it.
 //!
-//! Five kinds of work leave the interface thread: optimizing a document, recognising text in one
-//! document, recognising text in a folder of files, running an action over files, and exporting.
+//! Six kinds of work leave the interface thread: optimizing a document, recognising text in one
+//! document, recognising text in a folder of files, running an action over files, exporting, and
+//! printing.
 //! Each used to report itself in its own way — a private progress card for the optimizer, a toast
 //! rewritten every few hundred milliseconds for the rest — and only two of them could be stopped
 //! at all: the optimizer's Cancel button, and one method (`cancel_ocr`) that no control reached.
@@ -14,7 +15,10 @@
 //! person and an agent see the same jobs and can stop the same job.
 //!
 //! Bounded on purpose: a stop is cooperative and is answered between items, so a single item that
-//! takes a long time (one huge page at 600 dpi) still has to finish. Nothing here kills a thread,
+//! takes a long time (one huge page at 600 dpi) still has to finish. A job can also be handed to
+//! something this app cannot call back — a print job the spooler has taken — and [`Jobs::hand_over`]
+//! is that moment: the card withdraws its Cancel and the job centre refuses the stop, rather than
+//! offering one that would be ignored. Nothing here kills a thread,
 //! and a job whose worker has died is removed by the poll that was waiting for it, not by a
 //! watchdog: the worker holds an [`Alive`] handle and drops it when it ends, so the poll can tell
 //! "not finished yet" from "never going to say anything" (REC-R06).
@@ -117,6 +121,8 @@ pub enum Kind {
     /// An action run over files.
     Action,
     Export,
+    /// A job sent to a printer.
+    Print,
 }
 
 impl Kind {
@@ -128,6 +134,7 @@ impl Kind {
             Kind::RecognizeFiles => "recognize-files",
             Kind::Action => "action",
             Kind::Export => "export",
+            Kind::Print => "print",
         }
     }
 }
@@ -148,6 +155,9 @@ pub struct Job {
     pub total: usize,
     /// A stop was asked for and the worker has not reported back yet.
     pub stopping: bool,
+    /// Whether a stop can still be answered. False once the job has been handed to something
+    /// outside this app that cannot call it back (see [`Jobs::hand_over`]).
+    pub stoppable: bool,
     cancel: Cancel,
 }
 
@@ -175,7 +185,18 @@ impl Jobs {
         self.next = self.next.saturating_add(1);
         let id = JobId(self.next);
         let cancel = Cancel::new();
-        self.running.push(Job { id, kind, label, stage: String::new(), fraction: 0.0, done: 0, total, stopping: false, cancel: cancel.clone() });
+        self.running.push(Job {
+            id,
+            kind,
+            label,
+            stage: String::new(),
+            fraction: 0.0,
+            done: 0,
+            total,
+            stopping: false,
+            stoppable: true,
+            cancel: cancel.clone(),
+        });
         (id, cancel)
     }
 
@@ -223,9 +244,10 @@ impl Jobs {
         }
     }
 
-    /// Ask the job's worker to stop. `false` when no such job is running (already finished).
+    /// Ask the job's worker to stop. `false` when no such job is running (already finished), and
+    /// when the job has been handed over and no stop can be answered any more (see [`Self::hand_over`]).
     pub fn cancel(&mut self, id: JobId) -> bool {
-        match self.running.iter_mut().find(|j| j.id == id) {
+        match self.running.iter_mut().find(|j| j.id == id && j.stoppable) {
             Some(job) => {
                 job.stopping = true;
                 job.cancel.cancel();
@@ -235,13 +257,34 @@ impl Jobs {
         }
     }
 
-    /// Ask every running job to stop; returns how many were asked.
+    /// Ask every job that can still be stopped to stop; returns how many were asked.
     pub fn cancel_all(&mut self) -> usize {
+        let mut asked = 0;
         for job in &mut self.running {
-            job.stopping = true;
-            job.cancel.cancel();
+            if job.stoppable {
+                job.stopping = true;
+                job.cancel.cancel();
+                asked += 1;
+            }
         }
-        self.running.len()
+        asked
+    }
+
+    /// The job has been handed to something outside this app that cannot call it back — for a
+    /// print, the system spooler has taken it. From now on the card offers no Cancel for it and
+    /// [`Self::cancel`] answers `false`, because a stop that cannot happen is not a stop: a
+    /// button that did nothing would be worse than no button. A stop that was asked for a moment
+    /// too late is cleared with it, so the card does not say Cancelling… about a job that is
+    /// going ahead. `false` when no such job is running.
+    pub fn hand_over(&mut self, id: JobId) -> bool {
+        match self.running.iter_mut().find(|j| j.id == id) {
+            Some(job) => {
+                job.stoppable = false;
+                job.stopping = false;
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -338,6 +381,28 @@ mod tests {
         assert!(jobs.get(b).is_some_and(|j| j.stopping));
         assert!(jobs.finish(b), "the export was running");
         assert!(jobs.is_empty());
+    }
+
+    /// A print job the spooler has taken cannot be called back: the centre stops offering the stop
+    /// instead of recording one that would be ignored.
+    #[test]
+    fn a_handed_over_job_refuses_the_stop_and_keeps_no_stopping_state() {
+        let mut jobs = Jobs::default();
+        let (print, token) = jobs.begin(Kind::Print, "Print to Front Desk".into(), 0);
+        let (other, _) = jobs.begin(Kind::Export, "Export".into(), 3);
+        assert!(jobs.get(print).is_some_and(|j| j.stoppable), "a fresh job can be stopped");
+        // While the sheets are being rendered the stop is real.
+        assert!(jobs.cancel(print));
+        assert!(token.is_cancelled(), "the worker holds the same flag");
+        // The spooler takes the job: the stop is withdrawn, and the state that was set before it
+        // is cleared so the card does not say Cancelling… for ever.
+        assert!(jobs.hand_over(print));
+        assert!(!jobs.cancel(print), "a stop that cannot happen is refused");
+        assert!(jobs.get(other).is_some_and(|j| j.stoppable && !j.stopping), "the other job is untouched");
+        assert_eq!(jobs.cancel_all(), 1, "only the job that can be stopped is asked");
+        assert!(jobs.get(other).is_some_and(|j| j.stopping));
+        assert!(jobs.get(print).is_some_and(|j| !j.stoppable && !j.stopping), "a late stop is not shown as one");
+        assert!(!jobs.hand_over(crate::jobs::JobId(99)), "no such job");
     }
 
     #[test]

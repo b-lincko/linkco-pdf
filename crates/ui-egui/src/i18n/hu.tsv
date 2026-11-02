@@ -2253,3 +2253,7 @@ key	Space	Szóköz
 	Exporting… page {d} of {t}	Exportálás… {t} oldalból {d}.
 	Export cancelled	Exportálás megszakítva
 	An export is already running	Már fut egy exportálás
+	Print to {printer}	Nyomtatás erre: {printer}
+	Preparing the print job	A nyomtatási feladat előkészítése
+	Rendering sheet {d} of {t}	{d}. lap előállítása, összesen {t}
+	Print cancelled: nothing was sent to {printer}	A nyomtatás megszakítva: semmi nem került a(z) {printer} nyomtatóra

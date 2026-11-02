@@ -378,7 +378,19 @@ impl Control {
         if let Some(id) = p.get("cancel") {
             let id = id.as_u64().ok_or_else(|| "ui.jobs: cancel must be a job id (see ui.state jobs)".to_string())?;
             let job = crate::jobs::JobId(id);
-            return if host.cancel_job(job) { Ok(host.jobs()) } else { Err(format!("ui.jobs: no running job {id}")) };
+            if host.cancel_job(job) {
+                return Ok(host.jobs());
+            }
+            // A job can be running and yet not stoppable — a print the spooler has taken is out of
+            // this app's hands — so the answer distinguishes that from a job that is gone.
+            let running = host.jobs();
+            let handed_over =
+                running.as_array().is_some_and(|jobs| jobs.iter().any(|j| j["id"].as_u64() == Some(id) && j["stoppable"] == json!(false)));
+            return Err(if handed_over {
+                format!("ui.jobs: job {id} can no longer be stopped: the printer has taken it")
+            } else {
+                format!("ui.jobs: no running job {id}")
+            });
         }
         Ok(host.jobs())
     }
@@ -671,6 +683,7 @@ fn jobs_json(jobs: &crate::jobs::Jobs) -> Value {
                     "total": j.total,
                     "fraction": j.fraction,
                     "stopping": j.stopping,
+                    "stoppable": j.stoppable,
                 })
             })
             .collect(),

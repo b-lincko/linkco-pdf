@@ -2255,3 +2255,7 @@ key	Space	Leertaste
 	Exporting… page {d} of {t}	Exportiere… Seite {d} von {t}
 	Export cancelled	Export abgebrochen
 	An export is already running	Es läuft bereits ein Export
+	Print to {printer}	Drucken auf {printer}
+	Preparing the print job	Druckauftrag wird vorbereitet
+	Rendering sheet {d} of {t}	Blatt {d} von {t} wird gerendert
+	Print cancelled: nothing was sent to {printer}	Druck abgebrochen: an {printer} wurde nichts gesendet

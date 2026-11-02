@@ -2276,3 +2276,7 @@ key	Space	Пробіл
 	Exporting… page {d} of {t}	Експортування… сторінка {d} з {t}
 	Export cancelled	Експорт скасовано
 	An export is already running	Експорт уже виконується
+	Print to {printer}	Друк на {printer}
+	Preparing the print job	Підготовка завдання друку
+	Rendering sheet {d} of {t}	Візуалізація аркуша {d} з {t}
+	Print cancelled: nothing was sent to {printer}	Друк скасовано: на {printer} нічого не надіслано

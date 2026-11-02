@@ -2236,3 +2236,7 @@ key	Space	Spacja
 	file {d} of {t}	Plik {d} z {t}
 	Export stopped after {done} of {total} files	Eksport zatrzymany po {done} z {total} plików
 	and {n} more	i jeszcze {n}
+	Print to {printer}	Drukuj na {printer}
+	Preparing the print job	Przygotowywanie zadania drukowania
+	Rendering sheet {d} of {t}	Renderowanie arkusza {d} z {t}
+	Print cancelled: nothing was sent to {printer}	Drukowanie anulowane: nic nie zostało wysłane do {printer}

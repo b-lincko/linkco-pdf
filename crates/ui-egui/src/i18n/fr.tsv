@@ -2255,3 +2255,7 @@ key	Space	Espace
 	Exporting… page {d} of {t}	Exportation… page {d} sur {t}
 	Export cancelled	Export annulé
 	An export is already running	Une exportation est déjà en cours
+	Print to {printer}	Imprimer sur {printer}
+	Preparing the print job	Préparation du travail d'impression
+	Rendering sheet {d} of {t}	Rendu de la feuille {d} sur {t}
+	Print cancelled: nothing was sent to {printer}	Impression annulée : rien n'a été envoyé à {printer}

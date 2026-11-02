@@ -2255,3 +2255,7 @@ key	Space	スペース
 	Exporting… page {d} of {t}	エクスポート中… {t} ページ中 {d} ページ
 	Export cancelled	エクスポートを中止しました
 	An export is already running	すでにエクスポートを実行中です
+	Print to {printer}	{printer} に印刷
+	Preparing the print job	印刷ジョブを準備しています
+	Rendering sheet {d} of {t}	シート {d}/{t} を描画しています
+	Print cancelled: nothing was sent to {printer}	印刷を取り消しました: {printer} には何も送信されていません
