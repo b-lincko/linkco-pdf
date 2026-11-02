@@ -151,7 +151,7 @@ impl OfficeFormat {
 
 /// One page as paragraphs and images (for Word, HTML and RTF export), including what form
 /// XObjects draw.
-fn page_of(cos: &pdfcraft_cos::Document, i: usize, info: &pdfcraft_render::inspect::PageInfo) -> pdfcraft_export::Page {
+fn page_of(cos: &pdfcraft_cos::Document, i: usize, size: (f32, f32)) -> pdfcraft_export::Page {
     let blocks = pdfcraft_edit::reading_blocks(cos, i)
         .unwrap_or_default()
         .into_iter()
@@ -176,23 +176,24 @@ fn page_of(cos: &pdfcraft_cos::Document, i: usize, info: &pdfcraft_render::inspe
             Some(pdfcraft_export::Image { ext: if ext == "jpg" { "jpg" } else { "png" }, bytes, rect: im.rect })
         })
         .collect();
-    pdfcraft_export::Page { width: info.width as f64, height: info.height as f64, blocks, images }
+    pdfcraft_export::Page { width: size.0 as f64, height: size.1 as f64, blocks, images }
 }
 
-/// Every page's content, in order. `keep_going` is asked before each page; `None` means it said
+/// Every page's content, in order, for pages of these displayed sizes (in points: all the export
+/// takes from a page's geometry). `keep_going` is asked before each page; `None` means it said
 /// stop, so the pages read so far are all that was read.
 fn pages_of(
     cos: &pdfcraft_cos::Document,
-    infos: &[pdfcraft_render::inspect::PageInfo],
+    sizes: &[(f32, f32)],
     keep_going: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Option<Vec<pdfcraft_export::Page>> {
-    let total = infos.len();
+    let total = sizes.len();
     let mut pages = Vec::with_capacity(total);
-    for (i, info) in infos.iter().enumerate() {
+    for (i, size) in sizes.iter().enumerate() {
         if !keep_going(i, total) {
             return None;
         }
-        pages.push(page_of(cos, i, info));
+        pages.push(page_of(cos, i, *size));
     }
     Some(pages)
 }
@@ -207,7 +208,8 @@ pub struct OfficeJob {
     /// The content the export reads (`None` for a document whose pages cannot be read as text:
     /// the file is then empty, as it always was).
     cos: Option<pdfcraft_cos::Document>,
-    pages: Vec<pdfcraft_render::inspect::PageInfo>,
+    /// Each page's displayed size in points.
+    sizes: Vec<(f32, f32)>,
     title: String,
     format: OfficeFormat,
 }
@@ -218,7 +220,7 @@ impl crate::Session {
         let doc = self.get(id).ok_or(EditError::NoDocument)?;
         Ok(OfficeJob {
             cos: doc.editor.as_ref().map(|e| e.cos.clone()),
-            pages: doc.info.pages.clone(),
+            sizes: doc.info.pages.iter().map(|p| (p.width, p.height)).collect(),
             title: doc.info.title.clone().unwrap_or_else(|| doc.name.trim_end_matches(".pdf").to_string()),
             format,
         })
@@ -228,7 +230,7 @@ impl crate::Session {
 impl OfficeJob {
     /// How many pages it reads.
     pub fn pages(&self) -> usize {
-        self.pages.len()
+        self.sizes.len()
     }
 
     /// The file's bytes, asking `keep_going` before each page with how many are read and how many
@@ -242,12 +244,12 @@ impl OfficeJob {
     }
 
     fn work(self, mut keep_going: impl FnMut(usize, usize) -> bool) -> Option<Vec<u8>> {
-        let OfficeJob { cos, pages, title, format } = self;
+        let OfficeJob { cos, sizes, title, format } = self;
         let read = match cos.as_ref() {
-            Some(cos) => pages_of(cos, &pages, &mut keep_going)?,
+            Some(cos) => pages_of(cos, &sizes, &mut keep_going)?,
             // Nothing readable: no page to walk, and the file is empty as it always was — but a
             // stop asked for before it started still means no file.
-            None if keep_going(0, pages.len()) => Vec::new(),
+            None if keep_going(0, sizes.len()) => Vec::new(),
             None => return None,
         };
         Some(match format {
@@ -263,7 +265,8 @@ impl crate::Document {
     /// form XObjects draw.
     pub fn export_pages(&self) -> Vec<pdfcraft_export::Page> {
         let Some(cos) = self.editor.as_ref().map(|e| &e.cos) else { return Vec::new() };
-        pages_of(cos, &self.info.pages, &mut |_, _| true).unwrap_or_default()
+        let sizes: Vec<(f32, f32)> = self.info.pages.iter().map(|p| (p.width, p.height)).collect();
+        pages_of(cos, &sizes, &mut |_, _| true).unwrap_or_default()
     }
 
     /// The document as a Word, HTML or RTF file.
