@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (367 records)
 
-complete: 37, in_progress: 8, pending: 322
+complete: 38, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -53,7 +53,7 @@ complete: 37, in_progress: 8, pending: 322
 | B033 | [x] An approval names the batch it approves | P0 | complete | REC-B03 |
 | B034 | [x] A job whose worker dies ends instead of spinning for ever | P0 | complete | REC-R06 |
 | B035 | [x] A batch of files is shown before it runs, and asked about again if it changed | P0 | complete | REC-B03 |
-| B036 | [ ] Word, HTML and RTF exports leave the interface thread, and can be stopped between pages | P0 | in_progress | REC-R04 |
+| B036 | [x] Word, HTML and RTF exports leave the interface thread, and can be stopped between pages | P0 | complete | REC-R04 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1429,11 +1429,11 @@ pending: 65, scope_review: 23
 
 ### B036: Word, HTML and RTF exports leave the interface thread, and can be stopped between pages
 
-- Status: **in_progress**; parent(s): REC-R04.
+- Status: **complete**; parent(s): REC-R04.
 - Acceptance: Exporting a document to Word, HTML or RTF no longer blocks the interface: the pages are read on a worker, the job centre shows the export with the page it is on, and the file is written once, atomically, when the last page is read. Stopping it before then writes no file at all and says so; a worker that ends without reporting ends its job rather than leaving a card spinning; and the document's own conversion is unchanged — the bytes a job writes are the bytes the document writes.
 - Audit: Started from the sentence REC-R04 has carried since B024 — the conversions still run synchronously — and asked what it would take to make one of them a job like the other five. Three things came out, and each changed the design. (1) The conversion could not simply be moved: reading a page's blocks and images needs the document, which lives in the session on the interface thread, so a worker has nothing to read. The answer is the pattern the optimizer already uses — hand out an owned job — but here it must also hand out the *page geometry*, because the export's page sizes come from the document's info, not from the content. (2) There are now two page readers unless the old one is rebuilt on the new one, so `Document::export_pages` is a wrapper over it: the file a document exports and the file a job exports are built by one function, and a test compares them byte for byte. (3) A stop mid-file is only honest because the file is written at the end: the worker keeps its bytes in memory and the writer replaces the target atomically once, so a stop means no file, never 'half a file'. Decisions. The save location is asked for first and the conversion second, which is the opposite order to before, because a document that is going to take a while should not be converted before anybody has said where it goes. The job uses the kind the export already had (`jobs::Kind::Export`), so the centre, the control channel and the keyboard stop all treat it like the other exports, and its label is the format it writes. A worker that panics is caught by the engine's guard, so it reports rather than dies silently, and a worker that ends without reporting at all ends its job here (the `jobs::Alive` rule from REC-R06). What the audit checked on the way: the wasm build keeps its old path (it computes and downloads, with no file to replace and no job to watch), an export already running refuses a second one with a sentence instead of starting, a stop that arrives after the last page is not a failure, a document with no readable content still writes its (empty) file, and the four new strings are in all fourteen catalogs with the asset hashes re-recorded.
 - Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable from it), so the Rust was compiled and run by CI, not here: the Python gates and the formatting check are the local evidence. A stop is cooperative and is answered between pages, so a single page that takes a long time still finishes — and the conversion of the pages already read (the Word, HTML or RTF string building) is not interrupted either, because it happens after the last page in one call. The file is held in memory until the end, which doubles the peak memory of an export on a very large document. Print jobs are not covered: they still run on their own thread with no row in the centre and no single stop, and REC-R04 stays open for them. The wasm build is unchanged and the new job code is not compiled for it.
-- Ci: pending
+- Ci: passed
 - Notes: The second half of REC-R04's remaining scope, and the one B024 named and left — R04 remains open for print jobs and for the Word/HTML/RTF conversions, which still run synchronously. The export path built the whole file on the interface thread before it even asked where to save: on a long document the window froze, the job centre knew nothing about it, and there was no way to stop it. What made this more than moving a call is that the expensive part — reading the text blocks and images of every page — needs the document, which belongs to the session on the interface thread, so a worker could not touch it. The engine now hands the work out (`Session::office_job` takes the content handle, the page sizes and the title; `OfficeJob::run(keep_going)` reads the pages and builds the file), the page reader is the same function `export_pages` uses, so a job and a document cannot disagree about what a page contains. On the interface side the file is written only at the end, which is what makes a stop simple and safe: nothing is half-written, so a stop means no file rather than a truncated one. Print jobs are what REC-R04 still waits for.
 - Local evidence: cargo fmt --all -- --check passes.
 - Local evidence: crates/engine/src/tests.rs::an_office_export_asks_between_pages_and_writes_nothing_when_stopped: a four-page document exports from the job to exactly what the document itself exports, the callback is asked before every page with its index and the count, and returning false before page three stops with no file.
@@ -1442,3 +1442,8 @@ pending: 65, scope_review: 23
 - Local evidence: crates/ui-egui/src/export_ui.rs::an_office_export_whose_worker_died_writes_nothing_and_retires: while the worker runs the card stays and its stage reads `Exporting… page 1 of 3`; when the worker ends without reporting, the run ends with the shared sentence instead of spinning.
 - Local evidence: crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf still proves the three formats end to end, now through the job (inline).
 - Local evidence: python3 docs/implementation/build_backlog.py --check, python3 -m unittest discover -s docs/implementation -p 'test_*.py', check_disclosure.py --check and check_egress.py --check pass.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41443271006
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41443270838
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41443271147
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41443270839
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41443270867
