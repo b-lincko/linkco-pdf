@@ -151,7 +151,7 @@ impl OfficeFormat {
 
 /// One page as paragraphs and images (for Word, HTML and RTF export), including what form
 /// XObjects draw.
-fn page_of(cos: &pdfcraft_cos::Document, i: usize, info: &inspect::PageInfo) -> pdfcraft_export::Page {
+fn page_of(cos: &pdfcraft_cos::Document, i: usize, info: &pdfcraft_render::inspect::PageInfo) -> pdfcraft_export::Page {
     let blocks = pdfcraft_edit::reading_blocks(cos, i)
         .unwrap_or_default()
         .into_iter()
@@ -183,7 +183,7 @@ fn page_of(cos: &pdfcraft_cos::Document, i: usize, info: &inspect::PageInfo) -> 
 /// stop, so the pages read so far are all that was read.
 fn pages_of(
     cos: &pdfcraft_cos::Document,
-    infos: &[inspect::PageInfo],
+    infos: &[pdfcraft_render::inspect::PageInfo],
     keep_going: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Option<Vec<pdfcraft_export::Page>> {
     let total = infos.len();
@@ -207,7 +207,7 @@ pub struct OfficeJob {
     /// The content the export reads (`None` for a document whose pages cannot be read as text:
     /// the file is then empty, as it always was).
     cos: Option<pdfcraft_cos::Document>,
-    pages: Vec<inspect::PageInfo>,
+    pages: Vec<pdfcraft_render::inspect::PageInfo>,
     title: String,
     format: OfficeFormat,
 }

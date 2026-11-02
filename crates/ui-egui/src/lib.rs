@@ -659,7 +659,7 @@ pub struct PdfCraftApp {
     /// The export worker, so a poll can tell "not done yet" from "ended without a word" (REC-R06).
     export_alive: Option<jobs::Alive>,
     /// A Word, HTML or RTF export in flight (REC-R04): one file, written when it finishes.
-    pub office_export: Option<export_ui::OfficeRun>,
+    office_export: Option<export_ui::OfficeRun>,
     /// The saved Fill & Sign signature and initials (drawn or typed).
     pub signature: Option<fill_sign::SavedSig>,
     pub initials: Option<fill_sign::SavedSig>,
