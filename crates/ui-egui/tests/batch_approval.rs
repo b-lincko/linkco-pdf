@@ -144,6 +144,6 @@ fn a_recognition_batch_names_the_file_it_would_replace_before_it_does() {
     app.use_files(pdfcraft_ui_egui::FilePurpose::Ocr, vec![("a.pdf".into(), one_page())]);
     let pending = app.pending_batch.clone().expect("the batch is planned before it runs");
     assert_eq!(pending.plan.replacing(), 1, "the copy already there is named as replaced");
-    assert_eq!(pending.plan.targets[0].output, dir.join("a.pdf"));
+    assert_eq!(pending.plan.targets[0].output, dir.join("out/a.pdf"), "the copy in the results folder, not the input's own file");
     assert_eq!(std::fs::read(dir.join("out/a.pdf")).unwrap(), b"an older copy", "planning replaced nothing");
 }
