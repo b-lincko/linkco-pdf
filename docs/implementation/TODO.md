@@ -1483,9 +1483,9 @@ pending: 65, scope_review: 23
 - Local evidence: cargo fmt --all -- --check passes.
 - Local evidence: crates/ui-egui/src/jobs.rs::a_waiting_job_has_a_row_but_does_not_make_its_kind_busy: a waiting row exists, is stoppable, has done nothing, and does not hold its kind once the running job ends.
 - Local evidence: crates/ui-egui/src/jobs.rs::a_second_job_waits_in_order_and_other_kinds_are_not_held_up: a print of another kind starts in the same pump, the two exports wait, and they start oldest first, one per pump.
-- Local evidence: crates/ui-egui/src/jobs.rs::a_waiting_job_called_off_is_never_started: the request's closure never runs, its row goes, the notice says so, and the running job is untouched.
+- Local evidence: crates/ui-egui/src/jobs.rs::a_waiting_job_called_off_is_never_started: the request's closure never runs, its row goes, the notice says so, and the running job is untouched (the row is retired by the pump's first pass, so a cancelled waiting job cannot be left behind).
 - Local evidence: crates/ui-egui/src/widgets.rs::the_card_names_each_state_of_a_job: Waiting its turn, the stage, Cancelling…, and a bare label when there is nothing to say.
 - Local evidence: crates/ui-egui/tests/control.rs::a_waiting_job_is_listed_as_waiting_and_can_be_called_off: ui.state reports queued: true and stoppable: true for the waiting job, ui.jobs cancels it, and only the running job is left.
-- Local evidence: crates/ui-egui/src/optimize_ui.rs::a_second_run_waits_its_turn_instead_of_being_refused: the second optimization gets a queued row and no refusal, a frame while the first runs changes nothing, and once the first ends its waiting row goes and the request is carried out on the ordinary path (reported here, because the test's document is not a PDF).
+- Local evidence: crates/ui-egui/src/optimize_ui.rs::a_second_run_waits_its_turn_instead_of_being_refused: the second optimization gets a queued row and no refusal, the running one still holds its kind, and a frame changes nothing while it runs.
 - Local evidence: python3 docs/implementation/build_backlog.py --check, python3 -m unittest discover -s docs/implementation -p 'test_*.py', check_disclosure.py --check and check_egress.py --check pass.
 - Local evidence: All 247 recorded asset SHA-256s match their files, including the sixteen edited catalogs.

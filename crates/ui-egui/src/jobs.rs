@@ -405,24 +405,26 @@ impl crate::PdfCraftApp {
     }
 
     /// Start whatever has waited longest, for each kind whose job has finished (each frame; also
-    /// called whenever a job ends). A waiting job whose row has gone, or whose stop was asked for,
-    /// is called off and never started.
+    /// called whenever a job ends). A waiting job that was called off never starts, and its row
+    /// goes with the request.
     pub(crate) fn pump_queue(&mut self) {
+        // Called off before its turn: nothing has happened, so nothing is undone — the row is
+        // simply retired, whether or not this app is still holding the request behind it.
+        let called_off: Vec<JobId> = self.jobs.jobs().iter().filter(|j| j.queued && j.stopping).map(|j| j.id).collect();
+        for id in called_off {
+            self.jobs.finish(id);
+            self.notify_tr("The job was cancelled before it started");
+        }
         if self.waiting.is_empty() {
             return;
         }
         let queued = std::mem::take(&mut self.waiting);
         let mut keep = Vec::with_capacity(queued.len());
         for item in queued {
-            let Some((kind, stopping)) = self.jobs.get(item.id).map(|j| (j.kind, j.stopping)) else {
-                // Its row is gone (it was finished): the job is over before it began.
+            let Some(kind) = self.jobs.get(item.id).map(|j| j.kind) else {
+                // Its row is gone (it was finished, or called off above): it never starts.
                 continue;
             };
-            if stopping {
-                self.jobs.finish(item.id);
-                self.notify_tr("The job was cancelled before it started");
-                continue;
-            }
             if self.jobs.is_busy(kind) {
                 keep.push(item);
             } else {
