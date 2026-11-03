@@ -1539,12 +1539,10 @@
 	Added {n} comments	Добавлено {n} комментариев
 	Choose a folder for the results	Выберите папку для результатов
 	Files for {name}	Файлы для {name}
-	An action is already running	Действие уже выполняется
 	Running action… file {d} of {t}	Выполняется действие… файл {d} из {t}
 	No unlinked web addresses were found in the text	В тексте не найдено несвязанных веб-адресов
 	Created 1 link	Создана 1 ссылка
 	Created {n} links	Создано {n} ссылок
-	Text recognition is already running	Распознавание текста уже выполняется
 	Recognizing text… file {d} of {t}	Распознавание текста… файл {d} из {t}
 	Recognizing text… page {d} of {t}	Распознавание текста… стр. {d} из {t}
 	Recognized 1 word	Распознано 1 слово
@@ -2178,8 +2176,9 @@ key	Space	Пробел
 	Export to {format}	Экспорт в {format}
 	Exporting… page {d} of {t}	Экспорт… страница {d} из {t}
 	Export cancelled	Экспорт отменён
-	An export is already running	Экспорт уже выполняется
 	Print to {printer}	Печать на {printer}
 	Preparing the print job	Подготовка задания печати
 	Rendering sheet {d} of {t}	Отрисовка листа {d} из {t}
 	Print cancelled: nothing was sent to {printer}	Печать отменена: на {printer} ничего не отправлено
+	Waiting its turn	Ожидает своей очереди
+	The job was cancelled before it started	Задание отменено до начала

@@ -1538,12 +1538,10 @@
 	Added {n} comments	أُضيف {n} تعليقات
 	Choose a folder for the results	اختر مجلدًا للنتائج
 	Files for {name}	ملفات {name}
-	An action is already running	يوجد إجراء قيد التشغيل بالفعل
 	Running action… file {d} of {t}	جارٍ تشغيل الإجراء… الملف {d} من {t}
 	No unlinked web addresses were found in the text	لم يُعثر في النص على عناوين ويب غير مرتبطة
 	Created 1 link	أُنشئ رابط واحد
 	Created {n} links	أُنشئ {n} روابط
-	Text recognition is already running	التعرف على النص قيد التشغيل بالفعل
 	Recognizing text… file {d} of {t}	جارٍ التعرف على النص… الملف {d} من {t}
 	Recognizing text… page {d} of {t}	جارٍ التعرف على النص… الصفحة {d} من {t}
 	Recognized 1 word	تم التعرف على كلمة واحدة
@@ -2020,7 +2018,6 @@
 	Created a PDF from {n} files; left out: {names}	أُنشئ ملف PDF من {n} ملفات؛ استُبعد: {names}
 	Created a PDF from the first {n} files	أُنشئ ملف PDF من أول {n} ملفات
 	Go to page…	الانتقال إلى صفحة…
-	Optimization is already running	التحسين قيد التشغيل بالفعل
 	Optimization cancelled	أُلغي التحسين
 	Couldn't optimize the file	تعذّر تحسين الملف
 	Files are combined in this order. Leave Pages empty to take every page.	تُدمج الملفات بهذا الترتيب. اترك «الصفحات» فارغًا لأخذ كل الصفحات.
@@ -2274,8 +2271,9 @@ key	Space	مسافة
 	Export to {format}	تصدير إلى {format}
 	Exporting… page {d} of {t}	جارٍ التصدير… الصفحة {d} من {t}
 	Export cancelled	أُلغي التصدير
-	An export is already running	يوجد تصدير قيد التشغيل بالفعل
 	Print to {printer}	طباعة إلى {printer}
 	Preparing the print job	جارٍ تحضير مهمة الطباعة
 	Rendering sheet {d} of {t}	جارٍ عرض الورقة {d} من {t}
 	Print cancelled: nothing was sent to {printer}	أُلغيت الطباعة: لم يُرسل شيء إلى {printer}
+	Waiting its turn	في انتظار دورها
+	The job was cancelled before it started	أُلغي العمل قبل أن يبدأ

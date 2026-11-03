@@ -1538,19 +1538,16 @@
 	Added {n} comments	注釈を {n} 件追加しました
 	Choose a folder for the results	結果の保存先フォルダーを選択
 	Files for {name}	{name} 用のファイル
-	An action is already running	アクションはすでに実行中です
 	Running action… file {d} of {t}	アクションを実行中… ファイル {d} / {t}
 	No unlinked web addresses were found in the text	テキスト内にリンクのない Web アドレスはありませんでした
 	Created 1 link	リンクを 1 件作成しました
 	Created {n} links	リンクを {n} 件作成しました
-	Text recognition is already running	テキスト認識はすでに実行中です
 	Optimizing… removing user data	最適化中… ユーザーデータを削除しています
 	Optimizing… image {d} of {t}	最適化中… 画像 {d} / {t}
 	Optimizing… cleaning up	最適化中… クリーンアップしています
 	Optimizing… merging identical objects	最適化中… 同一オブジェクトを統合しています
 	Optimizing… writing the copy	最適化中… コピーを書き込んでいます
 	Cancelling…	キャンセルしています…
-	Optimization is already running	最適化はすでに実行中です
 	Optimization cancelled	最適化をキャンセルしました
 	Couldn't optimize the file	ファイルを最適化できませんでした
 	Recognizing text… file {d} of {t}	テキストを認識中… ファイル {d} / {t}
@@ -2254,8 +2251,9 @@ key	Space	スペース
 	Export to {format}	{format} へエクスポート
 	Exporting… page {d} of {t}	エクスポート中… {t} ページ中 {d} ページ
 	Export cancelled	エクスポートを中止しました
-	An export is already running	すでにエクスポートを実行中です
 	Print to {printer}	{printer} に印刷
 	Preparing the print job	印刷ジョブを準備しています
 	Rendering sheet {d} of {t}	シート {d}/{t} を描画しています
 	Print cancelled: nothing was sent to {printer}	印刷を取り消しました: {printer} には何も送信されていません
+	Waiting its turn	順番待ちです
+	The job was cancelled before it started	ジョブは開始前に取り消されました

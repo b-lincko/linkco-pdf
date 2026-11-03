@@ -1507,19 +1507,16 @@
 	Added {n} comments	{n} megjegyzés hozzáadva
 	Choose a folder for the results	Válassz mappát az eredményeknek
 	Files for {name}	Fájlok ehhez: {name}
-	An action is already running	Már fut egy művelet
 	Running action… file {d} of {t}	Művelet fut… {d}. fájl / {t}
 	No unlinked web addresses were found in the text	A szövegben nem találtunk hivatkozás nélküli webcímet
 	Created 1 link	1 hivatkozás létrehozva
 	Created {n} links	{n} hivatkozás létrehozva
-	Text recognition is already running	A szövegfelismerés már fut
 	Optimizing… removing user data	Optimalizálás… felhasználói adatok eltávolítása
 	Optimizing… image {d} of {t}	Optimalizálás… {d}. kép / {t}
 	Optimizing… cleaning up	Optimalizálás… tisztítás
 	Optimizing… merging identical objects	Optimalizálás… azonos objektumok egyesítése
 	Optimizing… writing the copy	Optimalizálás… a másolat írása
 	Cancelling…	Megszakítás…
-	Optimization is already running	Az optimalizálás már fut
 	Optimization cancelled	Optimalizálás megszakítva
 	Couldn't optimize the file	A fájlt nem sikerült optimalizálni
 	Recognizing text… file {d} of {t}	Szövegfelismerés… {d}. fájl / {t}
@@ -2252,8 +2249,9 @@ key	Space	Szóköz
 	Export to {format}	Exportálás ide: {format}
 	Exporting… page {d} of {t}	Exportálás… {t} oldalból {d}.
 	Export cancelled	Exportálás megszakítva
-	An export is already running	Már fut egy exportálás
 	Print to {printer}	Nyomtatás erre: {printer}
 	Preparing the print job	A nyomtatási feladat előkészítése
 	Rendering sheet {d} of {t}	{d}. lap előállítása, összesen {t}
 	Print cancelled: nothing was sent to {printer}	A nyomtatás megszakítva: semmi nem került a(z) {printer} nyomtatóra
+	Waiting its turn	Vár a sorára
+	The job was cancelled before it started	A feladat a kezdés előtt megszakítva

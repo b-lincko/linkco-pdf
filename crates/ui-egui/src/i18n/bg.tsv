@@ -1490,19 +1490,16 @@
 	Added {n} comments	Добавени са {n} коментара
 	Choose a folder for the results	Изберете папка за резултатите
 	Files for {name}	Файлове за {name}
-	An action is already running	Вече се изпълнява действие
 	Running action… file {d} of {t}	Изпълнение на действие… файл {d} от {t}
 	No unlinked web addresses were found in the text	В текста не са открити уеб адреси без връзка
 	Created 1 link	Създадена е 1 връзка
 	Created {n} links	Създадени са {n} връзки
-	Text recognition is already running	Разпознаването на текст вече се изпълнява
 	Optimizing… removing user data	Оптимизиране… премахване на потребителски данни
 	Optimizing… image {d} of {t}	Оптимизиране… изображение {d} от {t}
 	Optimizing… cleaning up	Оптимизиране… почистване
 	Optimizing… merging identical objects	Оптимизиране… сливане на еднакви обекти
 	Optimizing… writing the copy	Оптимизиране… записване на копието
 	Cancelling…	Отказване…
-	Optimization is already running	Оптимизирането вече се изпълнява
 	Optimization cancelled	Оптимизирането е отказано
 	Couldn't optimize the file	Файлът не можа да бъде оптимизиран
 	Recognizing text… file {d} of {t}	Разпознаване на текст… файл {d} от {t}
@@ -2216,8 +2213,9 @@ key	Space	Интервал
 	Export to {format}	Експортиране към {format}
 	Exporting… page {d} of {t}	Експортиране… страница {d} от {t}
 	Export cancelled	Експортирането е отменено
-	An export is already running	Вече тече експортиране
 	Print to {printer}	Печат към {printer}
 	Preparing the print job	Подготовка на задачата за печат
 	Rendering sheet {d} of {t}	Изобразяване на лист {d} от {t}
 	Print cancelled: nothing was sent to {printer}	Печатът е отменен: нищо не беше изпратено към {printer}
+	Waiting its turn	Чака своя ред
+	The job was cancelled before it started	Задачата беше отменена, преди да започне

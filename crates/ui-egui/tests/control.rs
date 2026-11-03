@@ -1460,6 +1460,34 @@ fn read_mode_retains_existing_rail_click_to_close_policy() {
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Read);
 }
 
+/// A job waiting its turn is on the same list, says so, and can be called off there — a script
+/// sees the queue a person sees.
+#[test]
+fn a_waiting_job_is_listed_as_waiting_and_can_be_called_off() {
+    let (mut h, c) = harness();
+    let (running, _) = h.state_mut().jobs.begin(pdfcraft_ui_egui::jobs::Kind::Export, "Export to Image".into(), 3);
+    let waiting = h.state_mut().jobs.begin_queued(pdfcraft_ui_egui::jobs::Kind::Export, "Export to Text".into());
+    h.run_steps(2);
+
+    let listed = ok(&mut h, &c, "ui.state", json!({}));
+    let jobs = listed["jobs"].as_array().expect("jobs is a list").clone();
+    assert_eq!(jobs.len(), 2, "{listed}");
+    assert_eq!(jobs[0]["queued"], false);
+    assert_eq!(jobs[1]["queued"], true, "a waiting job says it is waiting: {listed}");
+    assert_eq!(jobs[1]["label"], "Export to Text");
+    assert_eq!(jobs[1]["stoppable"], true, "and it can be called off before it starts");
+
+    // Calling it off ends the request: the row goes, and the running job is untouched.
+    let stopped = ok(&mut h, &c, "ui.jobs", json!({ "cancel": waiting.0 }));
+    assert_eq!(stopped[1]["stopping"], true, "{stopped}");
+    assert_eq!(stopped[0]["stopping"], false, "{stopped}");
+    h.run_steps(2);
+    let after = ok(&mut h, &c, "ui.jobs", json!({}));
+    assert_eq!(after.as_array().map(Vec::len), Some(1), "only the running job is left: {after}");
+    let left = after[0]["id"].as_u64();
+    assert_eq!(left, Some(running.0), "{after}");
+}
+
 /// Every background job is on the control channel, and `ui.jobs` stops one of them the same way
 /// the card's Cancel button does.
 #[test]

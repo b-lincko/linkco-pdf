@@ -1517,19 +1517,16 @@
 	Added {n} comments	{n} commentaires ajoutés
 	Choose a folder for the results	Choisissez un dossier pour les résultats
 	Files for {name}	Fichiers pour {name}
-	An action is already running	Une action est déjà en cours
 	Running action… file {d} of {t}	Exécution de l'action… fichier {d} sur {t}
 	No unlinked web addresses were found in the text	Aucune adresse web non liée n'a été trouvée dans le texte
 	Created 1 link	1 lien créé
 	Created {n} links	{n} liens créés
-	Text recognition is already running	La reconnaissance de texte est déjà en cours
 	Optimizing… removing user data	Optimisation… suppression des données utilisateur
 	Optimizing… image {d} of {t}	Optimisation… image {d} sur {t}
 	Optimizing… cleaning up	Optimisation… nettoyage
 	Optimizing… merging identical objects	Optimisation… fusion des objets identiques
 	Optimizing… writing the copy	Optimisation… écriture de la copie
 	Cancelling…	Annulation…
-	Optimization is already running	L'optimisation est déjà en cours
 	Optimization cancelled	Optimisation annulée
 	Couldn't optimize the file	Impossible d'optimiser le fichier
 	Recognizing text… file {d} of {t}	Reconnaissance du texte… fichier {d} sur {t}
@@ -2254,8 +2251,9 @@ key	Space	Espace
 	Export to {format}	Exporter vers {format}
 	Exporting… page {d} of {t}	Exportation… page {d} sur {t}
 	Export cancelled	Export annulé
-	An export is already running	Une exportation est déjà en cours
 	Print to {printer}	Imprimer sur {printer}
 	Preparing the print job	Préparation du travail d'impression
 	Rendering sheet {d} of {t}	Rendu de la feuille {d} sur {t}
 	Print cancelled: nothing was sent to {printer}	Impression annulée : rien n'a été envoyé à {printer}
+	Waiting its turn	En attente de son tour
+	The job was cancelled before it started	Le travail a été annulé avant de commencer

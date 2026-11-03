@@ -599,6 +599,9 @@ pub struct PdfCraftApp {
     /// The background jobs that are running, drawn by the card at the bottom of the window
     /// (see [`widgets::jobs_card`]) and reported on the control channel.
     pub jobs: jobs::Jobs,
+    /// Jobs waiting their turn: one of their kind is already running (see
+    /// [`PdfCraftApp::queue_job`]). Each has a row in [`Self::jobs`] already.
+    pub(crate) waiting: Vec<jobs::WaitingJob>,
     /// A batch waiting for its reader: what it would write, and the work that would write it
     /// (see [`batch_plan`]). Only one question is asked at a time.
     pub pending_batch: Option<batch_plan::Pending>,
@@ -882,6 +885,7 @@ impl PdfCraftApp {
             optimize_draft: OptimizeDraft::default(),
             optimize_run: None,
             jobs: jobs::Jobs::default(),
+            waiting: Vec::new(),
             pending_batch: None,
             page_clipboard: None,
             grid_drop: None,
@@ -2190,6 +2194,8 @@ impl eframe::App for PdfCraftApp {
         self.poll_ocr();
         self.poll_optimize();
         self.poll_action();
+        // Whatever was waiting behind a job that has just ended starts now.
+        self.pump_queue();
         self.process_file_requests();
         #[cfg(not(target_arch = "wasm32"))]
         self.process_picked();

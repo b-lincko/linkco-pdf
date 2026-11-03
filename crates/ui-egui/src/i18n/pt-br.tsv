@@ -1431,12 +1431,10 @@
 	Added {n} comments	{n} comentários adicionados
 	Choose a folder for the results	Escolha uma pasta para os resultados
 	Files for {name}	Arquivos para {name}
-	An action is already running	Uma ação já está em execução
 	Running action… file {d} of {t}	Executando ação… arquivo {d} de {t}
 	No unlinked web addresses were found in the text	Nenhum endereço da Web sem link foi encontrado no texto
 	Created 1 link	1 link criado
 	Created {n} links	{n} links criados
-	Text recognition is already running	O reconhecimento de texto já está em execução
 	Recognizing text… file {d} of {t}	Reconhecendo texto… arquivo {d} de {t}
 	Recognizing text… page {d} of {t}	Reconhecendo texto… página {d} de {t}
 	Recognized 1 word	1 palavra reconhecida
@@ -2085,7 +2083,6 @@ action wizard	Start	Iniciar
 	None of those files can be made into a PDF; use PDFs, images or .txt files	Nenhum desses arquivos pode virar PDF; use PDFs, imagens ou arquivos .txt
 	Opens the printer driver's preferences. They are saved for every print from this computer; the copies, two-sided, grayscale and paper chosen here still apply.	Abre as preferências do driver da impressora. Elas valem para toda impressão deste computador; as cópias, frente e verso, escala de cinza e papel escolhidos aqui continuam valendo.
 	Optimization cancelled	Otimização cancelada
-	Optimization is already running	A otimização já está em execução
 	PRs	PRs
 	Pattern	Padrão
 	Pinned folders need the desktop app	As pastas fixadas precisam do aplicativo para desktop
@@ -2255,8 +2252,9 @@ key	Space	Espaço
 	Export to {format}	Exportar para {format}
 	Exporting… page {d} of {t}	Exportando… página {d} de {t}
 	Export cancelled	Exportação cancelada
-	An export is already running	Já há uma exportação em andamento
 	Print to {printer}	Imprimir em {printer}
 	Preparing the print job	Preparando o trabalho de impressão
 	Rendering sheet {d} of {t}	Renderizando a folha {d} de {t}
 	Print cancelled: nothing was sent to {printer}	Impressão cancelada: nada foi enviado para {printer}
+	Waiting its turn	Aguardando a sua vez
+	The job was cancelled before it started	O trabalho foi cancelado antes de começar

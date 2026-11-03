@@ -168,14 +168,6 @@ impl PdfCraftApp {
     /// Recognize text on the pages chosen in the dialog, in the background.
     pub fn start_ocr(&mut self) {
         let Some((vi, id)) = self.active_ids() else { return };
-        if self.ocr_run.is_some() {
-            self.notify_tr("Text recognition is already running");
-            return;
-        }
-        if let Some(why) = self.session.get(id).and_then(|d| d.read_only_reason.clone()) {
-            self.notify(why);
-            return;
-        }
         let d = &self.ocr_draft;
         let pages: Vec<usize> = match d.pages {
             OcrPages::All => Vec::new(),
@@ -183,6 +175,21 @@ impl PdfCraftApp {
             OcrPages::Range => (d.from.saturating_sub(1)..d.to).collect(),
         };
         let settings = OcrSettings { dpi: d.dpi as f32, language: d.language.clone(), ..Default::default() };
+        self.start_ocr_on(id, pages, settings);
+    }
+
+    /// [`Self::start_ocr`] on the document and pages the request was made for: a second
+    /// recognition waits its turn rather than being refused, so the choice is taken from the
+    /// dialog when the reader asks, not when the turn comes.
+    fn start_ocr_on(&mut self, id: pdfcraft_engine::DocId, pages: Vec<usize>, settings: OcrSettings) {
+        if self.ocr_run.is_some() {
+            self.queue_job(crate::jobs::Kind::Recognize, tl!("Recognize text").to_string(), move |app| app.start_ocr_on(id, pages, settings));
+            return;
+        }
+        if let Some(why) = self.session.get(id).and_then(|d| d.read_only_reason.clone()) {
+            self.notify(why);
+            return;
+        }
         let Some(job) = self.session.ocr_job(id, &pages, settings) else { return };
         // Registered before the worker starts, so the card shows the job from this frame on.
         let (job_id, cancel) = self.jobs.begin(crate::jobs::Kind::Recognize, tl!("Recognize text").to_string(), job.pages.len());
@@ -225,10 +232,6 @@ impl PdfCraftApp {
     /// Recognize text in each file, writing the searchable copies into a folder the user picks
     /// (the export folder override in tests), under the same names.
     pub fn ocr_files(&mut self, files: Vec<(String, Vec<u8>)>) {
-        if self.ocr_batch.is_some() {
-            self.notify_tr("Text recognition is already running");
-            return;
-        }
         // The settings showing now, not when the folder arrives.
         let settings = OcrSettings { dpi: self.ocr_draft.dpi as f32, language: self.ocr_draft.language.clone(), ..Default::default() };
         #[cfg(not(target_arch = "wasm32"))]
@@ -248,11 +251,6 @@ impl PdfCraftApp {
     /// On the desktop this no longer starts anything: it works out what the batch would write (see
     /// [`crate::batch_plan`]) and asks the reader. The run itself is [`Self::start_recognize_files`].
     fn ocr_files_into(&mut self, files: Vec<(String, Vec<u8>)>, settings: OcrSettings, #[cfg(not(target_arch = "wasm32"))] dir: std::path::PathBuf) {
-        // Another batch may have started while the folder picker was open.
-        if self.ocr_batch.is_some() {
-            self.notify_tr("Text recognition is already running");
-            return;
-        }
         // Desktop: nothing runs until the plan is answered (see [`crate::batch_plan`]).
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -270,6 +268,14 @@ impl PdfCraftApp {
     /// `plan` is the approved plan (the desktop path) or `None` on the web build, where each copy
     /// is a download.
     pub(crate) fn start_recognize_files(&mut self, files: Vec<(String, Vec<u8>)>, settings: OcrSettings, plan: Option<crate::batch_plan::Plan>) {
+        // A second batch waits its turn: the plan it was approved with is kept, so it writes what
+        // the reader agreed to whenever it starts (see `crate::jobs`).
+        if self.ocr_batch.is_some() {
+            self.queue_job(crate::jobs::Kind::RecognizeFiles, tl!("Recognize Text in Files").to_string(), move |app| {
+                app.start_recognize_files(files, settings, plan)
+            });
+            return;
+        }
         let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
         let files: Vec<crate::batch_plan::RunItem> = files.into_iter().map(|file| (destinations.next(), file)).collect();
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::RecognizeFiles, tl!("Recognize Text in Files").to_string(), files.len());

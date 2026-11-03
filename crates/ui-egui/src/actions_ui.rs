@@ -68,10 +68,6 @@ impl PdfCraftApp {
     /// Run `action` on files, writing the results into a folder the user picks (the export
     /// folder override in tests), in the background.
     pub fn run_action_on(&mut self, action: Action, files: Vec<(String, Vec<u8>)>) {
-        if self.action_run.is_some() {
-            self.notify_tr("An action is already running");
-            return;
-        }
         #[cfg(not(target_arch = "wasm32"))]
         match self.export_dir_override.clone() {
             Some(d) => self.run_action_into(action, files, d.into()),
@@ -90,11 +86,6 @@ impl PdfCraftApp {
     /// [`crate::batch_plan`]) and asks the reader. The run itself is [`Self::start_action`], called
     /// with the plan that was approved.
     fn run_action_into(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, #[cfg(not(target_arch = "wasm32"))] dir: std::path::PathBuf) {
-        // Another run may have started while the folder picker was open.
-        if self.action_run.is_some() {
-            self.notify_tr("An action is already running");
-            return;
-        }
         // Desktop: nothing runs until the plan is answered (see [`crate::batch_plan`]).
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -112,6 +103,13 @@ impl PdfCraftApp {
     /// `plan` is the approved plan (the desktop path) or `None` on the web build, where each result
     /// is a download and nothing on disk can be replaced.
     pub(crate) fn start_action(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, plan: Option<crate::batch_plan::Plan>) {
+        // A second run waits its turn instead of being refused: it keeps the plan it was approved
+        // with, so when it starts it writes exactly what the reader agreed to (see `crate::jobs`).
+        if self.action_run.is_some() {
+            let label = action.name.clone();
+            self.queue_job(crate::jobs::Kind::Action, label, move |app| app.start_action(action, files, plan));
+            return;
+        }
         // Where each result goes, in the order the files are offered (`None` on the web build).
         let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
         let files: Vec<crate::batch_plan::RunItem> = files.into_iter().map(|file| (destinations.next(), file)).collect();

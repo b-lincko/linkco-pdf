@@ -14,6 +14,11 @@
 //! further item starts. [`Jobs`] is the list the card draws and the control channel reports, so a
 //! person and an agent see the same jobs and can stop the same job.
 //!
+//! Ordered on purpose: a job asked for while another of its kind is running is not refused, it
+//! waits — its row says so, it can be called off before it starts, and it begins when the job ahead
+//! of it ends ([`crate::PdfCraftApp::queue_job`]). Kinds that have nothing to do with each other still run
+//! side by side, because a print and an optimization over different documents do not take turns.
+//!
 //! Bounded on purpose: a stop is cooperative and is answered between items, so a single item that
 //! takes a long time (one huge page at 600 dpi) still has to finish. A job can also be handed to
 //! something this app cannot call back — a print job the spooler has taken — and [`Jobs::hand_over`]
@@ -158,6 +163,9 @@ pub struct Job {
     /// Whether a stop can still be answered. False once the job has been handed to something
     /// outside this app that cannot call it back (see [`Jobs::hand_over`]).
     pub stoppable: bool,
+    /// Waiting its turn: another job of the same kind is running, and this one starts when that
+    /// ends (see [`crate::PdfCraftApp::queue_job`]). A queued job has done nothing and touched nothing.
+    pub queued: bool,
     cancel: Cancel,
 }
 
@@ -195,9 +203,39 @@ impl Jobs {
             total,
             stopping: false,
             stoppable: true,
+            queued: false,
             cancel: cancel.clone(),
         });
         (id, cancel)
+    }
+
+    /// Register a job that is waiting its turn: another job of `kind` is running, so this one has
+    /// a row (and can be called off) but does nothing until [`Self::is_busy`] says its kind is
+    /// free. It has no worker and no stop request of its own yet; the job that eventually starts
+    /// registers itself, so the work and the row always come from the same code.
+    pub fn begin_queued(&mut self, kind: Kind, label: String) -> JobId {
+        self.next = self.next.saturating_add(1);
+        let id = JobId(self.next);
+        self.running.push(Job {
+            id,
+            kind,
+            label,
+            stage: String::new(),
+            fraction: 0.0,
+            done: 0,
+            total: 0,
+            stopping: false,
+            stoppable: true,
+            queued: true,
+            cancel: Cancel::new(),
+        });
+        id
+    }
+
+    /// Whether a job of `kind` is actually running (a waiting one does not count: it is what would
+    /// be started next).
+    pub fn is_busy(&self, kind: Kind) -> bool {
+        self.running.iter().any(|j| j.kind == kind && !j.queued)
     }
 
     /// The running jobs, oldest first.
@@ -335,6 +373,68 @@ pub fn run_batch<T, E>(
     outcome
 }
 
+/// One job waiting its turn: the row it already has, and how to start it.
+///
+/// The closure is the module's own "start this" path, so a queued job runs exactly the code a
+/// first one would have run — the queue decides *when*, never *what*.
+pub(crate) struct WaitingJob {
+    id: JobId,
+    start: Box<dyn FnOnce(&mut crate::PdfCraftApp)>,
+}
+
+impl crate::PdfCraftApp {
+    /// Ask for `start` to run as a job of `kind`, once no job of that kind is running.
+    ///
+    /// This is what a second request gets instead of a refusal: a row in the centre that says it is
+    /// waiting, which can be called off before it starts anything, and which begins when the job
+    /// ahead of it ends. `start` is the caller's ordinary path, called on the interface thread with
+    /// owned arguments (the draft, the files, the plan), so a queued run does the same thing a
+    /// first one would — and registers its own row when it begins, which is why the waiting row is
+    /// retired first.
+    pub(crate) fn queue_job(&mut self, kind: Kind, label: String, start: impl FnOnce(&mut crate::PdfCraftApp) + 'static) -> JobId {
+        let id = self.jobs.begin_queued(kind, label);
+        self.waiting.push(WaitingJob { id, start: Box::new(start) });
+        id
+    }
+
+    /// Whether anything is waiting its turn (for tests and for the caller that asks twice).
+    pub(crate) fn has_waiting_jobs(&self) -> bool {
+        !self.waiting.is_empty()
+    }
+
+    /// Start whatever has waited longest, for each kind whose job has finished (each frame; also
+    /// called whenever a job ends). A waiting job whose row has gone, or whose stop was asked for,
+    /// is called off and never started.
+    pub(crate) fn pump_queue(&mut self) {
+        if self.waiting.is_empty() {
+            return;
+        }
+        let queued = std::mem::take(&mut self.waiting);
+        let mut keep = Vec::with_capacity(queued.len());
+        for item in queued {
+            let Some((kind, stopping)) = self.jobs.get(item.id).map(|j| (j.kind, j.stopping)) else {
+                // Its row is gone (it was finished): the job is over before it began.
+                continue;
+            };
+            if stopping {
+                self.jobs.finish(item.id);
+                self.notify_tr("The job was cancelled before it started");
+                continue;
+            }
+            if self.jobs.is_busy(kind) {
+                keep.push(item);
+            } else {
+                // The waiting row goes; the job registers its own row as it starts.
+                self.jobs.finish(item.id);
+                (item.start)(self);
+            }
+        }
+        // Anything queued while that ran waits for the next frame, behind what was already here.
+        keep.extend(std::mem::take(&mut self.waiting));
+        self.waiting = keep;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +503,97 @@ mod tests {
         assert!(jobs.get(other).is_some_and(|j| j.stopping));
         assert!(jobs.get(print).is_some_and(|j| !j.stoppable && !j.stopping), "a late stop is not shown as one");
         assert!(!jobs.hand_over(crate::jobs::JobId(99)), "no such job");
+    }
+
+    /// A waiting job is a row that has done nothing: its kind is not busy because of it, and
+    /// finishing the running one frees the kind for it.
+    #[test]
+    fn a_waiting_job_has_a_row_but_does_not_make_its_kind_busy() {
+        let mut jobs = Jobs::default();
+        let (running, _) = jobs.begin(Kind::Export, "Export to Image".into(), 2);
+        assert!(jobs.is_busy(Kind::Export));
+        assert!(!jobs.is_busy(Kind::Print), "another kind is free");
+        let waiting = jobs.begin_queued(Kind::Export, "Export to Text".into());
+        let row = jobs.get(waiting).expect("a waiting job has a row");
+        assert!(row.queued, "and the row says it is waiting");
+        assert!(row.stoppable, "it can be called off before it starts");
+        assert_eq!((row.done, row.total), (0, 0), "it has done nothing");
+        assert!(jobs.is_busy(Kind::Export), "the running one still makes the kind busy");
+        assert_eq!(jobs.jobs().len(), 2);
+        assert!(jobs.finish(running));
+        assert!(!jobs.is_busy(Kind::Export), "the waiting job does not hold the kind");
+    }
+
+    /// A second job waits its turn: it is a row in the centre, it is not refused, jobs of other
+    /// kinds are not held up by it, and the oldest of its kind goes first.
+    #[test]
+    fn a_second_job_waits_in_order_and_other_kinds_are_not_held_up() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let mut app = crate::PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let ran: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+        let started: Rc<RefCell<Vec<JobId>>> = Rc::default();
+        let (export, _) = app.jobs.begin(Kind::Export, "Export to Image".into(), 1);
+        for name in ["second", "third"] {
+            let (r, s) = (ran.clone(), started.clone());
+            // A real start registers its own row, which is what keeps the next one waiting.
+            app.queue_job(Kind::Export, name.into(), move |app| {
+                let (id, _) = app.jobs.begin(Kind::Export, name.to_string(), 1);
+                s.borrow_mut().push(id);
+                r.borrow_mut().push(name);
+            });
+        }
+        let r = ran.clone();
+        app.queue_job(Kind::Print, "Print to Front Desk".into(), move |app| {
+            app.jobs.begin(Kind::Print, "Print to Front Desk".to_string(), 0);
+            r.borrow_mut().push("print");
+        });
+        assert!(app.toast.is_none(), "asking again is not an error to report");
+
+        app.pump_queue();
+        assert_eq!(*ran.borrow(), vec!["print"], "the print is a different kind and starts at once");
+        assert_eq!(app.jobs.jobs().iter().filter(|j| j.queued).count(), 2, "{:?}", app.jobs.jobs());
+        assert!(app.jobs.jobs().iter().any(|j| j.queued && j.label == "second"), "each waiting job has its own row");
+
+        app.jobs.finish(export);
+        app.pump_queue();
+        assert_eq!(*ran.borrow(), vec!["print", "second"], "the oldest of the kind goes first");
+        assert!(app.has_waiting_jobs(), "the third is still waiting behind the one that started");
+        let second = started.borrow()[0];
+        app.jobs.finish(second);
+        app.pump_queue();
+        assert_eq!(*ran.borrow(), vec!["print", "second", "third"], "and then the one behind it");
+        assert!(!app.has_waiting_jobs());
+    }
+
+    /// A job called off while it is still waiting is never started, and says so: nothing it would
+    /// have done happened.
+    #[test]
+    fn a_waiting_job_called_off_is_never_started() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let mut app = crate::PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let ran: Rc<RefCell<bool>> = Rc::default();
+        let (export, _) = app.jobs.begin(Kind::Export, "Export to Image".into(), 1);
+        let started = ran.clone();
+        let waiting = app.queue_job(Kind::Export, "Export to Text".into(), move |_| *started.borrow_mut() = true);
+        assert!(app.jobs.get(waiting).is_some_and(|j| j.queued));
+
+        // The card's Cancel, or the control channel's: both end in cancel_job.
+        assert!(app.cancel_job(waiting));
+        app.pump_queue();
+        assert!(!*ran.borrow(), "a job called off before its turn touches nothing");
+        assert!(app.jobs.get(waiting).is_none(), "its row is gone");
+        assert!(!app.has_waiting_jobs());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job was cancelled before it started"));
+
+        // The job that was running is untouched, and finishing it starts nothing else.
+        assert!(app.jobs.get(export).is_some());
+        app.jobs.finish(export);
+        app.pump_queue();
+        assert!(!*ran.borrow());
     }
 
     #[test]

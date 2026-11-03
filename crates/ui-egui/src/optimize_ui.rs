@@ -289,8 +289,17 @@ impl PdfCraftApp {
             return;
         }
         let Some((_, id)) = self.active_ids() else { return };
+        self.start_optimize_on(id, kind, settings, discard);
+    }
+
+    /// [`Self::start_optimize`] on the document the request was made for, which matters when the
+    /// request has waited its turn: the reader may have moved to another document by then.
+    fn start_optimize_on(&mut self, id: pdfcraft_engine::DocId, kind: OptimizeKind, settings: &Settings, discard: &[Hidden]) {
+        // A second optimization waits its turn instead of being refused: its row says so, and it
+        // starts when the one in hand ends (see `crate::jobs`).
         if self.optimize_run.is_some() {
-            self.notify_tr("Optimization is already running");
+            let (settings, discard) = (settings.clone(), discard.to_vec());
+            self.queue_job(crate::jobs::Kind::Optimize, job_name(kind), move |app| app.start_optimize_on(id, kind, &settings, &discard));
             return;
         }
         let job = match self.session.optimize_job(id, settings, discard) {
@@ -434,8 +443,10 @@ mod tests {
         assert_eq!(h.state().toast.as_ref().map(|t| t.0.as_str()), Some("Optimization cancelled"));
     }
 
+    /// A second optimization asked for while one is going is not refused: it waits in the centre
+    /// with a row that says so, and it starts when the one in hand ends (REC-R04's queue).
     #[test]
-    fn a_second_run_is_refused_while_one_is_going() {
+    fn a_second_run_waits_its_turn_instead_of_being_refused() {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.open_bytes("notes.txt", None, b"hello".to_vec()).unwrap();
@@ -443,7 +454,25 @@ mod tests {
         let (job, _) = app.jobs.begin(crate::jobs::Kind::Optimize, "Reduce file size…".into(), 0);
         app.optimize_run = Some(OptimizeRun { doc, kind: OptimizeKind::Reduce, progress: Arc::default(), job, alive: crate::jobs::Alive::new() });
         app.optimize_with_draft();
-        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Optimization is already running"));
+        // Nothing is said about being refused, and the request has a row of its own.
+        assert!(app.toast.is_none(), "{:?}", app.toast);
+        let waiting = app.jobs.jobs().iter().find(|j| j.id != job).cloned().expect("the second optimization has a row");
+        assert!(waiting.queued, "{waiting:?}");
+        assert_eq!(waiting.kind, crate::jobs::Kind::Optimize);
+        assert!(app.has_waiting_jobs());
+        assert!(app.optimize_run.as_ref().is_some_and(|r| r.job == job), "the running one is untouched");
+        // While the first still runs, a frame changes nothing.
+        app.pump_queue();
+        assert_eq!(app.jobs.jobs().len(), 2, "{:?}", app.jobs.jobs());
+        // Its turn comes when the first ends: the waiting row goes and the request is carried out.
+        app.jobs.finish(job);
+        app.optimize_run = None;
+        app.pump_queue();
+        assert!(!app.has_waiting_jobs(), "its turn came");
+        assert!(app.jobs.jobs().iter().all(|j| !j.queued), "its waiting row is gone");
+        // What it does then is the ordinary path. `notes.txt` is not a PDF, so that path reports
+        // instead of starting a worker — which is how this test knows the closure really ran.
+        assert!(app.toast.as_ref().is_some_and(|t| t.0.starts_with("Couldn't optimize the file")), "{:?}", app.toast);
     }
 }
 

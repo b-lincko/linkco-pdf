@@ -684,6 +684,7 @@ fn jobs_json(jobs: &crate::jobs::Jobs) -> Value {
                     "fraction": j.fraction,
                     "stopping": j.stopping,
                     "stoppable": j.stoppable,
+                    "queued": j.queued,
                 })
             })
             .collect(),

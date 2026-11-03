@@ -240,10 +240,15 @@ pub fn jobs_card(app: &PdfCraftApp, ctx: &egui::Context) -> Option<crate::jobs::
     cancel
 }
 
-/// A job's row title: its name, then what it is doing, or that it is stopping.
+/// A job's row title: its name, then what it is doing, that it is waiting its turn, or that it is
+/// stopping.
 fn job_label(job: &crate::jobs::Job) -> String {
     if job.stopping {
         return format!("{}: {}", job.label, tl!("Cancelling…"));
+    }
+    // Waiting jobs have nothing to report but that: they are behind another job of their kind.
+    if job.queued {
+        return format!("{}: {}", job.label, tl!("Waiting its turn"));
     }
     if job.stage.is_empty() { job.label.clone() } else { format!("{}: {}", job.label, job.stage) }
 }
@@ -330,6 +335,24 @@ pub fn icon_pill(ui: &mut egui::Ui, icon: &str, label: &str, primary: bool) -> R
 mod tests {
     use super::*;
     use egui::Pos2;
+
+    /// A waiting job's row says it is waiting, a running one says what it is doing, and a stopped
+    /// one says it is stopping — the three states the card draws.
+    #[test]
+    fn the_card_names_each_state_of_a_job() {
+        crate::i18n::set_current(crate::i18n::Lang::from_code("en").unwrap());
+        let mut jobs = crate::jobs::Jobs::default();
+        let (running, _) = jobs.begin(crate::jobs::Kind::Export, "Export to Image".into(), 3);
+        let waiting = jobs.begin_queued(crate::jobs::Kind::Export, "Export to Text".into());
+        assert_eq!(job_label(jobs.get(waiting).unwrap()), "Export to Text: Waiting its turn");
+        jobs.stage(running, "Page 2 of 3", 0.5);
+        assert_eq!(job_label(jobs.get(running).unwrap()), "Export to Image: Page 2 of 3");
+        jobs.cancel(running);
+        assert_eq!(job_label(jobs.get(running).unwrap()), "Export to Image: Cancelling…");
+        // A job with nothing to say yet is named without a colon.
+        let (fresh, _) = jobs.begin(crate::jobs::Kind::Print, "Print to Front Desk".into(), 0);
+        assert_eq!(job_label(jobs.get(fresh).unwrap()), "Print to Front Desk");
+    }
 
     #[test]
     fn search_placeholder_never_overlaps_the_shortcut() {

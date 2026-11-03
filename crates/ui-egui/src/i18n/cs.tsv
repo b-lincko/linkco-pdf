@@ -217,3 +217,5 @@ key	Space	Mezerník
 	Preparing the print job	Příprava tiskové úlohy
 	Rendering sheet {d} of {t}	Vykreslování listu {d} z {t}
 	Print cancelled: nothing was sent to {printer}	Tisk zrušen: na {printer} nebylo nic odesláno
+	Waiting its turn	Čeká, až na ni přijde řada
+	The job was cancelled before it started	Úloha byla zrušena, než začala

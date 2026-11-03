@@ -260,6 +260,14 @@ impl PdfCraftApp {
     /// takes, so the card, the state and the worker's own lifetime cannot disagree.
     #[cfg(not(target_arch = "wasm32"))]
     fn begin_export(&mut self, status: ExportStatus, work: ExportWork, inline: bool) {
+        // One export at a time, in the order they were asked for: a second one waits its turn in
+        // the centre instead of replacing the first's card or being refused (see `crate::jobs`).
+        if self.export_status.is_some() || self.office_export.is_some() {
+            let total = work.pages.len();
+            let label = export_job_name(work.kind);
+            self.queue_job(crate::jobs::Kind::Export, label, move |app| app.begin_export(job_status(total), work, inline));
+            return;
+        }
         let ExportWork { src, kind, dpi, format, min_side, pages, stem, dir } = work;
         let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Export, export_job_name(kind), pages.len());
         self.export_job = Some(job);
@@ -453,8 +461,11 @@ impl PdfCraftApp {
         name: String,
         format: pdfcraft_engine::compare::OfficeFormat,
     ) {
-        if self.office_export.is_some() {
-            self.notify_tr("An export is already running");
+        if self.office_export.is_some() || self.export_status.is_some() {
+            // Waiting its turn rather than refused: the page work is only done when it starts, and
+            // the file is written at the end as always (see `crate::jobs`).
+            let label = crate::i18n::fmt(tl!("Export to {format}"), &[("format", office_format_name(format))]);
+            self.queue_job(crate::jobs::Kind::Export, label, move |app| app.start_office_export(job, path, name, format));
             return;
         }
         let label = crate::i18n::fmt(tl!("Export to {format}"), &[("format", office_format_name(format))]);
