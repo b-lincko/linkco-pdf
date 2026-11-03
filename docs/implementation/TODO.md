@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B039 · **Active stage:** basic
+**Active component:** B040 · **Active stage:** basic
 
-## Basic (370 records)
+## Basic (371 records)
 
-complete: 42, in_progress: 6, pending: 322
+complete: 42, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -57,6 +57,7 @@ complete: 42, in_progress: 6, pending: 322
 | B037 | [x] Print jobs are jobs in the centre, with a stop that is honest about the spooler | P0 | complete | REC-R04 |
 | B038 | [x] A second job of the same kind waits its turn in the centre instead of being refused | P0 | complete | REC-R04 |
 | B039 | [x] Publish a machine-readable capability manifest | P0 | complete | REC-R12 |
+| B040 | [ ] Per-call schema-version negotiation for run and MCP tools/call | P0 | in_progress | REC-B02 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1520,3 +1521,16 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41638279165
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41638279194
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41638279168
+
+### B040: Per-call schema-version negotiation for run and MCP tools/call
+
+- Status: **in_progress**; parent(s): REC-B02.
+- Acceptance: A caller can pin the tool-table revision one call was written against and be answered before anything runs, on both surfaces, through one shared rule: `pdfcraft-cli run <tool> … --schema-version V` (and `run --script … --schema-version V`) exits 3 (unsupported) when the major differs, 2 (usage) when V is not a version, and runs normally when the major matches — with no result printed on refusal; MCP `tools/call` with `params._meta.schemaVersion` gets a normal tool result with isError and structuredContent.error.kind = "unsupported" on a major mismatch (nothing ran), a -32602 protocol error when the value is not a version, and unchanged behaviour when _meta is absent. The rule lives in one place (schema::compatible) so the CLI and the MCP server cannot disagree, docs/api-stability.md documents both forms, and tests cover every branch on both surfaces.
+- Audit: Started from the two halves REC-B02 still had open after B015/B028/B031: no per-call schema negotiation, and no way to pin a single call. The audit checked what existed: `schema --schema-version V` answers the question once, before a job, but `run` had no way to carry it, and the MCP server reported the version only in initialize/tools/list — a tools/call could not say which revision it expected. Decisions. (1) One shared rule, schema::compatible(asked) -> Result<bool, ()>, used by both surfaces, so "compatible" means the same thing everywhere; Ok(true) same major, Ok(false) different major, Err(()) not a version — the three outcomes map to run, refuse, usage respectively. (2) On the command line the pin is checked before the Automation session is even built, so a refused call creates no session, opens no document and prints no result (stdout stays empty, so a script never mistakes a refusal for output); it covers a whole --script, since the version is a property of the caller, not of one step. (3) On MCP the pin rides in params._meta.schemaVersion (the protocol's reserved extension field), so no tool's argument schema changes and the tool-table version is not bumped; a major mismatch is a tool result with kind "unsupported" rather than a protocol error, because the call itself was well-formed — the build just does not speak that revision — matching how the CLI's exit 3 is a well-formed invocation refused. A non-version value is -32602 (invalid params), since it is malformed input. (4) Refusals print nothing on stdout, which the tests assert. What the audit checked on the way: positional() already skips an option and its value, so the pin never becomes the tool name; validate_options refuses --schema-version on commands that do not take it; the compact tool_call route is unchanged (its _meta would be inside arguments, which is a tool's own schema, and the non-compact tools/call remains available for pinning); the schema.rs doc promise (additive within a major) is untouched because no tool, argument, result field or error kind changed. Not claimed: per-step version pins inside one --script (the pin is per invocation), or any change to protocolVersion negotiation.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes were not compiled here: the new unit test, the two CLI test files and the MCP test are verified by CI, not locally. The Python gates ran locally and pass. Not claimed: per-step pins inside one script, reading a version from a config file, or any protocolVersion change.
+- Notes: Bounded part of REC-B02 (versioned schemas, stable exit codes, structured errors), which stays open. B015 gave the CLI its exit codes, B028 the version and error kinds, B031 the engine's refusal reasons; this closes the per-call negotiation half: a caller can now say, on the call itself, which schema revision it expects, and a mismatch is refused before any work — on the command line as exit 3 with an empty stdout, on MCP as an isError result with kind "unsupported" or a -32602 for a malformed version. Still open in REC-B02: the interface does not read the version back from a caller's config file, and there is no per-step pin inside one --script.
+- Local evidence: crates/automation/src/schema.rs::a_caller_is_answered_by_major_only: compatible() answers same-major true, other-major false, and Err for non-versions.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::run_pins_the_schema_version_before_anything_runs: same-major runs policy_status (exit 0); wrong major exits 3 with kind unsupported and empty stdout even for a call that would otherwise fail (doc_open on a missing file), proving the refusal precedes the tool; non-versions exit 2; a whole --script is refused before step 1.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_help_names_the_run_pin: --help names the run pin.
+- Local evidence: apps/pdfcraft-cli/tests/mcp_errors.rs::a_tool_call_may_pin_its_schema_version_in_meta: same-major runs; wrong major is isError with kind unsupported and both versions named, text block identical to the structured error; "banana" is -32602; no _meta is unchanged.
+- Local evidence: python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes.

@@ -88,3 +88,50 @@ fn the_command_says_what_it_does_not_understand() {
     assert!(help.contains("pdfcraft-cli schema"), "{help}");
     assert!(help.contains("--schema-version"), "{help}");
 }
+
+#[test]
+fn run_pins_the_schema_version_before_anything_runs() {
+    let version = pdfcraft_automation::TOOL_SCHEMA_VERSION;
+    let (major, _) = pdfcraft_automation::schema::parse_version(version).unwrap();
+    // Same major (any minor): the call runs normally.
+    for asked in [version.to_string(), format!("{major}.0"), format!("{major}.999")] {
+        let out = run(&["run", "policy_status", "--schema-version", &asked]);
+        assert!(out.status.success(), "{asked}: {}", String::from_utf8_lossy(&out.stderr));
+        let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(doc.get("profile").is_some(), "the tool ran: {doc}");
+    }
+    // A different major: exit 3 (unsupported) before the tool runs. The proof that nothing ran:
+    // this call would fail with the tool's own error (not 3) if the tool were reached at all.
+    let asked = format!("{}.0", major + 1);
+    let out = run(&["--error-format=json", "run", "doc_open", "path=/nonexistent/no-such-file.pdf", "--schema-version", &asked]);
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stdout.is_empty(), "a refused call prints no result");
+    let error: Value = serde_json::from_str(String::from_utf8_lossy(&out.stderr).lines().next().unwrap()).unwrap();
+    assert_eq!(error["error"]["kind"], "unsupported");
+    assert_eq!(error["error"]["exit_code"], 3);
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(message.contains(&asked) && message.contains(version), "both versions named: {message}");
+    // Not a version at all: exit 2 (usage), and again nothing runs.
+    for value in ["banana", "1", "1.2.3"] {
+        let out = run(&["run", "policy_status", "--schema-version", value]);
+        assert_eq!(out.status.code(), Some(2), "{value}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.stdout.is_empty(), "{value}: a refused call prints no result");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("not a version"), "{value}");
+    }
+    // The pin applies to a whole `--script` too, checked before the first step.
+    let scratch = std::env::temp_dir().join(format!("pdfcraft-schema-pin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let script = scratch.join("steps.json");
+    std::fs::write(&script, serde_json::to_vec(&serde_json::json!([{ "tool": "doc_open", "args": { "path": "/nonexistent/no-such-file.pdf" } }])).unwrap()).unwrap();
+    let out = run(&["run", "--script", script.to_str().unwrap(), "--schema-version", &asked]);
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn the_help_names_the_run_pin() {
+    let help = String::from_utf8_lossy(&run(&["--help"]).stdout).into_owned();
+    assert!(help.contains("pdfcraft-cli run"), "{help}");
+    assert!(help.contains("--schema-version"), "{help}");
+}

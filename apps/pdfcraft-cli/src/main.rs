@@ -65,8 +65,10 @@ pdfcraft-cli check  <files or dirs…> [--timeout 20] [--dpi 36] [--json out.jso
 pdfcraft-cli tools                                       automation tools and their JSON Schemas
 pdfcraft-cli schema                                  the tool table with its version [--schema-version V]
                                                            asks whether this build speaks V (exit 3 if not)
-pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png]
+pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png] [--schema-version V]
 pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open\", \"args\": {…}}, …]
+                      [--schema-version V] asks whether this build speaks V before anything runs
+                                                           (exit 3 if the major differs, 2 if V is not a version)
                       [--max-workers N] [--max-input-mib N] [--max-output-mib N] [--max-batch N] [--time-limit-ms N]
                                                            limits for this session (0 = no limit); limits_status reports them
 ",
@@ -345,6 +347,7 @@ const RUN_OPTIONS: &[OptionSpec] = &[
     OptionSpec { name: "--root", takes_value: true },
     OptionSpec { name: "--script", takes_value: true },
     OptionSpec { name: "--out", takes_value: true },
+    OptionSpec { name: "--schema-version", takes_value: true },
     OptionSpec { name: "--max-workers", takes_value: true },
     OptionSpec { name: "--max-input-mib", takes_value: true },
     OptionSpec { name: "--max-output-mib", takes_value: true },
@@ -995,6 +998,27 @@ fn print_output(auto: &pdfcraft_automation::Automation, content: Vec<pdfcraft_au
 
 fn run(args: &[String]) -> Result<(), CliError> {
     validate_options("run", args, RUN_OPTIONS)?;
+    // Per-call schema negotiation (REC-B02): a caller that pins the revision it was written
+    // against is answered before anything runs — one tool or a whole `--script` — so a mismatch
+    // is never discovered in the middle of a job. Same major: the call runs; different major:
+    // exit 3 (unsupported); not a version: exit 2 (usage).
+    if let Some(asked) = flag(args, "--schema-version") {
+        match pdfcraft_automation::schema::compatible(asked) {
+            Err(()) => {
+                return Err(usage(format!(
+                    "run: {asked:?} is not a version like {}; versions are major.minor",
+                    pdfcraft_automation::TOOL_SCHEMA_VERSION
+                )));
+            }
+            Ok(false) => {
+                return Err(unsupported(format!(
+                    "run: this build speaks schema {}, which is not compatible with {asked} (a different major version)",
+                    pdfcraft_automation::TOOL_SCHEMA_VERSION
+                )));
+            }
+            Ok(true) => {}
+        }
+    }
     let mut auto = automation(args)?;
     if let Some(script) = flag(args, "--script") {
         let text = std::fs::read_to_string(script).map_err(|e| format!("{script}: {e}"))?;

@@ -98,6 +98,19 @@ pub fn parse_version(s: &str) -> Option<(u32, u32)> {
     Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
+/// Would this build speak to a caller written against `asked` (`major.minor`)?
+///
+/// Per-call negotiation: `run --schema-version V` and MCP `tools/call`'s
+/// `params._meta.schemaVersion` both answer through this one rule, so the two surfaces cannot
+/// disagree. `Ok(true)` — same major, run the call; `Ok(false)` — a different major, refuse the
+/// call before anything runs; `Err(())` — `asked` is not a version at all, which is a usage
+/// error, not a compatibility answer.
+pub fn compatible(asked: &str) -> Result<bool, ()> {
+    let Some((asked_major, _)) = parse_version(asked) else { return Err(()) };
+    let (my_major, _) = parse_version(TOOL_SCHEMA_VERSION).unwrap_or((0, 0));
+    Ok(asked_major == my_major)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
