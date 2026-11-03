@@ -397,7 +397,9 @@ impl crate::PdfCraftApp {
         id
     }
 
-    /// Whether anything is waiting its turn (for tests and for the caller that asks twice).
+    /// Whether anything is waiting its turn: what the tests below ask to tell "it is queued" from
+    /// "it started". Nothing in the app asks — the card and the queue read `jobs` directly.
+    #[cfg(test)]
     pub(crate) fn has_waiting_jobs(&self) -> bool {
         !self.waiting.is_empty()
     }
