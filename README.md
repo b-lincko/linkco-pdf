@@ -397,3 +397,5 @@ Building 159, Street 220, Zone 24, P.O. Box 32282, Doha – Qatar · Phone: +974
 ## Implementation TODO and delivery workflow
 
 The complete research scope is tracked in the [live implementation TODO](docs/implementation/TODO.md), with [workflow and verification rules](docs/implementation/README.md). Work proceeds basic → advanced → future, one audited component at a time, with user confirmation before starting the next. Proposed features are not shipped-feature claims.
+
+A machine-readable statement of what this build does and does not do yet — every tool group and tool with its readiness, the command-line/MCP tool table with its schema version, and every network egress point — is generated into [`docs/capabilities.toml`](docs/capabilities.toml). It is never edited by hand: `python3 docs/implementation/build_capabilities.py --check` fails when it drifts from the sources it is generated from, and CI runs that check.

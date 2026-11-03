@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B038 · **Active stage:** basic
+**Active component:** B039 · **Active stage:** basic
 
-## Basic (369 records)
+## Basic (370 records)
 
-complete: 41, in_progress: 6, pending: 322
+complete: 41, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -56,6 +56,7 @@ complete: 41, in_progress: 6, pending: 322
 | B036 | [x] Word, HTML and RTF exports leave the interface thread, and can be stopped between pages | P0 | complete | REC-R04 |
 | B037 | [x] Print jobs are jobs in the centre, with a stop that is honest about the spooler | P0 | complete | REC-R04 |
 | B038 | [x] A second job of the same kind waits its turn in the centre instead of being refused | P0 | complete | REC-R04 |
+| B039 | [ ] Publish a machine-readable capability manifest | P0 | in_progress | REC-R12 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1494,3 +1495,17 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41589249104
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41589249265
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41589249131
+
+### B039: Publish a machine-readable capability manifest
+
+- Status: **in_progress**; parent(s): REC-R12.
+- Acceptance: docs/capabilities.toml exists, is valid TOML, and is generated — never hand-edited — from the real sources: every tool group and tool of crates/engine/src/catalog.rs with its availability and milestone, the automation tool table of crates/automation/src/tools.rs with its schema version from crates/automation/src/schema.rs (tool count, read-only and destructive counts, tool names), and every egress place of docs/network-egress.toml. `python3 docs/implementation/build_capabilities.py --check` fails when any source changes without regenerating the manifest; the generator raises instead of emitting a partial manifest when its parse stops matching the sources; the unit tests cover the gate plus one drift case per source and the stale-parse guard; CI runs the check and the tests; the README points a reader at the manifest.
+- Audit: Started from the third of the three things B020 left open in REC-R12: no machine-readable capability manifest for a support desk or a partner to read. The audit asked what the four existing surfaces could not give a machine: the README's tables are Markdown for people, the catalogue is Rust, the automation table is Rust, the egress list is TOML with prose restraints. Decisions. (1) One generated file, docs/capabilities.toml, because a manifest is only trustworthy if it cannot drift — a hand-maintained copy would become the same lie B020 removed, one step removed. (2) The interface section reuses check_disclosure.py's parser for catalog.rs rather than adding a second one, so the two checks cannot disagree about what a group or an availability is; the generator inherits its guards (a gutted catalogue raises instead of parsing zero groups). (3) The automation section parses tools.rs with an anchored pattern for the tool names and reads the schema version from schema.rs's constant, counting .ro()/.destructive() only inside the tools() body, with guards (>=100 tools, unique names, major.minor version) that fail loudly when the file is rewritten. (4) The network section reads network-egress.toml with tomllib and copies file/kind/what, leaving the restraint prose in the source where check_egress.py polices it. (5) Emitted TOML is validated by the gate test parsing it back with tomllib, which caught the emitter's trailing commas before this file ever shipped. What the audit checked on the way: the counts the manifest reports (23 groups, 145 tools of which 115 ready, 127 automation tools of which 41 read-only and 22 destructive, schema 1.4, 5 egress places) against the sources by hand; that no label needs escaping beyond quotes and backslashes; and that check_disclosure.py still passes with the README sentence added outside the two sections it parses. Not claimed: per-item readiness prose in the README, or generated/checked release notes — the other two open items of REC-R12.
+- Verification Limit: This component is documentation and Python only: no Rust changed, so no local Rust build was needed or attempted (the workspace cannot be built in this checkout — rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable — so any future Rust change is verified by CI, not here). The manifest describes the sources at generation time; it is a disclosure, not a runtime guarantee, and it says nothing about Acrobat parity, which parity/acrobat-features.toml scores separately.
+- Notes: Bounded part of REC-R12 (stable capability and limitation disclosure), which stays open. This closes the machine-readable half: a support desk or a partner integration can read docs/capabilities.toml instead of scraping the README, and CI fails when the manifest drifts from the catalogue, the tool table or the egress list, so it cannot silently claim more than the build does. Still open in REC-R12: the README discloses readiness per tool group, not per tool, and release notes remain unchecked per-release history.
+- Local evidence: python3 docs/implementation/build_capabilities.py writes docs/capabilities.toml: 23 interface groups (145 tools, 115 ready), automation schema 1.4 with 127 tools (41 read-only, 22 destructive), 5 network places.
+- Local evidence: python3 docs/implementation/build_capabilities.py --check passes on this checkout.
+- Local evidence: python3 -m unittest discover -s docs/implementation -p 'test_capabilities.py' passes: 9 tests (the gate, TOML validity and section checks, one drift case per source, the stale-parse guard, and --check failing on a drifted copy).
+- Local evidence: python3 -m unittest discover -s docs/implementation -p 'test_*.py' passes (60 tests total), as do the docs/research/scripts tests.
+- Local evidence: python3 docs/implementation/build_backlog.py --check, check_disclosure.py --check and check_egress.py --check all pass with the README and ci.yml edits.
+- Local evidence: the generated manifest parses with tomllib and its section counts match the sources.
