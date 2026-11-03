@@ -145,26 +145,13 @@ impl McpServer {
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
                 // Per-call schema negotiation (REC-B02): a client may pin the tool-table revision
                 // it was written against in `_meta.schemaVersion`. Same major: the call runs;
-                // different major: answered as an `unsupported` tool result and nothing runs; not
-                // a version: a protocol error. Clients that send no `_meta` are unaffected.
+                // different major: an `unsupported` tool result, nothing ran; not a version: a
+                // protocol error. Clients that send no `_meta` are unaffected.
                 if let Some(asked) = params.pointer("/_meta/schemaVersion").and_then(Value::as_str) {
                     match crate::schema::compatible(asked) {
-                        Err(()) => {
-                            return Err((
-                                INVALID_PARAMS,
-                                format!("tools/call _meta.schemaVersion {asked:?} is not a version like {}; versions are major.minor", crate::TOOL_SCHEMA_VERSION),
-                            ));
-                        }
-                        Ok(false) => {
-                            return Ok(tool_error(
-                                "unsupported",
-                                &format!(
-                                    "tools/call asked for schema {asked}, but this build speaks {} (a different major version); nothing ran",
-                                    crate::TOOL_SCHEMA_VERSION
-                                ),
-                            ));
-                        }
-                        Ok(true) => {}
+                        None => return Err((INVALID_PARAMS, format!("_meta.schemaVersion: {}", crate::schema::not_a_version_message(asked)))),
+                        Some(false) => return Ok(tool_error("unsupported", &crate::schema::incompatible_message(asked))),
+                        Some(true) => {}
                     }
                 }
                 if self.compact && name == TOOL_SEARCH {

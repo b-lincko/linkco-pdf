@@ -123,7 +123,8 @@ fn run_pins_the_schema_version_before_anything_runs() {
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).unwrap();
     let script = scratch.join("steps.json");
-    std::fs::write(&script, serde_json::to_vec(&serde_json::json!([{ "tool": "doc_open", "args": { "path": "/nonexistent/no-such-file.pdf" } }])).unwrap()).unwrap();
+    let steps = serde_json::json!([{ "tool": "doc_open", "args": { "path": "/nonexistent/no-such-file.pdf" } }]);
+    std::fs::write(&script, serde_json::to_vec(&steps).unwrap()).unwrap();
     let out = run(&["run", "--script", script.to_str().unwrap(), "--schema-version", &asked]);
     assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
     let _ = std::fs::remove_dir_all(&scratch);

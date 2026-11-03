@@ -96,9 +96,9 @@ fn the_compact_meta_tools_carry_the_kind_too() {
 fn a_tool_call_may_pin_its_schema_version_in_meta() {
     let version = pdfcraft_automation::TOOL_SCHEMA_VERSION;
     let (major, _) = pdfcraft_automation::schema::parse_version(version).unwrap();
-    let call = |schema_version: Value| {
+    fn call(schema_version: Value) -> Value {
         json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "policy_status", "arguments": {}, "_meta": { "schemaVersion": schema_version } } })
-    };
+    }
     // Same major (any minor): the call runs.
     for asked in [json!(version), json!(format!("{major}.0")), json!(format!("{major}.999"))] {
         let replies = session(&[], &[call(asked.clone())]);
@@ -121,6 +121,7 @@ fn a_tool_call_may_pin_its_schema_version_in_meta() {
     assert_eq!(replies[1]["error"]["code"], -32602, "{}", replies[1]);
     assert!(replies[1]["error"]["message"].as_str().unwrap().contains("not a version"), "{}", replies[1]);
     // No _meta at all: unchanged behaviour.
-    let replies = session(&[], &[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "policy_status", "arguments": {} } })]);
+    let plain = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "policy_status", "arguments": {} } });
+    let replies = session(&[], &[plain]);
     assert_ne!(replies[1]["result"]["isError"], json!(true), "{}", replies[1]);
 }

@@ -1004,19 +1004,9 @@ fn run(args: &[String]) -> Result<(), CliError> {
     // exit 3 (unsupported); not a version: exit 2 (usage).
     if let Some(asked) = flag(args, "--schema-version") {
         match pdfcraft_automation::schema::compatible(asked) {
-            Err(()) => {
-                return Err(usage(format!(
-                    "run: {asked:?} is not a version like {}; versions are major.minor",
-                    pdfcraft_automation::TOOL_SCHEMA_VERSION
-                )));
-            }
-            Ok(false) => {
-                return Err(unsupported(format!(
-                    "run: this build speaks schema {}, which is not compatible with {asked} (a different major version)",
-                    pdfcraft_automation::TOOL_SCHEMA_VERSION
-                )));
-            }
-            Ok(true) => {}
+            None => return Err(usage(format!("run: {}", pdfcraft_automation::schema::not_a_version_message(asked)))),
+            Some(false) => return Err(unsupported(format!("run: {}", pdfcraft_automation::schema::incompatible_message(asked)))),
+            Some(true) => {}
         }
     }
     let mut auto = automation(args)?;
