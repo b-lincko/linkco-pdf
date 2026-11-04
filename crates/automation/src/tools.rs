@@ -928,7 +928,7 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("actions.wizard")
             .with(schema(json!({}), &[])),
-        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log or error. Writes files: plan it first with batch_plan and pass the plan's approval.token as approve_token, and the run refuses if the batch it would carry out is not the one that was planned.")
+        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log, or the error, or \"stopped\" when the session's time limit stopped it mid-file (nothing is written for that file). Writes files: plan it first with batch_plan and pass the plan's approval.token as approve_token, and the run refuses if the batch it would carry out is not the one that was planned.")
             .destructive()
             .cmd("actions.wizard")
             .with(schema(
@@ -996,7 +996,7 @@ pub fn tools() -> Vec<ToolDef> {
             )),
         t("js_enabled", "JavaScript on or off", "Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript: set it with `enabled`, or read it. With JavaScript off, field scripts other than Acrobat's AF calls don't run.")
             .with(schema(json!({ "enabled": { "type": "boolean" } }), &[])),
-        t("ocr_recognize", "Recognize text (OCR)", "Scan & OCR ▸ Recognize text: render pages, read the words in them and add them as invisible text over the page image, so scanned pages become searchable and selectable (a searchable image; the image is not changed). Pages that already have text are skipped unless skip_text_pages is false. Returns each page's recognised text, word count or why it was skipped. Needs the OCR models (ocr_status). Undoable as one step.")
+        t("ocr_recognize", "Recognize text (OCR)", "Scan & OCR ▸ Recognize text: render pages, read the words in them and add them as invisible text over the page image, so scanned pages become searchable and selectable (a searchable image; the image is not changed). Pages that already have text are skipped unless skip_text_pages is false. Returns each page's recognised text, word count or why it was skipped; the result says timed_out when the session's time limit stopped the read part-way (the pages read so far are still added). Needs the OCR models (ocr_status). Undoable as one step.")
             .cmd("ocr.recognize")
             .with(schema(
                 json!({
@@ -1008,7 +1008,7 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
-        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error. Plan it first with batch_plan (operation ocr) and pass the plan's approval.token as approve_token.")
+        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error, or \"stopped\" with the pages read so far when the session's time limit stopped it mid-file (no output is written for that file). Plan it first with batch_plan (operation ocr) and pass the plan's approval.token as approve_token.")
             .destructive()
             .cmd("ocr.recognize_batch")
             .with(schema(

@@ -88,7 +88,7 @@ rather than guessed:
 | `--max-input-mib N` | Largest file a tool will read. A larger file is refused from its size, before a byte is read. |
 | `--max-output-mib N` | Largest file a tool will write. A larger result is refused before it is written, so no half-written file is left behind. |
 | `--max-batch N` | Most items `action_run`, `ocr_recognize_files` or `batch_plan` will take. |
-| `--time-limit-ms N` | How long a batch may spend before it stops starting new items. The item in hand is finished; the rest are reported as skipped, not dropped. |
+| `--time-limit-ms N` | How long a batch may spend before it stops starting new items, and inside one item before it stops that item: a file stopped mid-way (at a page or step boundary) is reported as `stopped`, not written half-done, and the rest are reported as skipped, not dropped. |
 
 `0` means no limit, and that is the default for every quota and for the time limit — a session
 that is not told otherwise does not silently refuse a file for being large. `limits_status` reports

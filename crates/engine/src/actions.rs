@@ -151,7 +151,7 @@ fn apply_step(s: &mut Session, id: DocId, step: &Step, log: &mut Vec<String>) ->
     let all: Vec<usize> = (0..pages).collect();
     let edit = match step {
         Step::RecognizeText => {
-            let found = s.recognize_text(id, &[], crate::ocr::OcrSettings::default()).map_err(EditError::Invalid)?;
+            let found = s.recognize_text(id, &[], crate::ocr::OcrSettings::default(), |_, _| true).map_err(EditError::Invalid)?;
             log.push(format!("Recognize text: {} words", found.iter().map(|p| p.words.len()).sum::<usize>()));
             return Ok(None);
         }
@@ -203,8 +203,10 @@ fn apply_step(s: &mut Session, id: DocId, step: &Step, log: &mut Vec<String>) ->
     Ok(None)
 }
 
-/// Run `action` on one file. `progress(step, steps)` is called before each step.
-pub fn run_on(action: &Action, name: &str, bytes: Arc<Vec<u8>>, mut progress: impl FnMut(usize, usize)) -> Result<FileResult, String> {
+/// Run `action` on one file. `progress(step, steps)` is called before each step; returning `false`
+/// stops at that step boundary — nothing is saved, and the error is [`stopped`], which callers
+/// recognise with [`is_stopped`].
+pub fn run_on(action: &Action, name: &str, bytes: Arc<Vec<u8>>, mut progress: impl FnMut(usize, usize) -> bool) -> Result<FileResult, String> {
     let mut s = Session::new();
     let mut id = s.open(name, None, bytes, None).map_err(|e| e.to_string())?;
     if let Some(why) = s.get(id).and_then(|d| d.read_only_reason.clone()) {
@@ -212,7 +214,9 @@ pub fn run_on(action: &Action, name: &str, bytes: Arc<Vec<u8>>, mut progress: im
     }
     let mut log = Vec::new();
     for (i, step) in action.steps.iter().enumerate() {
-        progress(i, action.steps.len());
+        if !progress(i, action.steps.len()) {
+            return Err(stopped(i, action.steps.len()));
+        }
         if let Some(new) = apply_step(&mut s, id, step, &mut log).map_err(|e| format!("{}: {e}", step.label()))? {
             id = new;
         }
@@ -221,4 +225,15 @@ pub fn run_on(action: &Action, name: &str, bytes: Arc<Vec<u8>>, mut progress: im
     // A signed file keeps its signatures: incremental. Otherwise a clean full rewrite.
     let bytes = if d.is_signed() { s.save_bytes(id) } else { s.save_full_bytes(id) }.map_err(|e| e.to_string())?;
     Ok(FileResult { name: name.to_string(), bytes, log })
+}
+
+/// The error [`run_on`] returns when its `progress` stopped the run before step `i` of `n`
+/// (the message counts steps from one).
+pub fn stopped(i: usize, n: usize) -> String {
+    format!("stopped before step {} of {n}", i + 1)
+}
+
+/// Did [`run_on`] stop because its `progress` said so, rather than fail?
+pub fn is_stopped(e: &str) -> bool {
+    e.starts_with("stopped before step ")
 }

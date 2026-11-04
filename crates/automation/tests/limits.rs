@@ -1,5 +1,6 @@
 //! Bounded work (REC-B07): the input, output and batch quotas, the worker count and the time
-//! limit are set where a session starts, refused before the work begins, and audited.
+//! limit (checked between items and inside one) are set where a session starts, refused before
+//! the work begins, and audited.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -118,13 +119,13 @@ fn a_batch_over_the_limit_is_refused_before_anything_is_read() {
 }
 
 #[test]
-fn a_time_limit_stops_a_batch_between_items_and_keeps_what_it_finished() {
+fn a_time_limit_stops_a_batch_inside_and_between_items() {
     let dir = workdir("time");
     for name in ["a.pdf", "b.pdf", "c.pdf"] {
         seed(&dir, name);
     }
-    // One nanosecond is over before the second item can start, so exactly one file is written and
-    // the rest are reported as skipped rather than silently dropped.
+    // One nanosecond is over before the first step can run, so the first file stops inside itself:
+    // it is reported as stopped, nothing is written for it, and the rest are skipped, not dropped.
     let mut a = auto(&dir).with_limits(Limits { item_timeout: Duration::from_nanos(1), ..Default::default() });
     let run = ok(
         &mut a,
@@ -132,11 +133,11 @@ fn a_time_limit_stops_a_batch_between_items_and_keeps_what_it_finished() {
         json!({ "steps": [{ "step": "set_title", "arg": "Rushed" }], "paths": ["a.pdf", "b.pdf", "c.pdf"], "folder": "out" }),
     );
     let files = run["files"].as_array().unwrap();
-    assert!(files[0]["output"].is_string(), "{}", files[0]);
+    assert!(files[0]["stopped"].as_str().unwrap().contains("time limit"), "{}", files[0]);
     assert!(files[1]["skipped"].as_str().unwrap().contains("time limit"), "{}", files[1]);
     assert!(files[2]["skipped"].is_string(), "{}", files[2]);
     assert_eq!(run["timed_out"], true);
-    assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 1, "only the item in hand is written");
+    assert_eq!(std::fs::read_dir(dir.join("out")).unwrap().count(), 0, "a file stopped inside itself is not written half-done");
     let audit = ok(&mut a, "limits_status", json!({}))["audit"].clone();
     assert_eq!(audit["batches_stopped_by_time"].as_u64(), Some(1), "one stopped batch, not one per skipped file: {audit}");
 

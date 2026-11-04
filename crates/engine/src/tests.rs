@@ -2020,7 +2020,7 @@ fn recognize_text_reads_the_euro_sign() {
     let png = export::Exporter::new(s.get(id).unwrap()).png(0, 150.0).unwrap();
     let scan = s.create_from_images(&[("scan.png".into(), png)]).unwrap();
     let id = s.open("scan.pdf", None, scan, None).unwrap();
-    s.recognize_text(id, &[], ocr::OcrSettings::default()).unwrap();
+    s.recognize_text(id, &[], ocr::OcrSettings::default(), |_, _| true).unwrap();
     let text = page_texts(&s, id)[0].clone();
     // The model was trained with € where the ocrs crate's alphabet has a second E.
     assert!(text.contains("€250"), "{text}");
@@ -2040,7 +2040,7 @@ fn recognize_text_makes_a_scanned_page_searchable() {
     let id = s.open("scan.pdf", None, scan, None).unwrap();
     assert_eq!(page_texts(&s, id), [""], "a picture has no text");
 
-    let found = s.recognize_text(id, &[], ocr::OcrSettings::default()).unwrap();
+    let found = s.recognize_text(id, &[], ocr::OcrSettings::default(), |_, _| true).unwrap();
     assert_eq!(found.len(), 1);
     let text = page_texts(&s, id)[0].to_lowercase();
     for w in ["quick", "brown", "fox", "lazy"] {
@@ -2055,7 +2055,7 @@ fn recognize_text_makes_a_scanned_page_searchable() {
     assert!(q.origin[0] < l.origin[0] && (top(q) - top(l)).abs() < 3.0, "{q:?} {l:?}");
 
     // A second pass skips the page: it has text now.
-    let again = s.recognize_text(id, &[], ocr::OcrSettings::default()).unwrap();
+    let again = s.recognize_text(id, &[], ocr::OcrSettings::default(), |_, _| true).unwrap();
     assert!(again[0].skipped.is_some());
 }
 
@@ -2278,7 +2278,7 @@ fn actions_run_their_steps_on_files() {
     let src = s.create_from_text("t", "Quarterly numbers").unwrap();
     let built = actions::builtin();
     let numbers = built.iter().find(|a| a.name == "Add Page Numbers").unwrap();
-    let r = actions::run_on(numbers, "q.pdf", src.clone(), |_, _| {}).unwrap();
+    let r = actions::run_on(numbers, "q.pdf", src.clone(), |_, _| true).unwrap();
     let mut s2 = Session::new();
     let id = s2.open("out.pdf", None, r.bytes, None).unwrap();
     assert!(page_texts(&s2, id)[0].contains("Page 1 of 1"), "{:?}", page_texts(&s2, id));
@@ -2296,14 +2296,18 @@ fn actions_run_their_steps_on_files() {
         builtin: false,
     };
     let mut steps = Vec::new();
-    let r = actions::run_on(&custom, "q.pdf", src, |i, n| steps.push((i, n))).unwrap();
+    fn record(steps: &mut Vec<(usize, usize)>, i: usize, n: usize) -> bool {
+        steps.push((i, n));
+        true
+    }
+    let r = actions::run_on(&custom, "q.pdf", src, |i, n| record(&mut steps, i, n)).unwrap();
     assert_eq!(steps, [(0, 4), (1, 4), (2, 4), (3, 4)]);
     assert_eq!(r.log.len(), 4, "{:?}", r.log);
     let id = s2.open("out2.pdf", None, r.bytes, None).unwrap();
     let d = s2.get(id).unwrap();
     assert_eq!(d.info.title.as_deref(), Some("Q3"));
     assert!(page_texts(&s2, id)[0].contains("DRAFT"));
-    assert!(actions::run_on(&custom, "bad.pdf", Arc::new(b"nope".to_vec()), |_, _| {}).is_err());
+    assert!(actions::run_on(&custom, "bad.pdf", Arc::new(b"nope".to_vec()), |_, _| true).is_err());
 }
 
 /// A removal step that fails (here: a signed file can't be rewritten without its hidden data)
@@ -2320,8 +2324,25 @@ fn actions_fail_when_hidden_information_could_not_be_removed() {
     let signed = s.sign(id, &digital_id, SignOptions { page: 1, ..SignOptions::default() }).unwrap();
     let built = actions::builtin();
     let sanitize = built.iter().find(|a| a.name == "Sanitize Documents").unwrap();
-    let e = actions::run_on(sanitize, "signed.pdf", signed, |_, _| {}).map(|r| r.log).unwrap_err();
+    let e = actions::run_on(sanitize, "signed.pdf", signed, |_, _| true).map(|r| r.log).unwrap_err();
     assert!(e.starts_with("Sanitize document:"), "{e}");
+}
+
+/// A run stopped by its own progress callback stops at a step boundary, saves nothing, and
+/// says so with an error `is_stopped` recognises.
+#[test]
+fn a_run_stopped_by_its_progress_writes_nothing_and_says_where() {
+    let s = Session::new();
+    let src = s.create_from_text("t", "Quarterly numbers").unwrap();
+    let custom = actions::Action {
+        name: "Mine".into(),
+        description: String::new(),
+        steps: vec![actions::Step::from_id("set_title", "Q3").unwrap(), actions::Step::AddWatermark("DRAFT".into())],
+        builtin: false,
+    };
+    let e = actions::run_on(&custom, "q.pdf", src, |i, _| i < 1).unwrap_err();
+    assert!(actions::is_stopped(&e), "{e}");
+    assert_eq!(e, actions::stopped(1, 2), "{e}");
 }
 
 #[test]
