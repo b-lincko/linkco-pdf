@@ -1252,7 +1252,7 @@ fn current_uid() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{CliError, InputStamp, control_file_problem, preview_scale, refuse_if_input_changed, stamp_of};
+    use super::{CliError, control_file_problem, preview_scale, refuse_if_input_changed, stamp_of};
 
     #[test]
     fn an_in_place_out_refuses_when_the_input_changed_since_it_was_read() {
