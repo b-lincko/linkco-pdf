@@ -185,7 +185,7 @@ fn a_script_step_may_pin_its_own_schema_version() {
     }
 
     // A step without a pin is unaffected, and a matching pin on any minor runs.
-    let mut plain = create.clone();
+    let plain = create.clone();
     let mut pinned = create.clone();
     pinned["schema_version"] = serde_json::json!(format!("{major}.999"));
     let script = write_script(serde_json::json!([plain, pinned]));
