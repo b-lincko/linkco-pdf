@@ -69,6 +69,7 @@ pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png] [--sch
 pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open\", \"args\": {…}}, …]
                       [--schema-version V] asks whether this build speaks V before anything runs
                                                            (exit 3 if the major differs, 2 if V is not a version)
+                      a step may carry \"schema_version\": \"V\" too, answered before that step runs
                       [--max-workers N] [--max-input-mib N] [--max-output-mib N] [--max-batch N] [--time-limit-ms N]
                                                            limits for this session (0 = no limit); limits_status reports them
 ",
@@ -1014,6 +1015,20 @@ fn run(args: &[String]) -> Result<(), CliError> {
         let text = std::fs::read_to_string(script).map_err(|e| format!("{script}: {e}"))?;
         let steps: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| usage(format!("{script}: {e}")))?;
         for (i, step) in steps.iter().enumerate() {
+            // A step may pin the revision it was written against (REC-B02): answered before that
+            // step runs, through the same rule as the invocation-level pin above.
+            if let Some(pin) = step.get("schema_version") {
+                let asked = pin.as_str().ok_or_else(|| usage(format!("step {}: schema_version must be a string", i + 1)))?;
+                let refusal = match pdfcraft_automation::schema::compatible(asked) {
+                    None => Some(usage(format!("step {}: {}", i + 1, pdfcraft_automation::schema::not_a_version_message(asked)))),
+                    Some(false) => Some(unsupported(format!("step {}: {}", i + 1, pdfcraft_automation::schema::incompatible_message(asked)))),
+                    Some(true) => None,
+                };
+                if let Some(e) = refusal {
+                    // Steps before this one already ran, so a mid-script refusal is partial.
+                    return Err(if i > 0 { e.into_partial() } else { e });
+                }
+            }
             // Steps before this one already ran, so their work stands: the failure is partial
             // (`exit::Kind::Partial`), which tells a script to look at what was done rather than
             // to assume nothing happened.

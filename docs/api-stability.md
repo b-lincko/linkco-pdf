@@ -39,6 +39,12 @@ job — the call is refused before anything runs:
 * `pdfcraft-cli run <tool> … --schema-version V` (or `run --script steps.json --schema-version V`)
   checks the whole invocation before the first tool is called: a different major exits **3**
   (`unsupported`), and a `V` that is not a version exits **2** (`usage`).
+* Inside a `--script`, one step may pin its own revision — `{"tool": …, "args": …,
+  "schema_version": "V"}` — and it is answered before that step runs, through the same rule: a
+  different major exits **3** (`unsupported`) without running that step or any later one (steps
+  before it already ran, so the failure is reported as `partial`, exit **6**), and a `V` that is
+  not a version — or a non-string value — exits **2** (`usage`). Steps without the key are
+  unaffected.
 * MCP `tools/call` with `params._meta.schemaVersion: "V"`: a different major is answered as a
   normal tool result with `isError: true` and `structuredContent.error.kind: "unsupported"`
   (nothing ran); a value that is not a version is a protocol error (`-32602`). Clients that send

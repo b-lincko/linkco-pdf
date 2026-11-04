@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B041 · **Active stage:** basic
+**Active component:** B042 · **Active stage:** basic
 
-## Basic (372 records)
+## Basic (373 records)
 
-complete: 44, in_progress: 6, pending: 322
+complete: 44, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -59,6 +59,7 @@ complete: 44, in_progress: 6, pending: 322
 | B039 | [x] Publish a machine-readable capability manifest | P0 | complete | REC-R12 |
 | B040 | [x] Per-call schema-version negotiation for run and MCP tools/call | P0 | complete | REC-B02 |
 | B041 | [x] Enforce the session time limit inside a single item (REC-B07) | P0 | complete | REC-B07 |
+| B042 | [ ] Per-step schema-version pin inside run --script (REC-B02) | P0 | in_progress | REC-B02 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1558,3 +1559,14 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41804820956
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41804821208
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41804821242
+
+### B042: Per-step schema-version pin inside run --script (REC-B02)
+
+- Status: **in_progress**; parent(s): REC-B02.
+- Acceptance: One step of `pdfcraft-cli run --script steps.json` may carry "schema_version": "V" and is answered before that step runs, through the same shared rule as the invocation-level pin (schema::compatible): same major the step runs; a different major exits 3 (unsupported) and neither that step nor any later step runs — steps before it already ran, so a mid-script refusal is reported as partial (exit 6) with their results on stdout, and a refusal on the first step is a plain exit 3 with an empty stdout; a V that is not a version, or a non-string value, exits 2 (usage). Steps without the key are unchanged, the invocation-level --schema-version still covers the whole script, docs/api-stability.md documents the per-step form, --help names it, and tests cover every branch.
+- Audit: REC-B02's remaining note after B040: no per-step pin inside one --script — the only pin was invocation-level, answered before step 1, so a script written against an older revision could discover the mismatch in the middle. The audit of the script loop: run() walked the steps and called run_step with no check between them; each step is a JSON object with tool/args/out keys, so a pin on the step object itself (not inside args) touches no tool schema — the same reasoning as B040's _meta choice, so TOOL_SCHEMA_VERSION does not move. Decisions. (1) Reuse schema::compatible unchanged, so "compatible" means the same for one call and for one step. (2) The refusal message names the step number (step 2: …) and both versions, like the invocation pin. (3) A mid-script refusal is partial (into_partial, exit 6) exactly like any other mid-script tool failure — earlier steps' work stands; a first-step refusal is a plain exit 3/2 because nothing ran. (4) A non-string schema_version is a usage error (exit 2), not silently ignored: a pin that cannot be read must not pass as if it matched. (5) docs/api-stability.md's per-call section gains the per-step form and --help names it. Not claimed: reading a pin from a config file, MCP-side per-step pins (an MCP tools/call is already one call, so _meta covers it), or any change to protocolVersion.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes — the per-step pin check in run()'s script loop, the help line, and the new schema.rs test — were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. Not claimed: config-file version reading, MCP per-step pins, or any protocolVersion change.
+- Notes: Bounded part of REC-B02 (versioned schemas, stable exit codes, structured errors), which stays open. B042 closes the last per-call half: a single step of a --script can now say which schema revision it expects, and a mismatch refuses that step before it runs rather than after. Still open in REC-B02: the interface does not read the version back from a caller's config file.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::a_script_step_may_pin_its_own_schema_version: matching pin runs the step; mid-script mismatch exits 6 (partial, message names step 2 and both versions, the earlier step's result is on stdout); first-step mismatch exits 3 with empty stdout; "banana" and a non-string pin exit 2 with empty stdout; unpinned steps and a matching pin on any minor both run.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_help_names_the_run_pin: --help names both the invocation pin and the per-step schema_version.
+- Local evidence: python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes.

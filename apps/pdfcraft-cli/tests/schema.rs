@@ -130,9 +130,75 @@ fn run_pins_the_schema_version_before_anything_runs() {
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
+/// One step of a `--script` may pin the revision it was written against (REC-B02): the pin is
+/// answered before that step runs, so a mismatch never runs the step it was written for.
+#[test]
+fn a_script_step_may_pin_its_own_schema_version() {
+    let version = pdfcraft_automation::TOOL_SCHEMA_VERSION;
+    let (major, _) = pdfcraft_automation::schema::parse_version(version).unwrap();
+    let other = format!("{}.0", major + 1);
+    let scratch = std::env::temp_dir().join(format!("pdfcraft-step-pin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let write_script = |steps: serde_json::Value| {
+        let script = scratch.join("steps.json");
+        std::fs::write(&script, serde_json::to_vec(&steps).unwrap()).unwrap();
+        script.to_str().unwrap().to_string()
+    };
+    let create = serde_json::json!({ "tool": "doc_create", "args": { "from": "text", "text": "pinned" } });
+
+    // A matching pin on a step runs that step (its result is on stdout); a mismatching pin on a
+    // later step refuses before it, so the run is partial (exit 6) and step 1's result stands.
+    let mut first = create.clone();
+    first["schema_version"] = serde_json::json!(version);
+    let mut second = serde_json::json!({ "tool": "doc_open", "args": { "path": "/nonexistent/no-such-file.pdf" } });
+    second["schema_version"] = serde_json::json!(other);
+    let script = write_script(serde_json::json!([first, second]));
+    let out = run(&["--error-format=json", "run", "--script", &script]);
+    assert_eq!(out.status.code(), Some(6), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"doc\""), "the step before the refusal ran and printed its result: {stdout}");
+    let error: Value = serde_json::from_str(String::from_utf8_lossy(&out.stderr).lines().next().unwrap()).unwrap();
+    assert_eq!(error["error"]["kind"], "partial");
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(message.contains("step 2") && message.contains(&other), "{error}");
+
+    // A mismatching pin on the first step: exit 3, nothing ran (no result on stdout).
+    let mut refused = create.clone();
+    refused["schema_version"] = serde_json::json!(other);
+    let script = write_script(serde_json::json!([refused]));
+    let out = run(&["--error-format=json", "run", "--script", &script]);
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stdout.is_empty(), "a refused first step printed no result");
+    let error: Value = serde_json::from_str(String::from_utf8_lossy(&out.stderr).lines().next().unwrap()).unwrap();
+    assert_eq!(error["error"]["kind"], "unsupported");
+    assert_eq!(error["error"]["exit_code"], 3);
+
+    // Not a version (or not a string): exit 2, nothing ran.
+    for pin in [serde_json::json!("banana"), serde_json::json!(3)] {
+        let mut step = create.clone();
+        step["schema_version"] = pin.clone();
+        let script = write_script(serde_json::json!([step]));
+        let out = run(&["run", "--script", &script]);
+        assert_eq!(out.status.code(), Some(2), "{pin}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.stdout.is_empty(), "{pin}: a refused step printed no result");
+    }
+
+    // A step without a pin is unaffected, and a matching pin on any minor runs.
+    let mut plain = create.clone();
+    let mut pinned = create.clone();
+    pinned["schema_version"] = serde_json::json!(format!("{major}.999"));
+    let script = write_script(serde_json::json!([plain, pinned]));
+    let out = run(&["run", "--script", &script]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).matches("\"doc\"").count(), 2, "both steps ran");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
 #[test]
 fn the_help_names_the_run_pin() {
     let help = String::from_utf8_lossy(&run(&["--help"]).stdout).into_owned();
     assert!(help.contains("pdfcraft-cli run"), "{help}");
     assert!(help.contains("--schema-version"), "{help}");
+    assert!(help.contains("schema_version"), "the per-step pin is named too: {help}");
 }

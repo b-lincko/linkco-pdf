@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B041"
+active_component = "B042"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -30,7 +30,7 @@ evidence = [
 
 [task_status.REC-B02]
 status = "in_progress"
-notes = "B015 gave the command line its stable exit codes and one-line JSON failures; B028 gives the tool interface a version and a kind. `pdfcraft-cli schema` prints the whole tool table under `schema_version` (major.minor, currently 1.0), `--schema-version V` answers whether this build speaks V and exits 3 when the major differs, and the MCP server reports the same version in `initialize` and `tools/list`. `ToolError::kind()` is the stable kind of every failure (usage, unsupported, refused, failed) and the MCP server returns it as `structuredContent.error`. B031 types the engine's reason for refusing an open, so a damaged document reaches an agent as `malformed` and a locked, empty or unsupported one as `failed` with its reason — and the command line's `--script` steps now return the documented exit code 4 for it. Still open: there is no per-call schema negotiation, and the interface does not read or show the version."
+notes = "B015 gave the command line its stable exit codes and one-line JSON failures; B028 gives the tool interface a version and a kind. `pdfcraft-cli schema` prints the whole tool table under `schema_version` (major.minor, currently 1.0), `--schema-version V` answers whether this build speaks V and exits 3 when the major differs, and the MCP server reports the same version in `initialize` and `tools/list`. `ToolError::kind()` is the stable kind of every failure (usage, unsupported, refused, failed) and the MCP server returns it as `structuredContent.error`. B031 types the engine's reason for refusing an open, so a damaged document reaches an agent as `malformed` and a locked, empty or unsupported one as `failed` with its reason — and the command line's `--script` steps now return the documented exit code 4 for it. B040 added the per-call pin on both surfaces (run --schema-version, MCP _meta.schemaVersion) and B042 the per-step pin inside one --script. Still open: the interface does not read the version back from a caller's config file."
 
 [task_status.REC-B04]
 status = "in_progress"
@@ -966,3 +966,19 @@ ci_notes = "Two rounds. 8f7096c was red only on the Clippy step of the two test 
 ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/41804821317", "https://github.com/b-lincko/linkco-pdf/actions/runs/41804821105", "https://github.com/b-lincko/linkco-pdf/actions/runs/41804820956", "https://github.com/b-lincko/linkco-pdf/actions/runs/41804821208", "https://github.com/b-lincko/linkco-pdf/actions/runs/41804821242"]
 implementation_commit = "8f7096c1c8935305d05fc011d231347dae24036f"
 verification_commit = "90660de50f4ee162105909003d7f52f7956b8c59"
+
+[components.B042]
+title = "Per-step schema-version pin inside run --script (REC-B02)"
+stage = "basic"
+parent_tasks = ["REC-B02"]
+status = "in_progress"
+code = ["apps/pdfcraft-cli/src/main.rs", "apps/pdfcraft-cli/tests/schema.rs", "docs/api-stability.md"]
+acceptance = "One step of `pdfcraft-cli run --script steps.json` may carry \"schema_version\": \"V\" and is answered before that step runs, through the same shared rule as the invocation-level pin (schema::compatible): same major the step runs; a different major exits 3 (unsupported) and neither that step nor any later step runs — steps before it already ran, so a mid-script refusal is reported as partial (exit 6) with their results on stdout, and a refusal on the first step is a plain exit 3 with an empty stdout; a V that is not a version, or a non-string value, exits 2 (usage). Steps without the key are unchanged, the invocation-level --schema-version still covers the whole script, docs/api-stability.md documents the per-step form, --help names it, and tests cover every branch."
+audit = "REC-B02's remaining note after B040: no per-step pin inside one --script — the only pin was invocation-level, answered before step 1, so a script written against an older revision could discover the mismatch in the middle. The audit of the script loop: run() walked the steps and called run_step with no check between them; each step is a JSON object with tool/args/out keys, so a pin on the step object itself (not inside args) touches no tool schema — the same reasoning as B040's _meta choice, so TOOL_SCHEMA_VERSION does not move. Decisions. (1) Reuse schema::compatible unchanged, so \"compatible\" means the same for one call and for one step. (2) The refusal message names the step number (step 2: …) and both versions, like the invocation pin. (3) A mid-script refusal is partial (into_partial, exit 6) exactly like any other mid-script tool failure — earlier steps' work stands; a first-step refusal is a plain exit 3/2 because nothing ran. (4) A non-string schema_version is a usage error (exit 2), not silently ignored: a pin that cannot be read must not pass as if it matched. (5) docs/api-stability.md's per-call section gains the per-step form and --help names it. Not claimed: reading a pin from a config file, MCP-side per-step pins (an MCP tools/call is already one call, so _meta covers it), or any change to protocolVersion."
+notes = "Bounded part of REC-B02 (versioned schemas, stable exit codes, structured errors), which stays open. B042 closes the last per-call half: a single step of a --script can now say which schema revision it expects, and a mismatch refuses that step before it runs rather than after. Still open in REC-B02: the interface does not read the version back from a caller's config file."
+local_evidence = [
+    "apps/pdfcraft-cli/tests/schema.rs::a_script_step_may_pin_its_own_schema_version: matching pin runs the step; mid-script mismatch exits 6 (partial, message names step 2 and both versions, the earlier step's result is on stdout); first-step mismatch exits 3 with empty stdout; \"banana\" and a non-string pin exit 2 with empty stdout; unpinned steps and a matching pin on any minor both run",
+    "apps/pdfcraft-cli/tests/schema.rs::the_help_names_the_run_pin: --help names both the invocation pin and the per-step schema_version",
+    "python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes",
+]
+verification_limit = "The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes — the per-step pin check in run()'s script loop, the help line, and the new schema.rs test — were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. Not claimed: config-file version reading, MCP per-step pins, or any protocolVersion change."
