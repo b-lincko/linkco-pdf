@@ -169,7 +169,7 @@ impl Session {
         id: DocId,
         pages: &[usize],
         settings: OcrSettings,
-        mut progress: impl FnMut(usize, usize) -> bool,
+        progress: impl FnMut(usize, usize) -> bool,
     ) -> Result<Vec<OcrPage>, String> {
         let job = self.ocr_job(id, pages, settings).ok_or("no such document")?;
         if let Some(why) = self.get(id).and_then(|d| d.read_only_reason.clone()) {

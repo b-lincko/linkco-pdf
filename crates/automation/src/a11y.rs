@@ -209,13 +209,12 @@ impl Automation {
             let resources = &self.resources;
             let mut on_page = |done: usize, total: usize| {
                 total_pages.store(total, std::sync::atomic::Ordering::Relaxed);
-                if resources.past_deadline(started) {
+                let over = resources.past_deadline(started);
+                if over {
                     hit.store(true, std::sync::atomic::Ordering::Relaxed);
                     done_pages.store(done, std::sync::atomic::Ordering::Relaxed);
-                    false
-                } else {
-                    true
                 }
+                !over
             };
             let result = self.read_input(p).and_then(|bytes| {
                 let bytes = std::sync::Arc::new(bytes);
@@ -224,7 +223,7 @@ impl Automation {
             if hit.load(std::sync::atomic::Ordering::Relaxed) {
                 // Count the stopped batch once, here: with `stopped` set the between-items check
                 // is skipped, and a mid-file stop is still a batch stopped by time.
-                self.resources.timed_out(started);
+                self.resources.count_stopped_batch();
                 stopped = true;
                 out.push(json!({
                     "path": p,
@@ -464,7 +463,7 @@ impl Automation {
             if hit.load(std::sync::atomic::Ordering::Relaxed) {
                 // Count the stopped batch once, here: with `stopped` set the between-items check
                 // is skipped, and a mid-file stop is still a batch stopped by time.
-                self.resources.timed_out(started);
+                self.resources.count_stopped_batch();
                 stopped = true;
                 out.push(json!({ "path": p, "stopped": "the time limit was reached during this file" }));
                 continue;

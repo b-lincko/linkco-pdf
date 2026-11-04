@@ -168,8 +168,14 @@ impl Budget {
         if limit.is_zero() || started.elapsed() <= limit {
             return false;
         }
-        Audit::count(&self.audit.timed_out);
+        self.count_stopped_batch();
         true
+    }
+
+    /// Count one batch stopped by the time limit. The between-items check gets here through
+    /// [`Self::timed_out`]; a stop inside a single item calls this directly, once.
+    pub(crate) fn count_stopped_batch(&self) {
+        Audit::count(&self.audit.timed_out);
     }
 
     /// The same limit, asked inside one item (a page or a step), so a single file cannot run past

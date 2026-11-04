@@ -2296,11 +2296,11 @@ fn actions_run_their_steps_on_files() {
         builtin: false,
     };
     let mut steps = Vec::new();
-    fn record(steps: &mut Vec<(usize, usize)>, i: usize, n: usize) -> bool {
+    let r = actions::run_on(&custom, "q.pdf", src, |i, n| {
         steps.push((i, n));
         true
-    }
-    let r = actions::run_on(&custom, "q.pdf", src, |i, n| record(&mut steps, i, n)).unwrap();
+    })
+    .unwrap();
     assert_eq!(steps, [(0, 4), (1, 4), (2, 4), (3, 4)]);
     assert_eq!(r.log.len(), 4, "{:?}", r.log);
     let id = s2.open("out2.pdf", None, r.bytes, None).unwrap();
