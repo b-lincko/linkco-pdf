@@ -54,9 +54,11 @@ fn an_in_place_out_edits_the_same_file_when_it_is_unchanged() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(first_page_rotation(&input), 90, "the in-place edit landed in the same file");
     assert_ne!(std::fs::read(&input).unwrap(), before, "the file was replaced, not kept");
-    // And a different --out still works alongside the input.
+    // And a different --out still works (a fresh copy, so the rotation is absolute again).
+    let input2 = tmp("inplace", "in2.pdf");
+    std::fs::write(&input2, fixture()).unwrap();
     let other = tmp("inplace", "other.pdf");
-    let out = Command::new(BIN).args(["edit", input.to_str().unwrap(), "--out", other.to_str().unwrap(), "--rotate", "1:180"]).output().unwrap();
+    let out = Command::new(BIN).args(["edit", input2.to_str().unwrap(), "--out", other.to_str().unwrap(), "--rotate", "1:180"]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(first_page_rotation(&other), 180);
 }
