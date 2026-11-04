@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B042 · **Active stage:** basic
+**Active component:** B043 · **Active stage:** basic
 
-## Basic (373 records)
+## Basic (374 records)
 
-complete: 45, in_progress: 6, pending: 322
+complete: 45, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -60,6 +60,7 @@ complete: 45, in_progress: 6, pending: 322
 | B040 | [x] Per-call schema-version negotiation for run and MCP tools/call | P0 | complete | REC-B02 |
 | B041 | [x] Enforce the session time limit inside a single item (REC-B07) | P0 | complete | REC-B07 |
 | B042 | [x] Per-step schema-version pin inside run --script (REC-B02) | P0 | complete | REC-B02 |
+| B043 | [ ] The command line refuses an in-place save of a file that changed since it was read (REC-R05) | P0 | in_progress | REC-R05 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1576,3 +1577,14 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41830371848
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41830371824
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41830371803
+
+### B043: The command line refuses an in-place save of a file that changed since it was read (REC-R05)
+
+- Status: **in_progress**; parent(s): REC-R05.
+- Acceptance: `pdfcraft-cli edit <in.pdf> --out <in.pdf>` (and `combine`/`extract` whose --out names one of the inputs) records the input's stamp (length and modification time) when the file is read, and before writing refuses with exit 5 (refused, kind "refused") and changes nothing when the file changed on disk in between; a --out naming a different file is written as asked, and an unchanged in-place file is written as asked. --help names the rule. Tests: a unit test of the check (changed input refused with kind refused, different --out allowed, unchanged input allowed, missing stamp refused) and an integration test that an in-place edit lands in the same file when it is unchanged and that a different --out still works.
+- Audit: REC-R05's open command-line half (named in B023's notes): B032 made every pdfcraft-cli output atomic, but `edit --out` still replaced whatever was at the output path without checking whether the file it had read was still the one on disk — so a script running unattended could clobber another program's write, the thing B010's app-side prompt exists to stop. The audit: edit/combine/extract read their inputs and then call save_output on --out with no comparison in between; the app's conflict module (Stamp, changed) lives in ui-egui and is not available to the CLI, so the CLI gets its own small stamp (length + mtime, the same cheap check the app's poll uses first). Decisions. (1) The check applies only when --out is the same file as an input (same_file compares canonical paths): replacing a different existing file is the caller's explicit choice, and only the file that was read can be stale. (2) The refusal is exit 5 (refused) with a message that says nothing was replaced and to re-read or write elsewhere — the command line has no prompt, so refusing and changing nothing is the only safe answer, matching B010's rule that a changed file is never silently overwritten. (3) split is not covered: its outputs are named {stem}-pN.pdf in --out-dir and can never name the input. (4) The stamp is taken immediately before the read, and compared immediately before the write, so the window is the edit itself. Not claimed: byte-level comparison of the input (the app's conflict path reads up to 32 MiB to compare contents; the CLI compares the cheap stamp only — a rewrite that keeps length and mtime is not detected here), file locking, or the web build.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes — the InputStamp/refuse_if_input_changed helpers, the wiring into edit/combine/extract, the unit test and the integration test — were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. The refusal branch is unit-tested (it is a race against another process, so it cannot be exercised deterministically end-to-end); the happy paths are integration-tested. Not claimed: content-level comparison of the changed input, file locking, split's outputs, or the web build.
+- Notes: Bounded part of REC-R05 (external-file change and save-conflict detection), which stays open for the web build (no local path to watch) and non-Unix rename identity. This closes the command-line half B023 named: an in-place --out can no longer replace a file another program wrote after the CLI read it — it refuses with exit 5 and changes nothing. The atomic writer from B032 already guaranteed no half-written file; this adds the changed-since-read check on top.
+- Local evidence: apps/pdfcraft-cli/src/main.rs (unit test) an_in_place_out_refuses_when_the_input_changed_since_it_was_read: a changed input is refused with kind refused, a different --out and an unchanged input are allowed, a missing stamp is refused.
+- Local evidence: apps/pdfcraft-cli/tests/edit.rs::an_in_place_out_edits_the_same_file_when_it_is_unchanged: edit <in> --out <in> --rotate 1:90 exits 0 and the rotation lands in the same file; a different --out still works.
+- Local evidence: python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes.

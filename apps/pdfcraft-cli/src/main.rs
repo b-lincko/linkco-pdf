@@ -58,6 +58,7 @@ pdfcraft-cli preview <file.pdf> [--page N] [--dpi 150 | --width PX] [--max-px 40
 pdfcraft-cli text   <file.pdf> [--page N]                  extracted text (pages separated by form feeds)
 pdfcraft-cli edit   <in.pdf> --out out.pdf [--rotate 1,3:90] [--delete 2,4] [--move 5:1]
                       [--insert-blank 1] [--title T] [--author A] [--full]
+                      an in-place --out refuses (exit 5) if the file changed since it was read
 pdfcraft-cli combine <a.pdf> <b.pdf> … --out combined.pdf
 pdfcraft-cli extract <in.pdf> --pages 1,3,5 --out out.pdf
 pdfcraft-cli split   <in.pdf> (--every N | --before 3,7) [--out-dir DIR]
@@ -391,6 +392,52 @@ fn read(path: &str) -> Result<Arc<Vec<u8>>, String> {
     std::fs::read(path).map(Arc::new).map_err(|e| format!("{path}: {e}"))
 }
 
+/// The input file's stamp when it was read (`REC-R05`): its length and modification time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InputStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+fn stamp_of(path: &Path) -> Option<InputStamp> {
+    let m = std::fs::metadata(path).ok()?;
+    Some(InputStamp { len: m.len(), modified: m.modified().ok() })
+}
+
+/// Read `path` for editing, remembering its stamp, so an in-place `--out` can refuse if the file
+/// changed in between.
+fn read_with_stamp(path: &str) -> Result<(Arc<Vec<u8>>, Option<InputStamp>), String> {
+    let stamp = stamp_of(Path::new(path));
+    Ok((read(path)?, stamp))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// `REC-R05`: an in-place output (`--out` naming the file that was read) refuses when the file
+/// changed on disk since it was read. The command line has no prompt, so it refuses (exit 5)
+/// and changes nothing, rather than replacing another program's write. A different `--out` is
+/// the caller's own choice and is written as asked.
+fn refuse_if_input_changed(input: &Path, at_read: Option<InputStamp>, out: &Path) -> Result<(), CliError> {
+    if !same_file(input, out) {
+        return Ok(());
+    }
+    if stamp_of(input) != at_read {
+        return Err(refused(format!(
+            "{}: changed on disk since it was read (another program wrote it); nothing was replaced — read it again, or write elsewhere with --out",
+            input.display()
+        )));
+    }
+    Ok(())
+}
+
 /// Write the file a command produced, the way the app saves a document: a private staging file
 /// beside the target, written and flushed to the disk, then renamed over it (`REC-R05`).
 ///
@@ -581,12 +628,14 @@ fn edit(args: &[String]) -> Result<(), CliError> {
     }
     let path = path.ok_or_else(|| usage("edit: missing file"))?;
     let out = out.ok_or_else(|| usage("edit: missing --out"))?;
+    let (input_bytes, at_read) = read_with_stamp(path)?;
     let mut session = Session::new();
-    let id = session.open(path, Some(path.to_string()), read(path)?, password).map_err(|e| malformed(e.to_string()))?;
+    let id = session.open(path, Some(path.to_string()), input_bytes, password).map_err(|e| malformed(e.to_string()))?;
     for e in edits {
         session.apply(id, e).map_err(|e| e.to_string())?;
     }
     let bytes = if full { session.save_full_bytes(id) } else { session.save_bytes(id) }.map_err(|e| e.to_string())?;
+    refuse_if_input_changed(Path::new(path), at_read, Path::new(out))?;
     save_output(Path::new(out), bytes.as_slice())
 }
 
@@ -601,8 +650,17 @@ fn combine(args: &[String]) -> Result<(), CliError> {
     if inputs.len() < 2 {
         return Err(usage("combine: give at least two input files"));
     }
-    let sources = inputs.iter().map(|p| Ok((file_stem(p), read(p)?))).collect::<Result<Vec<_>, String>>()?;
+    let mut sources = Vec::new();
+    let mut stamps = Vec::new();
+    for p in inputs {
+        let (bytes, at_read) = read_with_stamp(p)?;
+        stamps.push((PathBuf::from(p), at_read));
+        sources.push((file_stem(p), bytes));
+    }
     let bytes = pdfcraft_engine::Session::new().combine(&sources).map_err(|e| e.to_string())?;
+    for (input, at_read) in &stamps {
+        refuse_if_input_changed(input, *at_read, Path::new(out))?;
+    }
     save_output(Path::new(out), bytes.as_slice())
 }
 
@@ -611,9 +669,11 @@ fn extract(args: &[String]) -> Result<(), CliError> {
     let path = *positional(args).first().ok_or_else(|| usage("extract: missing file"))?;
     let out = flag(args, "--out").ok_or_else(|| usage("extract: missing --out"))?;
     let pages = page_list(flag(args, "--pages").ok_or_else(|| usage("extract: missing --pages"))?)?;
+    let (input_bytes, at_read) = read_with_stamp(path)?;
     let mut session = pdfcraft_engine::Session::new();
-    let id = session.open(path, None, read(path)?, flag(args, "--password")).map_err(|e| malformed(e.to_string()))?;
+    let id = session.open(path, None, input_bytes, flag(args, "--password")).map_err(|e| malformed(e.to_string()))?;
     let bytes = session.extract(id, &pages).map_err(|e| e.to_string())?;
+    refuse_if_input_changed(Path::new(path), at_read, Path::new(out))?;
     save_output(Path::new(out), bytes.as_slice())
 }
 
@@ -1191,7 +1251,32 @@ fn current_uid() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{control_file_problem, preview_scale};
+    use super::{CliError, InputStamp, control_file_problem, preview_scale, refuse_if_input_changed, stamp_of};
+
+    #[test]
+    fn an_in_place_out_refuses_when_the_input_changed_since_it_was_read() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-cli-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.pdf");
+        std::fs::write(&file, b"first").unwrap();
+        let at_read = stamp_of(&file);
+        // Another program writes the file after this command read it.
+        std::fs::write(&file, b"a longer, different version").unwrap();
+        let err = refuse_if_input_changed(&file, at_read, &file).unwrap_err();
+        match err {
+            CliError::Message(f) => assert_eq!(f.kind, crate::exit::Kind::Refused, "{f:?}"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        // A different --out is the caller's own choice: no refusal.
+        assert!(refuse_if_input_changed(&file, at_read, &dir.join("elsewhere.pdf")).is_ok());
+        // An unchanged input is written as asked.
+        let at_read = stamp_of(&file);
+        assert!(refuse_if_input_changed(&file, at_read, &file).is_ok());
+        // A missing stamp (the file was there at read time only) is treated as changed, not ignored.
+        assert!(refuse_if_input_changed(&file, None, &file).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn preview_scale_honours_width_dpi_and_the_pixel_cap() {

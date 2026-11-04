@@ -41,6 +41,32 @@ fn first_page_rotation(path: &std::path::Path) -> u16 {
     pdfcraft_render::inspect(bytes, None).unwrap().pages[0].rotation
 }
 
+/// An in-place `--out` (the output naming the input) is allowed while the file is unchanged, and
+/// the edit lands in the same file (REC-R05). The refusal when it changed in between is a race
+/// against another process, so it is covered by the unit test of `refuse_if_input_changed` in
+/// main.rs, not by racing here.
+#[test]
+fn an_in_place_out_edits_the_same_file_when_it_is_unchanged() {
+    let input = tmp("inplace", "in.pdf");
+    std::fs::write(&input, fixture()).unwrap();
+    let before = std::fs::read(&input).unwrap();
+    let out = Command::new(BIN)
+        .args(["edit", input.to_str().unwrap(), "--out", input.to_str().unwrap(), "--rotate", "1:90"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(first_page_rotation(&input), 90, "the in-place edit landed in the same file");
+    assert_ne!(std::fs::read(&input).unwrap(), before, "the file was replaced, not kept");
+    // And a different --out still works alongside the input.
+    let other = tmp("inplace", "other.pdf");
+    let out = Command::new(BIN)
+        .args(["edit", input.to_str().unwrap(), "--out", other.to_str().unwrap(), "--rotate", "1:180"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(first_page_rotation(&other), 180);
+}
+
 #[test]
 fn a_misspelled_option_fails_and_writes_nothing() {
     let input = tmp("typo", "in.pdf");

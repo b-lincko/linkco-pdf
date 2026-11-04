@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B042"
+active_component = "B043"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -15,7 +15,7 @@ steps = ["scope", "implement", "audit", "fix", "reaudit", "test", "push", "verif
 
 [task_status.REC-R05]
 status = "in_progress"
-notes = "B010 holds back an in-place save when the file's bytes differ from what the app loaded or last wrote, offering Save As, Cancel or Overwrite; B012 polls the open files and reports a rewritten, renamed or deleted one once per new situation; B023 states what the other version holds and adds the comparison, so all three choices the recommendation names are in the prompt. B032 closed the command-line half: every file `pdfcraft-cli` writes now goes through one atomic writer (`pdfcraft_platform::staging::replace_file`), so a denied permission, a full volume or a killed process leaves the file that was there untouched instead of a truncated one. R05 remains open for the web build, which has no local path to watch, and for the identity-based rename notice, which needs Unix metadata."
+notes = "B010 holds back an in-place save when the file's bytes differ from what the app loaded or last wrote, offering Save As, Cancel or Overwrite; B012 polls the open files and reports a rewritten, renamed or deleted one once per new situation; B023 states what the other version holds and adds the comparison, so all three choices the recommendation names are in the prompt. B032 closed the command-line half: every file `pdfcraft-cli` writes now goes through one atomic writer (`pdfcraft_platform::staging::replace_file`), so a denied permission, a full volume or a killed process leaves the file that was there untouched instead of a truncated one. B043 closed the command-line half: an in-place --out now refuses (exit 5) when the file changed on disk since it was read. R05 remains open for the web build, which has no local path to watch, and for the identity-based rename notice outside Unix (Windows file ids), which the app does not otherwise use."
 
 [task_status.REC-B01]
 status = "complete"
@@ -987,3 +987,19 @@ ci_notes = "Two rounds. 4d3519d was red only on the Clippy step of the CI run (4
 ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/41830371913", "https://github.com/b-lincko/linkco-pdf/actions/runs/41830371951", "https://github.com/b-lincko/linkco-pdf/actions/runs/41830371848", "https://github.com/b-lincko/linkco-pdf/actions/runs/41830371824", "https://github.com/b-lincko/linkco-pdf/actions/runs/41830371803"]
 implementation_commit = "4d3519db9f6ff1cefa7918d01c4142b641302f69"
 verification_commit = "e3a3144d58f0724432ba7f63daf84da1400faf30"
+
+[components.B043]
+title = "The command line refuses an in-place save of a file that changed since it was read (REC-R05)"
+stage = "basic"
+parent_tasks = ["REC-R05"]
+status = "in_progress"
+code = ["apps/pdfcraft-cli/src/main.rs", "apps/pdfcraft-cli/tests/edit.rs"]
+acceptance = "`pdfcraft-cli edit <in.pdf> --out <in.pdf>` (and `combine`/`extract` whose --out names one of the inputs) records the input's stamp (length and modification time) when the file is read, and before writing refuses with exit 5 (refused, kind \"refused\") and changes nothing when the file changed on disk in between; a --out naming a different file is written as asked, and an unchanged in-place file is written as asked. --help names the rule. Tests: a unit test of the check (changed input refused with kind refused, different --out allowed, unchanged input allowed, missing stamp refused) and an integration test that an in-place edit lands in the same file when it is unchanged and that a different --out still works."
+audit = "REC-R05's open command-line half (named in B023's notes): B032 made every pdfcraft-cli output atomic, but `edit --out` still replaced whatever was at the output path without checking whether the file it had read was still the one on disk — so a script running unattended could clobber another program's write, the thing B010's app-side prompt exists to stop. The audit: edit/combine/extract read their inputs and then call save_output on --out with no comparison in between; the app's conflict module (Stamp, changed) lives in ui-egui and is not available to the CLI, so the CLI gets its own small stamp (length + mtime, the same cheap check the app's poll uses first). Decisions. (1) The check applies only when --out is the same file as an input (same_file compares canonical paths): replacing a different existing file is the caller's explicit choice, and only the file that was read can be stale. (2) The refusal is exit 5 (refused) with a message that says nothing was replaced and to re-read or write elsewhere — the command line has no prompt, so refusing and changing nothing is the only safe answer, matching B010's rule that a changed file is never silently overwritten. (3) split is not covered: its outputs are named {stem}-pN.pdf in --out-dir and can never name the input. (4) The stamp is taken immediately before the read, and compared immediately before the write, so the window is the edit itself. Not claimed: byte-level comparison of the input (the app's conflict path reads up to 32 MiB to compare contents; the CLI compares the cheap stamp only — a rewrite that keeps length and mtime is not detected here), file locking, or the web build."
+notes = "Bounded part of REC-R05 (external-file change and save-conflict detection), which stays open for the web build (no local path to watch) and non-Unix rename identity. This closes the command-line half B023 named: an in-place --out can no longer replace a file another program wrote after the CLI read it — it refuses with exit 5 and changes nothing. The atomic writer from B032 already guaranteed no half-written file; this adds the changed-since-read check on top."
+local_evidence = [
+    "apps/pdfcraft-cli/src/main.rs (unit test) an_in_place_out_refuses_when_the_input_changed_since_it_was_read: a changed input is refused with kind refused, a different --out and an unchanged input are allowed, a missing stamp is refused",
+    "apps/pdfcraft-cli/tests/edit.rs::an_in_place_out_edits_the_same_file_when_it_is_unchanged: edit <in> --out <in> --rotate 1:90 exits 0 and the rotation lands in the same file; a different --out still works",
+    "python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes",
+]
+verification_limit = "The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes — the InputStamp/refuse_if_input_changed helpers, the wiring into edit/combine/extract, the unit test and the integration test — were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. The refusal branch is unit-tested (it is a race against another process, so it cannot be exercised deterministically end-to-end); the happy paths are integration-tested. Not claimed: content-level comparison of the changed input, file locking, split's outputs, or the web build."
