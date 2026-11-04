@@ -430,10 +430,11 @@ fn refuse_if_input_changed(input: &Path, at_read: Option<InputStamp>, out: &Path
         return Ok(());
     }
     if stamp_of(input) != at_read {
-        return Err(refused(format!(
+        let message = format!(
             "{}: changed on disk since it was read (another program wrote it); nothing was replaced — read it again, or write elsewhere with --out",
             input.display()
-        )));
+        );
+        return Err(refused(message));
     }
     Ok(())
 }
