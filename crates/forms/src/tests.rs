@@ -1677,3 +1677,96 @@ fn whitespace_only_text_is_kept_in_a_field_without_a_format() {
     set_value(&mut doc, "name", &FieldValue::Text(String::new())).unwrap();
     assert!(field(&fields(&reopen(&doc)), "name").value.is_empty());
 }
+
+/// The gap this closes: a producer wrote `/V` without an appearance, so the value cannot be seen.
+/// Regenerating draws it; a second run finds everything current and changes nothing.
+#[test]
+fn a_value_without_an_appearance_becomes_visible_and_then_stays_put() {
+    let mut doc = fixture();
+    let before = fields(&doc);
+    let name = field(&before, "name");
+    assert!(doc.get(name.widgets[0].obj).as_dict().unwrap().get(b"AP").is_none(), "the fixture's field has no appearance");
+    // Readable as a value, invisible on the page: that is the bug.
+    assert_eq!(name.value, ["Ada"]);
+
+    let plan = regenerate(&mut doc, None).unwrap();
+    let missing: Vec<&str> = plan.widgets.iter().filter(|(_, a)| *a == Appearances::Missing).map(|(n, _)| n.as_str()).collect();
+    assert!(missing.contains(&"name"), "the field with no appearance is reported missing: {missing:?}");
+    assert!(plan.drawn() > 0);
+
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let name = field(&all, "name");
+    let drawn = ap(&doc, &name.widgets[0]);
+    assert!(drawn.contains("Ada"), "the value is drawn into the appearance now: {drawn}");
+    // The /MK background the fixture gives this field ([1 1 0.9]) is drawn behind the text.
+    assert!(drawn.contains("1 1 0.9 rg"), "the /MK background colour is drawn: {drawn}");
+
+    // Second run: everything already right, nothing redrawn, and the file does not change.
+    let mut doc = fixture();
+    regenerate(&mut doc, None).unwrap();
+    let bytes_after_first = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let plan = regenerate(&mut doc, None).unwrap();
+    assert_eq!(plan.drawn(), 0, "a second run draws nothing: {:?}", plan.widgets);
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), bytes_after_first, "a second run changes no bytes");
+}
+
+/// A stale appearance — one made for an older value — is redrawn; one that already matches is not.
+#[test]
+fn a_stale_appearance_is_redrawn_and_a_current_one_is_left_alone() {
+    let mut doc = fixture();
+    // Give "city" a value and an appearance that draws it...
+    let city = field(&fields(&doc), "city").clone();
+    doc.update_dict(city.obj, |d| d.set(b"V".to_vec(), pdfcraft_cos::PdfString::text("Doha"))).unwrap();
+    regenerate(&mut doc, Some(&["city".to_string()])).unwrap();
+    let shown = reopen(&doc);
+    assert!(ap(&shown, &field(&fields(&shown), "city").widgets[0]).contains("Doha"), "the first appearance draws the old value");
+    let mut doc = shown;
+    // ...then move the value under the appearance's back, as a producer that writes /V only does.
+    let city = field(&fields(&doc), "city").obj;
+    doc.update_dict(city, |d| d.set(b"V".to_vec(), pdfcraft_cos::PdfString::text("Kharkiv"))).unwrap();
+    let plan = regenerate(&mut doc, None).unwrap();
+    let stale: Vec<&str> = plan.widgets.iter().filter(|(_, a)| *a == Appearances::Stale).map(|(n, _)| n.as_str()).collect();
+    assert_eq!(stale, ["city"], "the field whose value moved under its appearance is reported stale: {:?}", plan.widgets);
+    let doc = reopen(&doc);
+    let city = field(&fields(&doc), "city");
+    let redrawn = ap(&doc, &city.widgets[0]);
+    assert!(redrawn.contains("Kharkiv"), "the appearance shows the new value: {redrawn}");
+    // Nothing else was stale: the rest is either already right or not drawn from a value.
+    assert_eq!(plan.widgets.iter().filter(|(_, a)| *a == Appearances::Stale).count(), 1, "{:?}", plan.widgets);
+    assert!(plan.widgets.iter().filter(|(_, a)| **a != Appearances::Unsupported).all(|(n, a)| n == "city" || *a == Appearances::Current));
+}
+
+/// A button's icon and a signature's mark are not drawn from a value: reported, not invented.
+#[test]
+fn buttons_and_signatures_are_reported_as_unsupported_and_left_alone() {
+    let mut doc = fixture();
+    let plan = regenerate(&mut doc, None).unwrap();
+    let unsupported: Vec<&str> = plan.widgets.iter().filter(|(_, a)| *a == Appearances::Unsupported).map(|(n, _)| n.as_str()).collect();
+    assert!(unsupported.contains(&"go"), "the push button is unsupported: {unsupported:?}");
+    assert!(!unsupported.contains(&"name"), "a text field is not");
+    let doc = reopen(&doc);
+    let go = field(&fields(&doc), "go");
+    assert!(doc.get(go.widgets[0].obj).as_dict().unwrap().get(b"AP").is_none(), "the button keeps having no appearance");
+}
+
+/// Limiting the work by name, and refusing a name that is not a field.
+#[test]
+fn regenerate_can_be_limited_to_named_fields_and_refuses_unknown_ones() {
+    let mut doc = fixture();
+    let plan = regenerate(&mut doc, Some(&["name".to_string()])).unwrap();
+    assert!(plan.widgets.iter().all(|(n, _)| n == "name"), "only the named field was looked at: {:?}", plan.widgets);
+    assert_eq!(plan.drawn(), 1);
+    // The unnamed fields still have no appearance: the limit was real.
+    let other = field(&fields(&doc), "notes");
+    assert!(doc.get(other.widgets[0].obj).as_dict().unwrap().get(b"AP").is_none());
+
+    assert!(matches!(regenerate(&mut doc, Some(&["nope".to_string()])), Err(FormError::NoSuchField(n)) if n == "nope"));
+}
+
+/// A document with no form has nothing to regenerate, and says so rather than doing nothing.
+#[test]
+fn a_document_without_a_form_is_refused() {
+    let mut doc = one_page();
+    assert!(matches!(regenerate(&mut doc, None), Err(FormError::NoForm)));
+}

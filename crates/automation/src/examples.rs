@@ -122,6 +122,7 @@ pub fn why_not(tool: &str) -> Option<&'static str> {
         | "form_fill"
         | "form_reset"
         | "form_set_props"
+        | "form_regenerate_appearances"
         | "form_delete_field"
         | "form_tab_order"
         | "form_set_actions"

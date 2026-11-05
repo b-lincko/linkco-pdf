@@ -101,6 +101,7 @@ pub use pdfcraft_annot::{
     Shape, StampGroup, StampKind, Style, rect_quad,
 };
 pub use pdfcraft_forms::detect;
+pub use pdfcraft_forms::{Appearances, Regenerated as RegeneratedAppearances, regenerate as regenerate_appearances};
 pub use pdfcraft_optimize as optimize;
 pub use pdfcraft_preflight as pdfa;
 pub use pdfcraft_print as print;
@@ -187,7 +188,11 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::StyleAnnotation { .. }
         | Edit::FillAnnotation { .. }
         | Edit::SetAnnotationInfo { .. } => Scope::Comments,
-        Edit::SetFieldValue { .. } | Edit::ResetForm { .. } | Edit::SetFieldImage { .. } | Edit::ApplyScriptChanges { .. } => Scope::Form,
+        Edit::SetFieldValue { .. }
+        | Edit::ResetForm { .. }
+        | Edit::RegenerateFieldAppearances { .. }
+        | Edit::SetFieldImage { .. }
+        | Edit::ApplyScriptChanges { .. } => Scope::Form,
         Edit::Batch { edits, .. } => {
             let mut scopes = edits.iter().map(scope_of);
             let first = scopes.next().unwrap_or(Scope::Full);
@@ -1000,6 +1005,11 @@ pub enum Edit {
     ResetForm {
         names: Option<Vec<String>>,
     },
+    /// Redraw the normal appearances of the named fields (all when `None`) whose `/AP` is missing
+    /// or no longer matches the field's value, font and colours.
+    RegenerateFieldAppearances {
+        names: Option<Vec<String>>,
+    },
     /// Prepare a form: add a field on a page (`rect` in PDF user space); `name` defaults to
     /// Acrobat's next free name ("Text1", "Check Box2", …).
     AddField {
@@ -1274,6 +1284,7 @@ impl Edit {
             Edit::ResetForm { .. } => "Clear form".into(),
             Edit::AddField { .. } => "Add field".into(),
             Edit::SetFieldProps { .. } => "Change field properties".into(),
+            Edit::RegenerateFieldAppearances { .. } => "Regenerate field appearances".into(),
             Edit::DeleteField { .. } => "Delete field".into(),
             Edit::DuplicateField { .. } => "Duplicate field".into(),
             Edit::SetTabOrder { .. } | Edit::MoveInTabOrder { .. } => "Set tab order".into(),
@@ -1455,6 +1466,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::AddLinks { .. }
         | Edit::Sanitize
         | Edit::SetFieldProps { .. }
+        | Edit::RegenerateFieldAppearances { .. }
         | Edit::DeleteField { .. }
         | Edit::DuplicateField { .. }
         | Edit::SetTabOrder { .. }
@@ -1684,6 +1696,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::ResetForm { names } => {
             pdfcraft_forms::reset(doc, names.as_deref())?;
+        }
+        Edit::RegenerateFieldAppearances { names } => {
+            pdfcraft_forms::regenerate(doc, names.as_deref())?;
         }
         Edit::AddField { page, rect, kind, name } => {
             pdfcraft_forms::add_field(doc, *page, *rect, kind, name.as_deref())?;
@@ -2747,6 +2762,28 @@ impl Session {
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
         doc.bytes = bytes;
         Ok(())
+    }
+
+    /// What regenerating the given fields' appearances would find, without changing anything:
+    /// which widgets have no appearance, which have one that no longer matches the field's value,
+    /// which are already right, and which cannot be drawn from a value (a button's icon, a
+    /// signature's mark). Runs on a copy of the editor's current state, so the document, its undo
+    /// history and its dirty flag are untouched.
+    pub fn preview_field_appearances(&self, id: DocId, names: Option<&[String]>) -> Result<RegeneratedAppearances, EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        // The editor's state, not the file on disk: unsaved edits are part of what would be drawn.
+        match doc.editor.as_ref() {
+            Some(editor) => {
+                let mut cos = editor.cos.clone();
+                guard(|| pdfcraft_forms::regenerate(&mut cos, names)).map_err(EditError::Write)?.map_err(EditError::Form)
+            }
+            None => {
+                let mut cos = guard(|| pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()))
+                    .map_err(EditError::Write)?
+                    .map_err(|e| EditError::Write(e.to_string()))?;
+                guard(|| pdfcraft_forms::regenerate(&mut cos, names)).map_err(EditError::Write)?.map_err(EditError::Form)
+            }
+        }
     }
 
     /// The bytes to write for Save: an incremental update of the file as opened/last saved,

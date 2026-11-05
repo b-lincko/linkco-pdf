@@ -16,6 +16,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 import tempfile
+import tomllib
 import unittest
 
 import build_capabilities as caps
@@ -104,7 +105,10 @@ class DriftTest(unittest.TestCase):
             out = fix.build()
             self.assertNotEqual(out, fix.committed)
             self.assertIn('"zzz_probe"', out)
-            self.assertIn("tool_count = 128", out)
+            # One more tool than the committed manifest reports, whatever that number is today:
+            # the check is that a new tool reaches the count, not a frozen total.
+            before = tomllib.loads(fix.committed)["automation"]["tool_count"]
+            self.assertIn(f"tool_count = {before + 1}", out)
 
     def test_a_schema_version_change_is_caught(self) -> None:
         with Fixture() as fix:

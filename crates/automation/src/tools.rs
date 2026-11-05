@@ -344,6 +344,8 @@ pub fn tools() -> Vec<ToolDef> {
         t("form_reset", "Clear form", "Reset fields to their default values: all of them, or only those listed. Undoable.")
             .destructive()
             .with(schema(json!({ "doc": doc(), "fields": { "type": "array", "items": { "type": "string" } } }), &["doc"])),
+        t("form_regenerate_appearances", "Regenerate field appearances", "Redraw form fields from their values, font, size, colour, quadding and /MK colours and rotation, as filling a field does: for a form whose fields show nothing (a value set without an appearance) or show an old value, font or colour. Only fields whose appearance is missing or no longer matches are redrawn, so a second run changes nothing; push buttons (icons) and signature fields (marks) are reported as unsupported and left alone. Give fields to limit it to those names. Undoable.")
+            .with(schema(json!({ "doc": doc(), "fields": { "type": "array", "items": { "type": "string" } } }), &["doc"])),
         t(
             "form_add_field",
             "Prepare form: add a field",

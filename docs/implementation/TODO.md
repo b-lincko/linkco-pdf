@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B046 · **Active stage:** basic
+**Active component:** B047 · **Active stage:** basic
 
-## Basic (377 records)
+## Basic (378 records)
 
-complete: 49, in_progress: 6, pending: 322
+complete: 49, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -64,6 +64,7 @@ complete: 49, in_progress: 6, pending: 322
 | B044 | [x] Resumable batches: --resume skips the files an earlier run already wrote (REC-B04) | P0 | complete | REC-B04 |
 | B045 | [x] The run pin can come from the environment: PDFCRAFT_SCHEMA_VERSION (REC-B02) | P0 | complete | REC-B02 |
 | B046 | [x] A save survives a power loss: the folder holding the new name is flushed after the rename (REC-R01) | P0 | complete | REC-R01 |
+| B047 | [ ] Regenerate field appearances: a value without an appearance becomes visible (REC-F01) | P0 | in_progress | REC-F01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1642,3 +1643,10 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42004673331
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42004673395
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42004673425
+
+### B047: Regenerate field appearances: a value without an appearance becomes visible (REC-F01)
+
+- Status: **in_progress**; parent(s): REC-F01.
+- Acceptance: The tool `form_regenerate_appearances` (and the engine call under it, `pdfcraft_forms::regenerate`) redraws the normal appearance of every widget whose `/AP` is missing or no longer matches what the field would draw now, from the field's value, `/DA` font/size/colour, quadding, `/MK` background and border colours, and `/MK /R` rotation — the same drawing a fill makes, using the existing `field_appearance`. Only a widget that is missing an appearance or whose stored appearance differs from what would be drawn is redrawn, so a second run draws nothing and changes no bytes; an appearance that already matches is kept untouched. Push buttons (icons) and signature fields (marks) are reported as unsupported and left alone, because their appearance is not the field's value drawn from `/DA`. `fields` limits the work to the named fields (all when absent), and a name that is not a field is refused. The answer says what was found: `drawn` (missing + stale), `missing`, `stale` and `unsupported` lists. The change is one undo step (labelled Regenerate field appearances), adds no bytes when nothing is missing or stale, and is in the tool catalogue with a schema and a stated reason in examples.rs.
+- Audit: REC-F01's open notes: form.appearance-regeneration (partial) and form.push-buttons (partial). The audit of what existed: `pdfcraft_forms::appearance` already draws text and choice fields correctly — single-line, multiline, comb, password, quadding, auto size, combo/list selection, `/MK` background and border, `/MK /R` rotation, and the approximate Helvetica metrics — and `redraw` applies it, but only as a side effect of `set_value`/`reset`/`recalculate`. Nothing could redraw a field that already had its value. So a form produced by another tool that writes `/V` without an `/AP` (permitted by the specification, which says a viewer may regenerate) showed nothing in the value area, and PdfCraft could not fix it either: the value was in `form_fields`, the page showed an empty box, and re-filling with the same value was the only workaround — which fails for a field the caller cannot re-derive. Decisions. (1) The unit of work is the appearance, not the value: the existing drawing is reused verbatim, so the tool cannot drift from what a fill draws. (2) Only missing or stale appearances are redrawn, compared as decoded content streams: a widget whose appearance already matches is left byte-for-byte alone, so running the tool over a correct form is a no-op that does not bloat an incremental save, and an appearance a producer made more carefully than this code can survive. (3) A stored stream that cannot be decoded counts as stale and is redrawn rather than trusted. (4) Buttons and signatures are reported `unsupported` rather than given an invented appearance — a push button's icon comes from `/MK /CA` or an image and a signature's mark from a real signature, neither of which this code draws from a value. (5) The reporting comes from a preview (`Session::preview_field_appearances`) run on a clone of the editor's live state before the edit, so the answer describes unsaved edits too, and the edit itself is the ordinary undoable one. (6) The tool is not destructive: it replaces appearances it has established do not match, and never removes content. Not claimed: form.push-buttons (running a button's actions on click) is still open, and this does not regenerate `/D` or `/R` appearances, appearance streams a producer made with a font this code cannot measure, or XFA-drawn fields.
+- Notes: Closes REC-F01's appearance-regeneration note: a field whose value has no appearance, or whose appearance shows an older value, font or colour, can now be made to show what it holds, and the operation reports exactly which fields were in that state. Still open in REC-F01: push buttons running their actions, and the required-field validation and completion guide the recommendation also names. The combination is not a form-validation model.
