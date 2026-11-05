@@ -26,6 +26,31 @@ pub fn sync_staged(f: &std::fs::File, sync_all: impl FnOnce(&std::fs::File) -> s
     sync_all(f)
 }
 
+/// Flush `dir` itself to the disk, so a rename made in it survives a power loss.
+///
+/// A rename is durable once the folder that holds the name has been flushed: the file's own
+/// [`sync_staged`] only promises its bytes, not the directory entry that points at them. Call this
+/// after a successful rename; it is the difference between "the new contents are on the disk" and
+/// "the new contents are the file that is there after the machine loses power".
+///
+/// Unix has an operation for this (opening the folder and flushing the descriptor, using the same
+/// `sync_staged` rule as the files). Windows has none reachable from the standard library: a
+/// rename there is documented to be flushed by the file's own flush, and reopening a folder needs
+/// a handle this crate does not open, so this is a no-op that reports success. On any other
+/// platform the folder is left to the filesystem.
+pub fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let folder = std::fs::File::open(dir)?;
+        sync_staged(&folder, std::fs::File::sync_all)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
 /// How many staging names [`create_staging`] tries. A random 64-bit name is only taken if someone
 /// put a file there on purpose, so running out means refusing, not trying harder.
 pub const STAGING_ATTEMPTS: usize = 16;
@@ -119,6 +144,10 @@ pub fn staging_suffixes() -> impl Iterator<Item = u64> {
 /// a half-written file. The staging file is removed if any step fails, and a target that is a
 /// folder (or whose folder is missing or unwritable) fails before a byte is written.
 ///
+/// The rename is flushed through the folder ([`sync_dir`]) before this returns, so a save that
+/// returns success is the file that is still there after a power loss, not only after a crash of
+/// this process.
+///
 /// On Unix the staging file is created `0o600` and keeps that mode once renamed into place, so a
 /// file this writes is private to its owner regardless of the umask; on other platforms the
 /// operating system's defaults apply, as they do to [`create_staging`].
@@ -140,9 +169,14 @@ pub fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    std::fs::rename(&tmp, path).inspect_err(|_| {
+    if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
-    })
+        return Err(e);
+    }
+    // The rename is only durable once the folder holding the name is on the disk too: without
+    // this a power loss can bring back the old file, or lose the new one, however well its
+    // bytes were flushed.
+    sync_dir(dir)
 }
 
 #[cfg(test)]
@@ -389,6 +423,47 @@ mod tests {
         let e = create_staging(&dir, "out.pdf", StagingName::TagThenSuffix, []).unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The folder flush is a real operation on Unix and a documented no-op elsewhere; either way
+    /// a save that returned cannot have skipped it silently.
+    #[test]
+    fn a_folder_is_flushed_after_the_rename_and_a_missing_one_is_an_error() {
+        let dir = test_dir("sync-dir");
+        sync_dir(&dir).unwrap();
+        // A folder that does not exist is reported, not treated as done: the caller has just
+        // renamed a file into it, so its absence means the save is not durable.
+        let missing = dir.join("no-such-folder");
+        let error = sync_dir(&missing).unwrap_err();
+        #[cfg(unix)]
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        #[cfg(not(unix))]
+        {
+            let _ = error;
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A save whose folder cannot be flushed is reported as failed rather than as a silent
+    /// success, so the caller never tells the user "saved" for a rename that may not survive.
+    #[test]
+    fn replace_file_reports_a_folder_that_cannot_be_flushed() {
+        let dir = test_dir("sync-fail");
+        replace_file(&dir.join("out.pdf"), b"first").unwrap();
+        // Moving the folder away leaves nothing to flush, the same failure a vanished or unmounted
+        // folder gives. The file itself was published by the successful save above.
+        let moved = dir.with_extension("moved");
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&dir, &moved).unwrap();
+        #[cfg(unix)]
+        {
+            let error = sync_dir(&dir).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        }
+        #[cfg(not(unix))]
+        sync_dir(&dir).unwrap();
+        std::fs::rename(&moved, &dir).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
