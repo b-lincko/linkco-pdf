@@ -8,7 +8,19 @@ use serde_json::Value;
 const BIN: &str = env!("CARGO_BIN_EXE_pdfcraft-cli");
 
 fn run(args: &[&str]) -> Output {
-    Command::new(BIN).args(args).output().unwrap()
+    let mut cmd = Command::new(BIN);
+    cmd.args(args).env_remove("PDFCRAFT_SCHEMA_VERSION");
+    cmd.output().unwrap()
+}
+
+/// `run` with environment variables set — for the PDFCRAFT_SCHEMA_VERSION default pin.
+fn run_with_env(env: &[(&str, &str)], args: &[&str]) -> Output {
+    let mut cmd = Command::new(BIN);
+    cmd.args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.output().unwrap()
 }
 
 /// The parsed stdout of a command that worked, and a check that it worked.
@@ -201,4 +213,43 @@ fn the_help_names_the_run_pin() {
     assert!(help.contains("pdfcraft-cli run"), "{help}");
     assert!(help.contains("--schema-version"), "{help}");
     assert!(help.contains("schema_version"), "the per-step pin is named too: {help}");
+    assert!(help.contains("PDFCRAFT_SCHEMA_VERSION"), "the environmental pin is named too: {help}");
+}
+
+/// The default pin for `run` can come from the caller's environment instead of the flag
+/// (REC-B02): a deployment sets PDFCRAFT_SCHEMA_VERSION once, and an explicit
+/// --schema-version still wins. The same answers as the flag: compatible runs, a different
+/// major is exit 3 before anything runs, a non-version is exit 2.
+#[test]
+fn the_environment_can_pin_the_version_for_run() {
+    let version = pdfcraft_automation::TOOL_SCHEMA_VERSION;
+    let (major, _) = pdfcraft_automation::schema::parse_version(version).unwrap();
+    let other = format!("{}.0", major + 1);
+
+    // The pin comes from the environment when the flag is absent.
+    let out = run_with_env(&[("PDFCRAFT_SCHEMA_VERSION", version)], &["run", "policy_status"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(doc.get("profile").is_some(), "the tool ran: {doc}");
+
+    // A mismatched environmental pin refuses before anything runs — the tool would answer with
+    // its own error (not 3) if it were reached at all.
+    let out = run_with_env(&[("PDFCRAFT_SCHEMA_VERSION", &other)], &["run", "doc_open", "path=/nonexistent/no-such-file.pdf"]);
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stdout.is_empty(), "a refused call prints no result");
+
+    // An explicit flag wins over the environment, in both directions.
+    let out = run_with_env(&[("PDFCRAFT_SCHEMA_VERSION", &other)], &["run", "policy_status", "--schema-version", version]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = run_with_env(&[("PDFCRAFT_SCHEMA_VERSION", version)], &["run", "policy_status", "--schema-version", &other]);
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // An empty variable is as good as unset.
+    let out = run_with_env(&[("PDFCRAFT_SCHEMA_VERSION", "")], &["run", "policy_status"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // A non-version in the environment is a usage error, like a bad flag.
+    let out = run_with_env(&[("PDFCRAFT_SCHEMA_VERSION", "banana")], &["run", "policy_status"]);
+    assert_eq!(out.status.code(), Some(2), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a version"), "{}", String::from_utf8_lossy(&out.stderr));
 }

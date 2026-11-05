@@ -38,7 +38,11 @@ job — the call is refused before anything runs:
 
 * `pdfcraft-cli run <tool> … --schema-version V` (or `run --script steps.json --schema-version V`)
   checks the whole invocation before the first tool is called: a different major exits **3**
-  (`unsupported`), and a `V` that is not a version exits **2** (`usage`).
+  (`unsupported`), and a `V` that is not a version exits **2** (`usage`). When the flag is
+  absent, the default pin is read from the environment: `PDFCRAFT_SCHEMA_VERSION` set to a
+  version applies to every `run` of that environment (a deployment pins once instead of adding
+  the flag to every call), and an explicit `--schema-version` always wins over it; an empty
+  `PDFCRAFT_SCHEMA_VERSION` is treated as unset.
 * Inside a `--script`, one step may pin its own revision — `{"tool": …, "args": …,
   "schema_version": "V"}` — and it is answered before that step runs, through the same rule: a
   different major exits **3** (`unsupported`) without running that step or any later one (steps

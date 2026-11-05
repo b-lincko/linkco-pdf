@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B044"
+active_component = "B045"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -30,7 +30,7 @@ evidence = [
 
 [task_status.REC-B02]
 status = "in_progress"
-notes = "B015 gave the command line its stable exit codes and one-line JSON failures; B028 gives the tool interface a version and a kind. `pdfcraft-cli schema` prints the whole tool table under `schema_version` (major.minor, currently 1.0), `--schema-version V` answers whether this build speaks V and exits 3 when the major differs, and the MCP server reports the same version in `initialize` and `tools/list`. `ToolError::kind()` is the stable kind of every failure (usage, unsupported, refused, failed) and the MCP server returns it as `structuredContent.error`. B031 types the engine's reason for refusing an open, so a damaged document reaches an agent as `malformed` and a locked, empty or unsupported one as `failed` with its reason — and the command line's `--script` steps now return the documented exit code 4 for it. B040 added the per-call pin on both surfaces (run --schema-version, MCP _meta.schemaVersion) and B042 the per-step pin inside one --script. Still open: the interface does not read the version back from a caller's config file."
+notes = "B015 gave the command line its stable exit codes and one-line JSON failures; B028 gives the tool interface a version and a kind. `pdfcraft-cli schema` prints the whole tool table under `schema_version` (major.minor, currently 1.0), `--schema-version V` answers whether this build speaks V and exits 3 when the major differs, and the MCP server reports the same version in `initialize` and `tools/list`. `ToolError::kind()` is the stable kind of every failure (usage, unsupported, refused, failed) and the MCP server returns it as `structuredContent.error`. B031 types the engine's reason for refusing an open, so a damaged document reaches an agent as `malformed` and a locked, empty or unsupported one as `failed` with its reason — and the command line's `--script` steps now return the documented exit code 4 for it. B040 added the per-call pin on both surfaces (run --schema-version, MCP _meta.schemaVersion) and B042 the per-step pin inside one --script. B045 lets a deployment pin once through the environment: PDFCRAFT_SCHEMA_VERSION is the default pin for run when the flag is absent (the flag still wins). Still open: reading the pin from a literal config file (a structured file the interface parses itself)."
 
 [task_status.REC-B04]
 status = "in_progress"
@@ -1024,3 +1024,19 @@ local_evidence = [
     "python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes",
 ]
 verification_limit = "The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. The OCR resume path (ocr_recognize_files) is wired with the same check but cannot be exercised end-to-end without OCR models; the action path is tested. Not claimed: staleness detection of existing outputs, overlapping-job coordination, or a folder watcher."
+
+[components.B045]
+title = "The run pin can come from the environment: PDFCRAFT_SCHEMA_VERSION (REC-B02)"
+stage = "basic"
+parent_tasks = ["REC-B02"]
+status = "in_progress"
+code = ["apps/pdfcraft-cli/src/main.rs", "apps/pdfcraft-cli/tests/schema.rs", "docs/api-stability.md"]
+acceptance = "When pdfcraft-cli run is invoked without --schema-version, the default pin is read from the PDFCRAFT_SCHEMA_VERSION environment variable: a version there applies to every run in that environment and is answered by the same rule as the flag (same major: the call runs; different major: exit 3 unsupported before anything runs, with nothing printed on stdout; not a version: exit 2 usage). An explicit --schema-version always wins over the environment, in both directions, and an empty PDFCRAFT_SCHEMA_VERSION is treated as unset. The USAGE text for run names the variable, docs/api-stability.md documents it in the per-call section, and apps/pdfcraft-cli/tests/schema.rs covers: the env pin is accepted and the tool runs, an env mismatch exits 3 with nothing run, the flag beats the env both ways, an empty env is ignored, a non-version env exits 2, and --help names the variable."
+audit = "REC-B02's open note: the interface does not read the version back from a caller's configuration, so every call written in a config had to repeat --schema-version. The audit of what existed: the pin was only per call — run --schema-version, MCP params._meta.schemaVersion, and the per-step schema_version inside a --script (B040, B042) — and nothing provided a deployment-level default. Decisions. (1) The deployment-level default is the PDFCRAFT_SCHEMA_VERSION environment variable, read in run where the invocation is answered; an environment is the standard place a deployment configures all its processes, so no file format is invented. (2) Scope is run only: schema keeps its explicit flag (it is itself the version question), and the MCP server keeps the per-call _meta pin, because an MCP client's config cannot reliably inject an env var into the already-running server. (3) An explicit flag always wins over the environment, so a one-off call can override the deployment pin in either direction. (4) An empty variable is treated as unset, so an empty env entry in a config does not break every run. (5) The answer is the same rule as the flag — compatible by major runs, a different major exits 3 before anything runs, a non-version exits 2 — no new semantics. Not claimed: reading the pin from a literal config file, changing the MCP surface, or the schema command."
+notes = "Bounded part of REC-B02 (versioned schemas, stable exit codes and structured errors), which stays open. This closes the note 'the interface does not read the version back from a caller's config file' in the environment sense: a deployment now pins once with PDFCRAFT_SCHEMA_VERSION and every run in that environment is answered against it, with the per-call flag still winning. Still open in REC-B02: a literal structured config file the interface parses itself."
+local_evidence = [
+    "apps/pdfcraft-cli/tests/schema.rs::the_environment_can_pin_the_version_for_run: env pin accepted and the tool runs; env mismatch exits 3 with empty stdout; the flag beats the env in both directions; empty env is ignored; a non-version env exits 2 with 'not a version'",
+    "apps/pdfcraft-cli/tests/schema.rs::the_help_names_the_run_pin: --help names PDFCRAFT_SCHEMA_VERSION",
+    "python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests)",
+]
+verification_limit = "The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. Not claimed: a literal config file, the MCP surface, or the schema command."

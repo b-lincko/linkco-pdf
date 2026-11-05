@@ -71,6 +71,7 @@ pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open
                       [--schema-version V] asks whether this build speaks V before anything runs
                                                            (exit 3 if the major differs, 2 if V is not a version)
                       a step may carry \"schema_version\": \"V\" too, answered before that step runs
+                      PDFCRAFT_SCHEMA_VERSION sets the default pin for run (the flag wins)
                       [--max-workers N] [--max-input-mib N] [--max-output-mib N] [--max-batch N] [--time-limit-ms N]
                                                            limits for this session (0 = no limit); limits_status reports them
 ",
@@ -1063,11 +1064,15 @@ fn run(args: &[String]) -> Result<(), CliError> {
     // Per-call schema negotiation (REC-B02): a caller that pins the revision it was written
     // against is answered before anything runs — one tool or a whole `--script` — so a mismatch
     // is never discovered in the middle of a job. Same major: the call runs; different major:
-    // exit 3 (unsupported); not a version: exit 2 (usage).
-    if let Some(asked) = flag(args, "--schema-version") {
-        match pdfcraft_automation::schema::compatible(asked) {
-            None => return Err(usage(format!("run: {}", pdfcraft_automation::schema::not_a_version_message(asked)))),
-            Some(false) => return Err(unsupported(format!("run: {}", pdfcraft_automation::schema::incompatible_message(asked)))),
+    // exit 3 (unsupported); not a version: exit 2 (usage). The pin may also come from the
+    // caller's environment (PDFCRAFT_SCHEMA_VERSION), so a deployment sets it once instead of
+    // adding the flag to every call; an explicit --schema-version always wins.
+    let env_pin = || std::env::var("PDFCRAFT_SCHEMA_VERSION").ok().filter(|v| !v.is_empty());
+    let asked = flag(args, "--schema-version").map(str::to_string).or_else(env_pin);
+    if let Some(asked) = asked {
+        match pdfcraft_automation::schema::compatible(&asked) {
+            None => return Err(usage(format!("run: {}", pdfcraft_automation::schema::not_a_version_message(&asked)))),
+            Some(false) => return Err(unsupported(format!("run: {}", pdfcraft_automation::schema::incompatible_message(&asked)))),
             Some(true) => {}
         }
     }

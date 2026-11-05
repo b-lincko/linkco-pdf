@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B044 · **Active stage:** basic
+**Active component:** B045 · **Active stage:** basic
 
-## Basic (375 records)
+## Basic (376 records)
 
-complete: 46, in_progress: 7, pending: 322
+complete: 46, in_progress: 8, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -62,6 +62,7 @@ complete: 46, in_progress: 7, pending: 322
 | B042 | [x] Per-step schema-version pin inside run --script (REC-B02) | P0 | complete | REC-B02 |
 | B043 | [x] The command line refuses an in-place save of a file that changed since it was read (REC-R05) | P0 | complete | REC-R05 |
 | B044 | [ ] Resumable batches: --resume skips the files an earlier run already wrote (REC-B04) | P0 | in_progress | REC-B04 |
+| B045 | [ ] The run pin can come from the environment: PDFCRAFT_SCHEMA_VERSION (REC-B02) | P0 | in_progress | REC-B02 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1606,3 +1607,14 @@ pending: 65, scope_review: 23
 - Local evidence: crates/automation/tests/resume.rs::a_resumed_run_skips_the_files_an_earlier_run_already_wrote: with resume, the pre-existing out/b.pdf is reported resumed and its bytes are untouched while a and c are written under their own names and no `b (2).pdf` appears; without resume, b is redone under `b (2).pdf` and out/b.pdf is still not replaced.
 - Local evidence: crates/automation/tests/resume.rs::a_plan_made_with_resume_marks_the_finished_files_and_carries_the_flag: only the finished target carries resumed, the approve call carries resume, a plan without resume carries neither, and a token from the resume plan runs the resume call.
 - Local evidence: python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes.
+
+### B045: The run pin can come from the environment: PDFCRAFT_SCHEMA_VERSION (REC-B02)
+
+- Status: **in_progress**; parent(s): REC-B02.
+- Acceptance: When pdfcraft-cli run is invoked without --schema-version, the default pin is read from the PDFCRAFT_SCHEMA_VERSION environment variable: a version there applies to every run in that environment and is answered by the same rule as the flag (same major: the call runs; different major: exit 3 unsupported before anything runs, with nothing printed on stdout; not a version: exit 2 usage). An explicit --schema-version always wins over the environment, in both directions, and an empty PDFCRAFT_SCHEMA_VERSION is treated as unset. The USAGE text for run names the variable, docs/api-stability.md documents it in the per-call section, and apps/pdfcraft-cli/tests/schema.rs covers: the env pin is accepted and the tool runs, an env mismatch exits 3 with nothing run, the flag beats the env both ways, an empty env is ignored, a non-version env exits 2, and --help names the variable.
+- Audit: REC-B02's open note: the interface does not read the version back from a caller's configuration, so every call written in a config had to repeat --schema-version. The audit of what existed: the pin was only per call — run --schema-version, MCP params._meta.schemaVersion, and the per-step schema_version inside a --script (B040, B042) — and nothing provided a deployment-level default. Decisions. (1) The deployment-level default is the PDFCRAFT_SCHEMA_VERSION environment variable, read in run where the invocation is answered; an environment is the standard place a deployment configures all its processes, so no file format is invented. (2) Scope is run only: schema keeps its explicit flag (it is itself the version question), and the MCP server keeps the per-call _meta pin, because an MCP client's config cannot reliably inject an env var into the already-running server. (3) An explicit flag always wins over the environment, so a one-off call can override the deployment pin in either direction. (4) An empty variable is treated as unset, so an empty env entry in a config does not break every run. (5) The answer is the same rule as the flag — compatible by major runs, a different major exits 3 before anything runs, a non-version exits 2 — no new semantics. Not claimed: reading the pin from a literal config file, changing the MCP surface, or the schema command.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. Not claimed: a literal config file, the MCP surface, or the schema command.
+- Notes: Bounded part of REC-B02 (versioned schemas, stable exit codes and structured errors), which stays open. This closes the note 'the interface does not read the version back from a caller's config file' in the environment sense: a deployment now pins once with PDFCRAFT_SCHEMA_VERSION and every run in that environment is answered against it, with the per-call flag still winning. Still open in REC-B02: a literal structured config file the interface parses itself.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_environment_can_pin_the_version_for_run: env pin accepted and the tool runs; env mismatch exits 3 with empty stdout; the flag beats the env in both directions; empty env is ignored; a non-version env exits 2 with 'not a version'.
+- Local evidence: apps/pdfcraft-cli/tests/schema.rs::the_help_names_the_run_pin: --help names PDFCRAFT_SCHEMA_VERSION.
+- Local evidence: python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
