@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B043 · **Active stage:** basic
+**Active component:** B044 · **Active stage:** basic
 
-## Basic (374 records)
+## Basic (375 records)
 
-complete: 46, in_progress: 6, pending: 322
+complete: 46, in_progress: 7, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -61,6 +61,7 @@ complete: 46, in_progress: 6, pending: 322
 | B041 | [x] Enforce the session time limit inside a single item (REC-B07) | P0 | complete | REC-B07 |
 | B042 | [x] Per-step schema-version pin inside run --script (REC-B02) | P0 | complete | REC-B02 |
 | B043 | [x] The command line refuses an in-place save of a file that changed since it was read (REC-R05) | P0 | complete | REC-R05 |
+| B044 | [ ] Resumable batches: --resume skips the files an earlier run already wrote (REC-B04) | P0 | in_progress | REC-B04 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1594,3 +1595,14 @@ pending: 65, scope_review: 23
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41845593295
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41845593373
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/41845593930
+
+### B044: Resumable batches: --resume skips the files an earlier run already wrote (REC-B04)
+
+- Status: **in_progress**; parent(s): REC-B04.
+- Acceptance: action_run, ocr_recognize_files and batch_plan take an optional boolean resume. In a run with resume, an input whose result is already in the output folder under its own file name (crate::child(folder, batch_input_name)) is reported per file as {"path": …, "resumed": "the output is already there from an earlier run"} and skipped — not read, not written, not counted against the time limit — while the rest of the batch is done normally; without resume nothing changes (an action run still writes a taken name under the stepped-aside `name (2).pdf`, never replacing what is there). In batch_plan with resume, such targets carry resumed: true with a note, and the approve call carries resume: true so following the plan resumes; the approval token still names the same batch (resume is not hashed into it). The resume property is in the three tools' schemas and their descriptions. Tests (crates/automation/tests/resume.rs): a resumed run skips the pre-existing output and leaves its bytes untouched while doing the rest, and invents no stepped-aside name; a plain run still redoes the file under `b (2).pdf`; a resume plan marks only the finished targets and carries the flag; an approval token from the resume plan runs the resume call.
+- Audit: REC-B04's open note: a batch over a folder is not resumable after a crash. The audit of what existed: action_output steps past a name taken on disk, so a re-run after a crash wrote the finished files again under `name (2).pdf` and left the originals — the batch could never continue where it stopped; ocr_recognize_files' child(folder, name) is the plain own name, so a re-run would have replaced the finished copies. Decisions. (1) The resume signal is the input's own name in the output folder (child(folder, batch_input_name(path))), for both writers — the name the first run would have written under, before any stepping. (2) A resumed item is reported and skipped before it is read, so it costs no input quota and no time-limit budget. (3) The approval token is unchanged (it hashes kind, folder, settings and path/output/replaces/error, not the resume flag): resume only skips items the plan already named, so a token from either plan still names the same batch, and batch_plan with resume marks the finished targets and puts resume: true in the approve call so following the plan resumes. (4) The check is a folder existence test, not a content comparison: a result file that exists is treated as done — anything else would need a digest of the run, which the plan token already provides for the approval half. (5) Schemas gain the optional resume property on the three tools (additive within the major, no version bump). Not claimed: resuming an OCR batch is wired identically to the action batch but not exercised end-to-end (no OCR models in the test environment), detecting that an existing output is stale or corrupt, coordinating two runs started at the same time, or a folder watcher.
+- Verification Limit: The workspace cannot be built in this checkout (rten 0.26 needs rustc 1.94, the local toolchain is 1.88, and no crate registry is reachable), so the Rust changes were not compiled here and are verified by CI, not locally. The Python gates ran locally and pass. The OCR resume path (ocr_recognize_files) is wired with the same check but cannot be exercised end-to-end without OCR models; the action path is tested. Not claimed: staleness detection of existing outputs, overlapping-job coordination, or a folder watcher.
+- Notes: Bounded part of REC-B04 (folders, exclusions and deduplication in batches), which stays open. This closes the note 'a batch over a folder is not resumable after a crash': re-running a batch with resume continues where the earlier run stopped — finished files are reported as resumed and left byte-for-byte alone, the rest are done. Still open in REC-B04: a folder watcher (the app's job) and coordination of overlapping jobs started at the same time.
+- Local evidence: crates/automation/tests/resume.rs::a_resumed_run_skips_the_files_an_earlier_run_already_wrote: with resume, the pre-existing out/b.pdf is reported resumed and its bytes are untouched while a and c are written under their own names and no `b (2).pdf` appears; without resume, b is redone under `b (2).pdf` and out/b.pdf is still not replaced.
+- Local evidence: crates/automation/tests/resume.rs::a_plan_made_with_resume_marks_the_finished_files_and_carries_the_flag: only the finished target carries resumed, the approve call carries resume, a plan without resume carries neither, and a token from the resume plan runs the resume call.
+- Local evidence: python3 docs/implementation/build_backlog.py --check, build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes.

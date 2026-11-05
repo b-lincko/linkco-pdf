@@ -928,7 +928,7 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("actions.wizard")
             .with(schema(json!({}), &[])),
-        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log, or the error, or \"stopped\" when the session's time limit stopped it mid-file (nothing is written for that file). Writes files: plan it first with batch_plan and pass the plan's approval.token as approve_token, and the run refuses if the batch it would carry out is not the one that was planned.")
+        t("action_run", "Run an action", "Action Wizard: run a built-in action (action: its name) or a list of steps ([{step, arg}], ids from action_list) on each PDF in paths, writing the results into folder under the same names. A path may be a folder, which is walked, and a file reached twice is processed once; the answer's skipped list says what was left out and why. Returns each file's step log, or the error, or \"stopped\" when the session's time limit stopped it mid-file (nothing is written for that file), or \"resumed\" with resume when its result is already in the folder. Writes files: plan it first with batch_plan and pass the plan's approval.token as approve_token, and the run refuses if the batch it would carry out is not the one that was planned.")
             .destructive()
             .cmd("actions.wizard")
             .with(schema(
@@ -938,13 +938,14 @@ pub fn tools() -> Vec<ToolDef> {
                     "paths": batch_paths(),
                     "folder": { "type": "string" },
                     "approve_token": approve_token(),
+                    "resume": { "type": "boolean", "description": "Skip an input whose result is already in folder under its own name (written by an earlier run that stopped, e.g. after a crash): it is reported as resumed, not done again." },
                 })),
                 &["paths", "folder"],
             )),
         t(
             "batch_plan",
             "Plan a batch write",
-            "Before running a destructive batch, say what it would do: for each input, the file the run would write into folder (exactly the name the run picks, including a `name (2).pdf` when the name is taken), whether a file is already there and would be replaced, the input's pages, title and size, and what cannot be undone. Writes nothing and creates no folder. operation is action (an Action Wizard run: give action or steps) or ocr (a searchable copy of each file: give dpi, language, skip_text_pages). The answer's approve field holds the exact call that would carry the plan out, and its approval object holds the token to pass back with it: give the token and the run refuses rather than carry out a batch other than this one.",
+            "Before running a destructive batch, say what it would do: for each input, the file the run would write into folder (exactly the name the run picks, including a `name (2).pdf` when the name is taken), whether a file is already there and would be replaced, the input's pages, title and size, and what cannot be undone. Writes nothing and creates no folder. operation is action (an Action Wizard run: give action or steps) or ocr (a searchable copy of each file: give dpi, language, skip_text_pages). The answer's approve field holds the exact call that would carry the plan out, and its approval object holds the token to pass back with it: give the token and the run refuses rather than carry out a batch other than this one. With resume, targets whose result is already in the folder are marked resumed, and the approve call carries resume too.",
         )
         .ro()
         .cmd("actions.wizard")
@@ -958,6 +959,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "dpi": { "type": "number", "minimum": 72, "maximum": 600, "description": "With operation ocr: the resolution pages would be read at." },
                 "language": { "type": "string", "enum": ["en"], "description": "With operation ocr: the document language." },
                 "skip_text_pages": { "type": "boolean", "description": "With operation ocr: whether pages that already have text are left alone." },
+                "resume": { "type": "boolean", "description": "Skip an input whose result is already in folder under its own name (written by an earlier run that stopped, e.g. after a crash): it is reported as resumed, not done again." },
             })),
             &["operation", "paths", "folder"],
         )),
@@ -1008,7 +1010,7 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
-        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error, or \"stopped\" with the pages read so far when the session's time limit stopped it mid-file (no output is written for that file). Plan it first with batch_plan (operation ocr) and pass the plan's approval.token as approve_token.")
+        t("ocr_recognize_files", "Recognize text in multiple files", "Scan & OCR ▸ Recognize text ▸ In multiple files: read every page of each PDF in paths and write the searchable result into folder under the same name (pages that already have text are left alone). A path may be a folder, which is walked, and a file reached twice is processed once. Returns, per file, the output path, word count and skipped pages, or the error, or \"stopped\" with the pages read so far when the session's time limit stopped it mid-file (no output is written for that file), or \"resumed\" with resume when its result is already in the folder. Plan it first with batch_plan (operation ocr) and pass the plan's approval.token as approve_token.")
             .destructive()
             .cmd("ocr.recognize_batch")
             .with(schema(
@@ -1018,6 +1020,7 @@ pub fn tools() -> Vec<ToolDef> {
                     "dpi": { "type": "number", "minimum": 72, "maximum": 600 },
                     "language": { "type": "string", "enum": ["en"] },
                     "approve_token": approve_token(),
+                    "resume": { "type": "boolean", "description": "Skip an input whose result is already in folder under its own name (written by an earlier run that stopped, e.g. after a crash): it is reported as resumed, not done again." },
                 })),
                 &["paths", "folder"],
             )),

@@ -55,14 +55,15 @@ impl Automation {
         // The batch limit is part of what a plan has to be honest about: a run of this size would
         // be refused, so the plan is too.
         self.resources.check_batch(expanded.count())?;
+        let resume = a.opt_bool("resume")?.unwrap_or(false);
         match operation {
-            "action" => self.plan_action(a, &expanded, &folder),
-            "ocr" => self.plan_ocr(a, &expanded, &folder),
+            "action" => self.plan_action(a, &expanded, &folder, resume),
+            "ocr" => self.plan_ocr(a, &expanded, &folder, resume),
             other => Err(ToolError::InvalidArgs(format!("unknown operation {other:?} (action, ocr)"))),
         }
     }
 
-    fn plan_action(&mut self, a: &Args, expanded: &Expanded, folder: &Path) -> Result<Value> {
+    fn plan_action(&mut self, a: &Args, expanded: &Expanded, folder: &Path, resume: bool) -> Result<Value> {
         let action = action_from_args(a)?;
         let steps: Vec<Value> = action.steps.iter().map(|s| json!({ "step": s.id(), "label": s.label(), "arg": s.arg() })).collect();
         // The list the run would write, from the code the run itself uses: a name that is taken on
@@ -77,6 +78,12 @@ impl Automation {
                 if t.error.is_none() {
                     // The steps go on the target: this file would have them run over it.
                     target["steps"] = Value::Array(steps.clone());
+                    // With resume, a result already in the folder under the input's own name is
+                    // skipped by the run, so the plan says so on this target.
+                    if resume && crate::child(folder, &crate::batch_input_name(&t.path)).exists() {
+                        target["resumed"] = json!(true);
+                        target["resumed_note"] = json!("the output under the input's own name is already there from an earlier run; a resume run skips this file");
+                    }
                 }
                 target
             })
@@ -84,6 +91,9 @@ impl Automation {
         // Approving is not a re-typing: the arguments are the files this plan was made from, by
         // name, so the run covers exactly the list that was planned even if the folder changes.
         let mut args = json!({ "paths": expanded.approve_paths(), "folder": a.str("folder")? });
+        if resume {
+            args["resume"] = json!(true);
+        }
         match a.opt_str("action")? {
             Some(name) => args["action"] = json!(name),
             None => args["steps"] = a.get("steps").cloned().unwrap_or(Value::Null),
@@ -94,7 +104,7 @@ impl Automation {
         Ok(plan)
     }
 
-    fn plan_ocr(&mut self, a: &Args, expanded: &Expanded, folder: &Path) -> Result<Value> {
+    fn plan_ocr(&mut self, a: &Args, expanded: &Expanded, folder: &Path, resume: bool) -> Result<Value> {
         let settings = self.ocr_settings(a)?;
         // `ocr_recognize_files` writes each result under the input's own name, so a name that is
         // already in the folder — or that an earlier input of the same batch writes — is replaced.
@@ -111,6 +121,10 @@ impl Automation {
                     target["replaces"] = json!(true);
                     target["replaces_note"] = json!("an earlier input in this batch writes the same file name, so this one's result replaces it");
                 }
+                if resume && crate::child(folder, &crate::batch_input_name(&t.path)).exists() {
+                    target["resumed"] = json!(true);
+                    target["resumed_note"] = json!("the output under the input's own name is already there from an earlier run; a resume run skips this file");
+                }
                 seen.push(t.output.clone());
                 target["changes"] = json!([
                     format!("reads every page at {} dpi in language {}", settings.dpi.round(), settings.language),
@@ -125,6 +139,9 @@ impl Automation {
             })
             .collect();
         let mut args = json!({ "paths": expanded.approve_paths(), "folder": a.str("folder")? });
+        if resume {
+            args["resume"] = json!(true);
+        }
         for (key, value) in
             [("dpi", a.get("dpi").cloned()), ("language", a.get("language").cloned()), ("skip_text_pages", a.get("skip_text_pages").cloned())]
         {

@@ -182,6 +182,7 @@ impl Automation {
         )?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
+        let resume = a.opt_bool("resume")?.unwrap_or(false);
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
@@ -201,6 +202,12 @@ impl Automation {
                 continue;
             }
             let name = crate::batch_input_name(p);
+            // --resume: a result already in the folder under the input's own name was written by
+            // an earlier run (one that stopped, e.g. after a crash), so it is reported, not redone.
+            if resume && crate::child(&folder, &name).exists() {
+                out.push(json!({ "path": p, "resumed": "the output is already there from an earlier run" }));
+                continue;
+            }
             // The limit also holds inside this file: the per-page callback stops the read at a page
             // boundary, and a file stopped that way is reported, not written half-read.
             let hit = std::sync::atomic::AtomicBool::new(false);
@@ -425,6 +432,7 @@ impl Automation {
             &planned,
         )?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
+        let resume = a.opt_bool("resume")?.unwrap_or(false);
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
@@ -447,6 +455,12 @@ impl Automation {
                 continue;
             }
             let name = crate::batch_input_name(p);
+            // --resume: a result already in the folder under the input's own name was written by
+            // an earlier run (one that stopped, e.g. after a crash), so it is reported, not redone.
+            if resume && crate::child(&folder, &name).exists() {
+                out.push(json!({ "path": p, "resumed": "the output is already there from an earlier run" }));
+                continue;
+            }
             let hit = std::sync::atomic::AtomicBool::new(false);
             let resources = &self.resources;
             let mut on_step = |_, _| {
