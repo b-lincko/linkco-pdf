@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (378 records)
 
-complete: 49, in_progress: 7, pending: 322
+complete: 50, in_progress: 7, pending: 321
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ complete: 49, in_progress: 7, pending: 322
 | B044 | [x] Resumable batches: --resume skips the files an earlier run already wrote (REC-B04) | P0 | complete | REC-B04 |
 | B045 | [x] The run pin can come from the environment: PDFCRAFT_SCHEMA_VERSION (REC-B02) | P0 | complete | REC-B02 |
 | B046 | [x] A save survives a power loss: the folder holding the new name is flushed after the rename (REC-R01) | P0 | complete | REC-R01 |
-| B047 | [ ] Regenerate field appearances: a value without an appearance becomes visible (REC-F01) | P0 | in_progress | REC-F01 |
+| B047 | [x] Regenerate field appearances: a value without an appearance becomes visible (REC-F01) | P0 | complete | REC-F01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -100,7 +100,7 @@ complete: 49, in_progress: 7, pending: 322
 | REC-C01 | [ ] Interoperable annotation appearance regression suite | P0 | pending | comment.appearance-generation comment.text-box |
 | REC-D01 | [ ] Plain-language signature status and signed-revision viewer | P0 | pending | sign.signatures-panel sign.signature-properties sign.compare-signed-version |
 | REC-E01 | [ ] Reliable existing-text editing with font diagnostics | P0 | pending | edit.text-edit |
-| REC-F01 | [ ] Predictable required-field validation and completion guide | P0 | pending | form.appearance-regeneration form.push-buttons |
+| REC-F01 | [ ] Predictable required-field validation and completion guide | P0 | in_progress | form.appearance-regeneration form.push-buttons |
 | REC-H04 | [ ] Share preflight for secrets metadata signatures and forms | P0 | pending | '- |
 | REC-P04 | [ ] Merge form-name conflict resolution | P0 | pending | organize.field-name-conflicts |
 | REC-Q05 | [ ] Reliable mixed-size duplex tray and label printing | P0 | pending | print.paper-source-by-size print.page-setup |
@@ -1646,7 +1646,14 @@ pending: 65, scope_review: 23
 
 ### B047: Regenerate field appearances: a value without an appearance becomes visible (REC-F01)
 
-- Status: **in_progress**; parent(s): REC-F01.
+- Status: **complete**; parent(s): REC-F01.
 - Acceptance: The tool `form_regenerate_appearances` (and the engine call under it, `pdfcraft_forms::regenerate`) redraws the normal appearance of every widget whose `/AP` is missing or no longer matches what the field would draw now, from the field's value, `/DA` font/size/colour, quadding, `/MK` background and border colours, and `/MK /R` rotation — the same drawing a fill makes, using the existing `field_appearance`. Only a widget that is missing an appearance or whose stored appearance differs from what would be drawn is redrawn, so a second run draws nothing and changes no bytes; an appearance that already matches is kept untouched. Push buttons (icons) and signature fields (marks) are reported as unsupported and left alone, because their appearance is not the field's value drawn from `/DA`. `fields` limits the work to the named fields (all when absent), and a name that is not a field is refused. The answer says what was found: `drawn` (missing + stale), `missing`, `stale` and `unsupported` lists. The change is one undo step (labelled Regenerate field appearances), adds no bytes when nothing is missing or stale, and is in the tool catalogue with a schema and a stated reason in examples.rs.
 - Audit: REC-F01's open notes: form.appearance-regeneration (partial) and form.push-buttons (partial). The audit of what existed: `pdfcraft_forms::appearance` already draws text and choice fields correctly — single-line, multiline, comb, password, quadding, auto size, combo/list selection, `/MK` background and border, `/MK /R` rotation, and the approximate Helvetica metrics — and `redraw` applies it, but only as a side effect of `set_value`/`reset`/`recalculate`. Nothing could redraw a field that already had its value. So a form produced by another tool that writes `/V` without an `/AP` (permitted by the specification, which says a viewer may regenerate) showed nothing in the value area, and PdfCraft could not fix it either: the value was in `form_fields`, the page showed an empty box, and re-filling with the same value was the only workaround — which fails for a field the caller cannot re-derive. Decisions. (1) The unit of work is the appearance, not the value: the existing drawing is reused verbatim, so the tool cannot drift from what a fill draws. (2) Only missing or stale appearances are redrawn, compared as decoded content streams: a widget whose appearance already matches is left byte-for-byte alone, so running the tool over a correct form is a no-op that does not bloat an incremental save, and an appearance a producer made more carefully than this code can survive. (3) A stored stream that cannot be decoded counts as stale and is redrawn rather than trusted. (4) Buttons and signatures are reported `unsupported` rather than given an invented appearance — a push button's icon comes from `/MK /CA` or an image and a signature's mark from a real signature, neither of which this code draws from a value. (5) The reporting comes from a preview (`Session::preview_field_appearances`) run on a clone of the editor's live state before the edit, so the answer describes unsaved edits too, and the edit itself is the ordinary undoable one. (6) The tool is not destructive: it replaces appearances it has established do not match, and never removes content. Not claimed: form.push-buttons (running a button's actions on click) is still open, and this does not regenerate `/D` or `/R` appearances, appearance streams a producer made with a font this code cannot measure, or XFA-drawn fields.
+- Ci: passed
 - Notes: Closes REC-F01's appearance-regeneration note: a field whose value has no appearance, or whose appearance shows an older value, font or colour, can now be made to show what it holds, and the operation reports exactly which fields were in that state. Still open in REC-F01: push buttons running their actions, and the required-field validation and completion guide the recommendation also names. The combination is not a form-validation model.
+- Local evidence: crates/forms/src/tests.rs::a_value_without_an_appearance_becomes_visible_and_then_stays_put (CI on 15cdda3): the fixture's name field has /V (Ada) and no /AP and is reported Missing and drawn — the saved appearance contains Ada and the /MK background colour — and a second run reports drawn 0 and writes identical bytes.
+- Local evidence: crates/forms/src/tests.rs::a_stale_appearance_is_redrawn_and_a_current_one_is_left_alone (CI on 15cdda3): after a value moves under a drawn appearance, the next run reports exactly that field Stale, the saved appearance shows the new value, and a third run draws nothing.
+- Local evidence: crates/forms/src/tests.rs::buttons_and_signatures_are_reported_as_unsupported_and_left_alone and ::regenerate_can_be_limited_to_named_fields_and_refuses_unknown_ones and ::a_document_without_a_form_is_refused (CI on 15cdda3): buttons are Unsupported and keep no /AP, a limit leaves the other fields untouched, an unknown name is NoSuchField, and a document without a form is NoForm.
+- Local evidence: crates/automation/tests/form_appearances.rs (CI on 15cdda3): the tool reports drawn 0 on a form whose appearances are already right; after both /AP are stripped from the saved file it reports drawn 2, missing [alpha, beta], no stale and no unsupported, and a second call reports drawn 0; fields limits it; an unknown name is refused; a document without a form says so; the tool is in the catalogue, not destructive, and its description names the case.
+- Local evidence: python3 docs/implementation/build_backlog.py --check (676 records), build_capabilities.py --check (128 automation tools), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42035489088

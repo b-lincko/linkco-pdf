@@ -68,8 +68,7 @@ jobs:
 
       - name: Format
         if: runner.os == 'Linux'
-        shell: bash
-        run: .github/scripts/run-annotated.sh "format Linux" cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Clippy
         shell: bash
@@ -113,8 +112,7 @@ jobs:
         with:
           key: wasm32
       - name: Check library crates for wasm32
-        shell: bash
-        run: .github/scripts/run-annotated.sh "wasm32" cargo xtask wasm
+        run: cargo xtask wasm
 
   deny:
     name: dependency licences and advisories
