@@ -101,7 +101,7 @@ pub use pdfcraft_annot::{
     Shape, StampGroup, StampKind, Style, rect_quad,
 };
 pub use pdfcraft_forms::detect;
-pub use pdfcraft_forms::{Appearances, Regenerated as RegeneratedAppearances, regenerate as regenerate_appearances};
+pub use pdfcraft_forms::{Appearances, Regenerated as RegeneratedAppearances, fields as form_fields, regenerate as regenerate_appearances};
 pub use pdfcraft_optimize as optimize;
 pub use pdfcraft_preflight as pdfa;
 pub use pdfcraft_print as print;

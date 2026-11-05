@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use pdfcraft_automation::{Automation, Content};
 use pdfcraft_cos::{Document, write_full};
-use pdfcraft_engine::{Edit, FieldValue, NewField, Session};
+use pdfcraft_engine::{Edit, FieldValue, NewField, Session, form_fields};
 use serde_json::{Value, json};
 
 fn tool(a: &mut Automation, name: &str, args: Value) -> Value {
@@ -57,7 +57,7 @@ fn seeded(dir: &std::path::Path) -> String {
 /// are in the form, and nothing on the page shows them.
 fn strip_appearances(path: &str) {
     let mut cos = Document::open(Arc::new(std::fs::read(path).unwrap())).unwrap();
-    let all = pdfcraft_forms::fields(&cos);
+    let all = form_fields(&cos);
     assert_eq!(all.len(), 2);
     for f in &all {
         for w in &f.widgets {
