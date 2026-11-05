@@ -14,7 +14,7 @@ P0 is a safety priority, not a universal scheduling stage. Gates for a new colla
 
 ## Basic (377 records)
 
-complete: 48, in_progress: 7, pending: 322
+complete: 49, in_progress: 6, pending: 322
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -63,7 +63,7 @@ complete: 48, in_progress: 7, pending: 322
 | B043 | [x] The command line refuses an in-place save of a file that changed since it was read (REC-R05) | P0 | complete | REC-R05 |
 | B044 | [x] Resumable batches: --resume skips the files an earlier run already wrote (REC-B04) | P0 | complete | REC-B04 |
 | B045 | [x] The run pin can come from the environment: PDFCRAFT_SCHEMA_VERSION (REC-B02) | P0 | complete | REC-B02 |
-| B046 | [ ] A save survives a power loss: the folder holding the new name is flushed after the rename (REC-R01) | P0 | in_progress | REC-R01 |
+| B046 | [x] A save survives a power loss: the folder holding the new name is flushed after the rename (REC-R01) | P0 | complete | REC-R01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1630,7 +1630,15 @@ pending: 65, scope_review: 23
 
 ### B046: A save survives a power loss: the folder holding the new name is flushed after the rename (REC-R01)
 
-- Status: **in_progress**; parent(s): REC-R01.
+- Status: **complete**; parent(s): REC-R01.
 - Acceptance: A save that returns success is the file that is still there after the machine loses power, not only after the writing process crashes. `pdfcraft_platform::staging::sync_dir` flushes the folder itself (on Unix, opening it and flushing the descriptor through the same `sync_staged` rule the files use, including the macOS FUSEFS plain-fsync fallback; on non-Unix it is a documented no-op that reports success). Every save path flushes the folder after a successful rename: `replace_file` (the command line and every other caller of it), the automation writer `write_atomic_using` and the desktop save `write_atomically_using`. A folder that cannot be flushed fails the save rather than reporting success, and on the automation path that is a normal tool failure. Tests: `sync_dir` succeeds on a real folder and reports a missing one; the process-kill boundary test in both the automation and the desktop suite gains a `synced` phase that pauses after the save has returned, so a kill at that boundary is shown to leave the complete new file, no staging file, and a retry that succeeds.
 - Audit: REC-R01's open note: power-loss durability. The audit of what existed: B001-B007 built write → flush → close → rename, so the bytes are on the disk before the target name changes, and a reader or a killed process sees the old file whole or the new file whole. What none of them flushed is the directory entry: on Unix a rename is durable only once the folder that contains the name is itself flushed, so after a power cut the volume can come back with the old name pointing at the old file even though the new file's bytes were flushed — the save reported success and the work is gone. Decisions. (1) One new operation, `sync_dir`, rather than a flush call pasted into three crates: the folder open, the macOS fallback and the platform difference live in one place beside the flush rule they share. (2) It is called on the success path after the rename, never before: a folder flushed before the rename says nothing about the new name. (3) On non-Unix it reports success without doing anything, because the standard library has no folder flush there — Windows documents a rename as flushed with the file's own flush, and the handle a real folder flush needs is not one this crate opens; the doc comment says so rather than pretending. (4) It runs in production save paths only; the test seams in the two writers are unchanged, so a test can still inject write, flush and rename failures. (5) A flush that fails fails the save: a save that cannot be made durable is reported as not durable, and the tool's caller sees the error instead of a false claim of success. Not claimed: a physical power-cut test (no harness can do that here), meta-data durability of the staging file's own directory entry before the rename, the app's control-file write in apps/pdfcraft/src/main.rs (it is not a document save and is outside this component), or the rest of REC-R01.
+- Ci: passed
 - Notes: Closes REC-R01's power-loss durability note for document saves: after a save that returned success, the new file's name and bytes are both flushed to the volume, so a power loss cannot resurrect the old file. Still open in REC-R01: physical volume-full, whole-application restart and session recovery, and the full save-integrity release gate, which needs a signed build and machine-level testing. This is a durability step, not a re-do of the atomic-save guarantee B001-B007 established.
+- Local evidence: crates/platform/src/staging.rs::a_folder_is_flushed_or_the_platform_has_no_such_operation (CI on c40a135, ubuntu and Windows): the folder flush succeeds on a real folder, and a missing folder follows the platform's contract — NotFound on Unix, Ok where there is no folder flush.
+- Local evidence: crates/platform/src/staging.rs::a_folder_that_cannot_be_flushed_is_reported_as_an_error (CI on c40a135, ubuntu, Unix-only): a folder that is gone is an error from sync_dir, not a silent success.
+- Local evidence: crates/automation/src/lib.rs and crates/ui-egui/src/editing.rs (CI on c40a135, ubuntu and Windows): the kill-boundary suites gained a synced phase — a child killed after the save returned leaves the complete new file and no staging file, and the retry over that folder succeeds.
+- Local evidence: python3 docs/implementation/build_backlog.py --check (675 records), build_capabilities.py --check, check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42004673331
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42004673395
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42004673425
