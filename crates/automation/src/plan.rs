@@ -82,7 +82,8 @@ impl Automation {
                     // skipped by the run, so the plan says so on this target.
                     if resume && crate::child(folder, &crate::batch_input_name(&t.path)).exists() {
                         target["resumed"] = json!(true);
-                        target["resumed_note"] = json!("the output under the input's own name is already there from an earlier run; a resume run skips this file");
+                        target["resumed_note"] =
+                            json!("the output under the input's own name is already there from an earlier run; a resume run skips this file");
                     }
                 }
                 target
@@ -123,7 +124,8 @@ impl Automation {
                 }
                 if resume && crate::child(folder, &crate::batch_input_name(&t.path)).exists() {
                     target["resumed"] = json!(true);
-                    target["resumed_note"] = json!("the output under the input's own name is already there from an earlier run; a resume run skips this file");
+                    target["resumed_note"] =
+                        json!("the output under the input's own name is already there from an earlier run; a resume run skips this file");
                 }
                 seen.push(t.output.clone());
                 target["changes"] = json!([
