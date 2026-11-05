@@ -58,6 +58,7 @@ pdfcraft-cli preview <file.pdf> [--page N] [--dpi 150 | --width PX] [--max-px 40
 pdfcraft-cli text   <file.pdf> [--page N]                  extracted text (pages separated by form feeds)
 pdfcraft-cli edit   <in.pdf> --out out.pdf [--rotate 1,3:90] [--delete 2,4] [--move 5:1]
                       [--insert-blank 1] [--title T] [--author A] [--full]
+                      an in-place --out refuses (exit 5) if the file changed since it was read
 pdfcraft-cli combine <a.pdf> <b.pdf> … --out combined.pdf
 pdfcraft-cli extract <in.pdf> --pages 1,3,5 --out out.pdf
 pdfcraft-cli split   <in.pdf> (--every N | --before 3,7) [--out-dir DIR]
@@ -65,8 +66,12 @@ pdfcraft-cli check  <files or dirs…> [--timeout 20] [--dpi 36] [--json out.jso
 pdfcraft-cli tools                                       automation tools and their JSON Schemas
 pdfcraft-cli schema                                  the tool table with its version [--schema-version V]
                                                            asks whether this build speaks V (exit 3 if not)
-pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png]
+pdfcraft-cli run    <tool> [key=value …] [--root DIR] [--out image.png] [--schema-version V]
 pdfcraft-cli run    --script steps.json [--root DIR]      [{\"tool\": \"doc_open\", \"args\": {…}}, …]
+                      [--schema-version V] asks whether this build speaks V before anything runs
+                                                           (exit 3 if the major differs, 2 if V is not a version)
+                      a step may carry \"schema_version\": \"V\" too, answered before that step runs
+                      PDFCRAFT_SCHEMA_VERSION sets the default pin for run (the flag wins)
                       [--max-workers N] [--max-input-mib N] [--max-output-mib N] [--max-batch N] [--time-limit-ms N]
                                                            limits for this session (0 = no limit); limits_status reports them
 ",
@@ -345,6 +350,7 @@ const RUN_OPTIONS: &[OptionSpec] = &[
     OptionSpec { name: "--root", takes_value: true },
     OptionSpec { name: "--script", takes_value: true },
     OptionSpec { name: "--out", takes_value: true },
+    OptionSpec { name: "--schema-version", takes_value: true },
     OptionSpec { name: "--max-workers", takes_value: true },
     OptionSpec { name: "--max-input-mib", takes_value: true },
     OptionSpec { name: "--max-output-mib", takes_value: true },
@@ -385,6 +391,53 @@ fn positional(args: &[String]) -> Vec<&str> {
 
 fn read(path: &str) -> Result<Arc<Vec<u8>>, String> {
     std::fs::read(path).map(Arc::new).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The input file's stamp when it was read (`REC-R05`): its length and modification time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InputStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+fn stamp_of(path: &Path) -> Option<InputStamp> {
+    let m = std::fs::metadata(path).ok()?;
+    Some(InputStamp { len: m.len(), modified: m.modified().ok() })
+}
+
+/// Read `path` for editing, remembering its stamp, so an in-place `--out` can refuse if the file
+/// changed in between.
+fn read_with_stamp(path: &str) -> Result<(Arc<Vec<u8>>, Option<InputStamp>), String> {
+    let stamp = stamp_of(Path::new(path));
+    Ok((read(path)?, stamp))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// `REC-R05`: an in-place output (`--out` naming the file that was read) refuses when the file
+/// changed on disk since it was read. The command line has no prompt, so it refuses (exit 5)
+/// and changes nothing, rather than replacing another program's write. A different `--out` is
+/// the caller's own choice and is written as asked.
+fn refuse_if_input_changed(input: &Path, at_read: Option<InputStamp>, out: &Path) -> Result<(), CliError> {
+    if !same_file(input, out) {
+        return Ok(());
+    }
+    if stamp_of(input) != at_read {
+        let message = format!(
+            "{}: changed on disk since it was read (another program wrote it); nothing was replaced — read it again, or write elsewhere with --out",
+            input.display()
+        );
+        return Err(refused(message));
+    }
+    Ok(())
 }
 
 /// Write the file a command produced, the way the app saves a document: a private staging file
@@ -577,12 +630,14 @@ fn edit(args: &[String]) -> Result<(), CliError> {
     }
     let path = path.ok_or_else(|| usage("edit: missing file"))?;
     let out = out.ok_or_else(|| usage("edit: missing --out"))?;
+    let (input_bytes, at_read) = read_with_stamp(path)?;
     let mut session = Session::new();
-    let id = session.open(path, Some(path.to_string()), read(path)?, password).map_err(|e| malformed(e.to_string()))?;
+    let id = session.open(path, Some(path.to_string()), input_bytes, password).map_err(|e| malformed(e.to_string()))?;
     for e in edits {
         session.apply(id, e).map_err(|e| e.to_string())?;
     }
     let bytes = if full { session.save_full_bytes(id) } else { session.save_bytes(id) }.map_err(|e| e.to_string())?;
+    refuse_if_input_changed(Path::new(path), at_read, Path::new(out))?;
     save_output(Path::new(out), bytes.as_slice())
 }
 
@@ -597,8 +652,17 @@ fn combine(args: &[String]) -> Result<(), CliError> {
     if inputs.len() < 2 {
         return Err(usage("combine: give at least two input files"));
     }
-    let sources = inputs.iter().map(|p| Ok((file_stem(p), read(p)?))).collect::<Result<Vec<_>, String>>()?;
+    let mut sources = Vec::new();
+    let mut stamps = Vec::new();
+    for p in inputs {
+        let (bytes, at_read) = read_with_stamp(p)?;
+        stamps.push((PathBuf::from(p), at_read));
+        sources.push((file_stem(p), bytes));
+    }
     let bytes = pdfcraft_engine::Session::new().combine(&sources).map_err(|e| e.to_string())?;
+    for (input, at_read) in &stamps {
+        refuse_if_input_changed(input, *at_read, Path::new(out))?;
+    }
     save_output(Path::new(out), bytes.as_slice())
 }
 
@@ -607,9 +671,11 @@ fn extract(args: &[String]) -> Result<(), CliError> {
     let path = *positional(args).first().ok_or_else(|| usage("extract: missing file"))?;
     let out = flag(args, "--out").ok_or_else(|| usage("extract: missing --out"))?;
     let pages = page_list(flag(args, "--pages").ok_or_else(|| usage("extract: missing --pages"))?)?;
+    let (input_bytes, at_read) = read_with_stamp(path)?;
     let mut session = pdfcraft_engine::Session::new();
-    let id = session.open(path, None, read(path)?, flag(args, "--password")).map_err(|e| malformed(e.to_string()))?;
+    let id = session.open(path, None, input_bytes, flag(args, "--password")).map_err(|e| malformed(e.to_string()))?;
     let bytes = session.extract(id, &pages).map_err(|e| e.to_string())?;
+    refuse_if_input_changed(Path::new(path), at_read, Path::new(out))?;
     save_output(Path::new(out), bytes.as_slice())
 }
 
@@ -995,11 +1061,40 @@ fn print_output(auto: &pdfcraft_automation::Automation, content: Vec<pdfcraft_au
 
 fn run(args: &[String]) -> Result<(), CliError> {
     validate_options("run", args, RUN_OPTIONS)?;
+    // Per-call schema negotiation (REC-B02): a caller that pins the revision it was written
+    // against is answered before anything runs — one tool or a whole `--script` — so a mismatch
+    // is never discovered in the middle of a job. Same major: the call runs; different major:
+    // exit 3 (unsupported); not a version: exit 2 (usage). The pin may also come from the
+    // caller's environment (PDFCRAFT_SCHEMA_VERSION), so a deployment sets it once instead of
+    // adding the flag to every call; an explicit --schema-version always wins.
+    let env_pin = || std::env::var("PDFCRAFT_SCHEMA_VERSION").ok().filter(|v| !v.is_empty());
+    let asked = flag(args, "--schema-version").map(str::to_string).or_else(env_pin);
+    if let Some(asked) = asked {
+        match pdfcraft_automation::schema::compatible(&asked) {
+            None => return Err(usage(format!("run: {}", pdfcraft_automation::schema::not_a_version_message(&asked)))),
+            Some(false) => return Err(unsupported(format!("run: {}", pdfcraft_automation::schema::incompatible_message(&asked)))),
+            Some(true) => {}
+        }
+    }
     let mut auto = automation(args)?;
     if let Some(script) = flag(args, "--script") {
         let text = std::fs::read_to_string(script).map_err(|e| format!("{script}: {e}"))?;
         let steps: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| usage(format!("{script}: {e}")))?;
         for (i, step) in steps.iter().enumerate() {
+            // A step may pin the revision it was written against (REC-B02): answered before that
+            // step runs, through the same rule as the invocation-level pin above.
+            if let Some(pin) = step.get("schema_version") {
+                let asked = pin.as_str().ok_or_else(|| usage(format!("step {}: schema_version must be a string", i + 1)))?;
+                let refusal = match pdfcraft_automation::schema::compatible(asked) {
+                    None => Some(usage(format!("step {}: {}", i + 1, pdfcraft_automation::schema::not_a_version_message(asked)))),
+                    Some(false) => Some(unsupported(format!("step {}: {}", i + 1, pdfcraft_automation::schema::incompatible_message(asked)))),
+                    Some(true) => None,
+                };
+                if let Some(e) = refusal {
+                    // Steps before this one already ran, so a mid-script refusal is partial.
+                    return Err(if i > 0 { e.into_partial() } else { e });
+                }
+            }
             // Steps before this one already ran, so their work stands: the failure is partial
             // (`exit::Kind::Partial`), which tells a script to look at what was done rather than
             // to assume nothing happened.
@@ -1162,7 +1257,32 @@ fn current_uid() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{control_file_problem, preview_scale};
+    use super::{CliError, control_file_problem, preview_scale, refuse_if_input_changed, stamp_of};
+
+    #[test]
+    fn an_in_place_out_refuses_when_the_input_changed_since_it_was_read() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-cli-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.pdf");
+        std::fs::write(&file, b"first").unwrap();
+        let at_read = stamp_of(&file);
+        // Another program writes the file after this command read it.
+        std::fs::write(&file, b"a longer, different version").unwrap();
+        let err = refuse_if_input_changed(&file, at_read, &file).unwrap_err();
+        match err {
+            CliError::Message(f) => assert_eq!(f.kind, crate::exit::Kind::Refused, "{f:?}"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        // A different --out is the caller's own choice: no refusal.
+        assert!(refuse_if_input_changed(&file, at_read, &dir.join("elsewhere.pdf")).is_ok());
+        // An unchanged input is written as asked.
+        let at_read = stamp_of(&file);
+        assert!(refuse_if_input_changed(&file, at_read, &file).is_ok());
+        // A missing stamp (the file was there at read time only) is treated as changed, not ignored.
+        assert!(refuse_if_input_changed(&file, None, &file).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn preview_scale_honours_width_dpi_and_the_pixel_cap() {

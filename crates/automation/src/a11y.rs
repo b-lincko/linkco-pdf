@@ -182,6 +182,7 @@ impl Automation {
         )?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
+        let resume = a.opt_bool("resume")?.unwrap_or(false);
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
@@ -201,9 +202,44 @@ impl Automation {
                 continue;
             }
             let name = crate::batch_input_name(p);
-            let result = self
-                .read_input(p)
-                .and_then(|bytes| pdfcraft_engine::ocr::recognize_file(&name, std::sync::Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true));
+            // --resume: a result already in the folder under the input's own name was written by
+            // an earlier run (one that stopped, e.g. after a crash), so it is reported, not redone.
+            if resume && crate::child(&folder, &name).exists() {
+                out.push(json!({ "path": p, "resumed": "the output is already there from an earlier run" }));
+                continue;
+            }
+            // The limit also holds inside this file: the per-page callback stops the read at a page
+            // boundary, and a file stopped that way is reported, not written half-read.
+            let hit = std::sync::atomic::AtomicBool::new(false);
+            let done_pages = std::sync::atomic::AtomicUsize::new(0);
+            let total_pages = std::sync::atomic::AtomicUsize::new(0);
+            let resources = &self.resources;
+            let mut on_page = |done: usize, total: usize| {
+                total_pages.store(total, std::sync::atomic::Ordering::Relaxed);
+                let over = resources.past_deadline(started);
+                if over {
+                    hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                    done_pages.store(done, std::sync::atomic::Ordering::Relaxed);
+                }
+                !over
+            };
+            let result = self.read_input(p).and_then(|bytes| {
+                let bytes = std::sync::Arc::new(bytes);
+                pdfcraft_engine::ocr::recognize_file(&name, bytes, None, settings.clone(), &ocr, &mut on_page)
+            });
+            if hit.load(std::sync::atomic::Ordering::Relaxed) {
+                // Count the stopped batch once, here: with `stopped` set the between-items check
+                // is skipped, and a mid-file stop is still a batch stopped by time.
+                self.resources.count_stopped_batch();
+                stopped = true;
+                out.push(json!({
+                    "path": p,
+                    "stopped": "the time limit was reached during this file",
+                    "pages_done": done_pages.load(std::sync::atomic::Ordering::Relaxed),
+                    "pages_total": total_pages.load(std::sync::atomic::Ordering::Relaxed),
+                }));
+                continue;
+            }
             out.push(match result {
                 Ok(r) => {
                     let target = &planned[i].output;
@@ -221,7 +257,20 @@ impl Automation {
         let settings = self.ocr_settings(a)?;
         let pages = if a.opt_ints("pages")?.is_some() { self.pages(a, "pages")? } else { Vec::new() };
         let id = self.doc(a)?.id;
-        let found = self.session.recognize_text(id, &pages, settings).map_err(failed)?;
+        // The limit holds inside this document too: the per-page callback stops the read at a page
+        // boundary (the pages read so far are still added), and the result says it stopped.
+        let started = std::time::Instant::now();
+        let hit = std::sync::atomic::AtomicBool::new(false);
+        let session = &mut self.session;
+        let resources = &self.resources;
+        let mut on_page = |_, _| {
+            let over = resources.past_deadline(started);
+            if over {
+                hit.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            !over
+        };
+        let found = session.recognize_text(id, &pages, settings, &mut on_page).map_err(failed)?;
         let list: Vec<Value> = found
             .iter()
             .map(|p| match &p.skipped {
@@ -229,7 +278,11 @@ impl Automation {
                 None => json!({ "page": p.page + 1, "words": p.words.len(), "text": p.text() }),
             })
             .collect();
-        Ok(json!({ "words": found.iter().map(|p| p.words.len()).sum::<usize>(), "pages": list }))
+        Ok(json!({
+            "words": found.iter().map(|p| p.words.len()).sum::<usize>(),
+            "pages": list,
+            "timed_out": hit.load(std::sync::atomic::Ordering::Relaxed),
+        }))
     }
 
     pub(crate) fn ocr_status(&self) -> Result<Value> {
@@ -379,6 +432,7 @@ impl Automation {
             &planned,
         )?;
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
+        let resume = a.opt_bool("resume")?.unwrap_or(false);
         let started = std::time::Instant::now();
         let mut stopped = false;
         let mut out = Vec::new();
@@ -390,8 +444,9 @@ impl Automation {
                     continue;
                 }
             };
-            // Between items, not during one: the file in hand is finished (as a stop is). Asked
-            // once per batch, so the audit counts batches stopped rather than files skipped.
+            // Between items, and inside one: the per-step callback stops a file at a step boundary,
+            // and a file stopped that way is reported, not written half-done. Asked once per batch,
+            // so the audit counts batches stopped rather than files skipped.
             if !out.is_empty() && !stopped && self.resources.timed_out(started) {
                 stopped = true;
             }
@@ -400,7 +455,33 @@ impl Automation {
                 continue;
             }
             let name = crate::batch_input_name(p);
-            let result = self.read_input(p).and_then(|bytes| run_on(&action, &name, std::sync::Arc::new(bytes), |_, _| {}));
+            // --resume: a result already in the folder under the input's own name was written by
+            // an earlier run (one that stopped, e.g. after a crash), so it is reported, not redone.
+            if resume && crate::child(&folder, &name).exists() {
+                out.push(json!({ "path": p, "resumed": "the output is already there from an earlier run" }));
+                continue;
+            }
+            let hit = std::sync::atomic::AtomicBool::new(false);
+            let resources = &self.resources;
+            let mut on_step = |_, _| {
+                let over = resources.past_deadline(started);
+                if over {
+                    hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                !over
+            };
+            let result = self.read_input(p).and_then(|bytes| {
+                let bytes = std::sync::Arc::new(bytes);
+                run_on(&action, &name, bytes, &mut on_step)
+            });
+            if hit.load(std::sync::atomic::Ordering::Relaxed) {
+                // Count the stopped batch once, here: with `stopped` set the between-items check
+                // is skipped, and a mid-file stop is still a batch stopped by time.
+                self.resources.count_stopped_batch();
+                stopped = true;
+                out.push(json!({ "path": p, "stopped": "the time limit was reached during this file" }));
+                continue;
+            }
             out.push(match result {
                 Ok(r) => {
                     // The name this batch was planned with, not a fresh guess: an approval covered

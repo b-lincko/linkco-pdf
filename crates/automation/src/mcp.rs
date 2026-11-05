@@ -143,6 +143,17 @@ impl McpServer {
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "tools/call needs a tool name".to_string()))?;
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+                // Per-call schema negotiation (REC-B02): a client may pin the tool-table revision
+                // it was written against in `_meta.schemaVersion`. Same major: the call runs;
+                // different major: an `unsupported` tool result, nothing ran; not a version: a
+                // protocol error. Clients that send no `_meta` are unaffected.
+                if let Some(asked) = params.pointer("/_meta/schemaVersion").and_then(Value::as_str) {
+                    match crate::schema::compatible(asked) {
+                        None => return Err((INVALID_PARAMS, format!("_meta.schemaVersion: {}", crate::schema::not_a_version_message(asked)))),
+                        Some(false) => return Ok(tool_error("unsupported", &crate::schema::incompatible_message(asked))),
+                        Some(true) => {}
+                    }
+                }
                 if self.compact && name == TOOL_SEARCH {
                     check_keys(name, &args, &["query", "category", "name"]).map_err(|e| (INVALID_PARAMS, e))?;
                     return Ok(match search_tools(&args, self.automation.policy()) {

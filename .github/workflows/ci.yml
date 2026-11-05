@@ -43,6 +43,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           python3 docs/implementation/build_backlog.py --check
+          python3 docs/implementation/build_capabilities.py --check
           python3 -m unittest discover -s docs/implementation -p 'test_*.py' -v
           python3 -m unittest discover -s docs/research/scripts -p 'test_*.py' -v
 

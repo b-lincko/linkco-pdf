@@ -160,15 +160,30 @@ impl Budget {
         Ok(())
     }
 
-    /// Has `started` been running longer than the time limit? A batch asks this between items, so
-    /// an item already in hand is finished (as a stop is, in the job centre) rather than abandoned.
+    /// Has `started` been running longer than the time limit? A batch asks this between items.
+    /// Inside one item the per-page and per-step callbacks ask [`Self::past_deadline`] instead, so
+    /// the limit also holds within a single file.
     pub(crate) fn timed_out(&self, started: Instant) -> bool {
         let limit = self.limits.item_timeout;
         if limit.is_zero() || started.elapsed() <= limit {
             return false;
         }
-        Audit::count(&self.audit.timed_out);
+        self.count_stopped_batch();
         true
+    }
+
+    /// Count one batch stopped by the time limit. The between-items check gets here through
+    /// [`Self::timed_out`]; a stop inside a single item calls this directly, once.
+    pub(crate) fn count_stopped_batch(&self) {
+        Audit::count(&self.audit.timed_out);
+    }
+
+    /// The same limit, asked inside one item (a page or a step), so a single file cannot run past
+    /// it either. Not counted: the audit counts batches stopped, and the between-items
+    /// [`Self::timed_out`] has already counted this one.
+    pub(crate) fn past_deadline(&self, started: Instant) -> bool {
+        let limit = self.limits.item_timeout;
+        !limit.is_zero() && started.elapsed() > limit
     }
 
     /// `limits_status`: what is set, and what it has done.

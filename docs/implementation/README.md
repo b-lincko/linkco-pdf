@@ -332,6 +332,8 @@ Local evidence: formatting passes, the ledger and the docs suite pass (51 tests)
 ```sh
 python3 docs/implementation/build_backlog.py
 python3 docs/implementation/build_backlog.py --check
+python3 docs/implementation/build_capabilities.py
+python3 docs/implementation/build_capabilities.py --check
 python3 -m unittest discover -s docs/implementation -p 'test_*.py' -v
 python3 -m unittest discover -s docs/research/scripts -p 'test_*.py' -v
 ```

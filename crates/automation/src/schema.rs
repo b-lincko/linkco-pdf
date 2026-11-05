@@ -98,6 +98,30 @@ pub fn parse_version(s: &str) -> Option<(u32, u32)> {
     Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
+/// Would this build speak to a caller written against `asked` (`major.minor`)?
+///
+/// Per-call negotiation: `run --schema-version V` and MCP `tools/call`'s
+/// `params._meta.schemaVersion` both answer through this one rule, so the two surfaces cannot
+/// disagree. `Some(true)` — same major, run the call; `Some(false)` — a different major, refuse
+/// the call before anything runs; `None` — `asked` is not a version at all, which is a usage
+/// error, not a compatibility answer.
+pub fn compatible(asked: &str) -> Option<bool> {
+    let (asked_major, _) = parse_version(asked)?;
+    let (my_major, _) = parse_version(TOOL_SCHEMA_VERSION).unwrap_or((0, 0));
+    Some(asked_major == my_major)
+}
+
+/// What to tell a caller whose pinned major differs from this build's: one sentence, shared by
+/// every surface, naming both versions.
+pub fn incompatible_message(asked: &str) -> String {
+    format!("this build speaks schema {TOOL_SCHEMA_VERSION}, which is not compatible with {asked} (a different major version)")
+}
+
+/// What to tell a caller whose pin is not a version at all.
+pub fn not_a_version_message(asked: &str) -> String {
+    format!("{asked:?} is not a version like {TOOL_SCHEMA_VERSION}; versions are major.minor")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +144,18 @@ mod tests {
         assert_eq!(listed.len(), document["tool_count"].as_u64().unwrap() as usize);
         assert_eq!(listed.len(), tools().len());
         assert_eq!(document["schema_version"], TOOL_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn a_caller_is_answered_by_major_only() {
+        let (major, minor) = parse_version(TOOL_SCHEMA_VERSION).unwrap();
+        assert_eq!(compatible(TOOL_SCHEMA_VERSION), Some(true));
+        assert_eq!(compatible(&format!("{major}.0")), Some(true));
+        assert_eq!(compatible(&format!("{major}.{}", minor + 1)), Some(true));
+        assert_eq!(compatible(&format!("{}.0", major + 1)), Some(false));
+        assert_eq!(compatible(&format!("{}.99", major - 1)), Some(false));
+        assert_eq!(compatible("1"), None);
+        assert_eq!(compatible(""), None);
+        assert_eq!(compatible("1.x"), None);
     }
 }

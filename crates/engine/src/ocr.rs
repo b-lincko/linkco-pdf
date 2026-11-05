@@ -161,14 +161,22 @@ impl Session {
         Ok(words)
     }
 
-    /// Recognise text on `pages` and add it, in one call (the CLI and agents use this).
-    pub fn recognize_text(&mut self, id: DocId, pages: &[usize], settings: OcrSettings) -> Result<Vec<OcrPage>, String> {
+    /// Recognise text on `pages` and add it, in one call (the CLI and agents use this). `progress`
+    /// works as for [`OcrJob::run`]: returning `false` stops after the pages read so far, which are
+    /// still added and returned.
+    pub fn recognize_text(
+        &mut self,
+        id: DocId,
+        pages: &[usize],
+        settings: OcrSettings,
+        progress: impl FnMut(usize, usize) -> bool,
+    ) -> Result<Vec<OcrPage>, String> {
         let job = self.ocr_job(id, pages, settings).ok_or("no such document")?;
         if let Some(why) = self.get(id).and_then(|d| d.read_only_reason.clone()) {
             return Err(why);
         }
         let ocr = engine()?;
-        let found = job.run(&ocr, |_, _| true);
+        let found = job.run(&ocr, progress);
         self.apply_ocr(id, &found).map_err(|e| e.to_string())?;
         Ok(found)
     }

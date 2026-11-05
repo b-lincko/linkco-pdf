@@ -135,7 +135,7 @@ impl PdfCraftApp {
                     }
                 },
                 |(destination, (name, bytes))| {
-                    pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| {}).and_then(|r| {
+                    pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| true).and_then(|r| {
                         // The file written is the file that was approved.
                         write_to(destination.as_deref(), &name, &r.bytes)
                     })

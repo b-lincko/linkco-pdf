@@ -91,3 +91,37 @@ fn the_compact_meta_tools_carry_the_kind_too() {
     let result = call(&["--compact", "--profile", "read-only"], "tool_search", json!({ "name": "doc_save" }));
     assert_eq!(result["structuredContent"]["error"]["kind"], "refused", "{result}");
 }
+
+#[test]
+fn a_tool_call_may_pin_its_schema_version_in_meta() {
+    let version = pdfcraft_automation::TOOL_SCHEMA_VERSION;
+    let (major, _) = pdfcraft_automation::schema::parse_version(version).unwrap();
+    fn call(schema_version: Value) -> Value {
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "policy_status", "arguments": {}, "_meta": { "schemaVersion": schema_version } } })
+    }
+    // Same major (any minor): the call runs.
+    for asked in [json!(version), json!(format!("{major}.0")), json!(format!("{major}.999"))] {
+        let replies = session(&[], &[call(asked.clone())]);
+        let result = &replies[1]["result"];
+        assert_ne!(result["isError"], json!(true), "{asked}: {result}");
+        assert!(result["structuredContent"].get("profile").is_some(), "the tool ran: {result}");
+    }
+    // A different major: a normal tool result with isError and the stable kind "unsupported";
+    // nothing ran. The proof: the same call without the pin would have run policy_status.
+    let asked = format!("{}.0", major + 1);
+    let replies = session(&[], &[call(json!(asked))]);
+    let result = &replies[1]["result"];
+    assert_eq!(result["isError"], json!(true), "{result}");
+    assert_eq!(result["structuredContent"]["error"]["kind"], "unsupported", "{result}");
+    let message = result["structuredContent"]["error"]["message"].as_str().unwrap();
+    assert!(message.contains(&asked) && message.contains(version), "both versions named: {message}");
+    assert_eq!(result["content"][0]["text"], message, "the text block is the same failure: {result}");
+    // Not a version: a protocol error, not a tool result.
+    let replies = session(&[], &[call(json!("banana"))]);
+    assert_eq!(replies[1]["error"]["code"], -32602, "{}", replies[1]);
+    assert!(replies[1]["error"]["message"].as_str().unwrap().contains("not a version"), "{}", replies[1]);
+    // No _meta at all: unchanged behaviour.
+    let plain = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "policy_status", "arguments": {} } });
+    let replies = session(&[], &[plain]);
+    assert_ne!(replies[1]["result"]["isError"], json!(true), "{}", replies[1]);
+}

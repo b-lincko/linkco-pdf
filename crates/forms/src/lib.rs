@@ -13,7 +13,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 
 mod actions;
 pub mod af;
@@ -1106,7 +1106,119 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
     Ok(())
 }
 
-/// Acrobat's Clear form: every field (or the named ones) back to its default value.
+/// What one widget's appearance needed, and what was done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appearances {
+    /// The widget draws what the field's value, font and colours say; nothing was drawn.
+    Current,
+    /// The widget had no `/AP`, so its value could not be seen at all.
+    Missing,
+    /// The widget had an `/AP` that does not match what the field would draw now.
+    Stale,
+    /// A button's icon or a signature's mark is not drawn from the field's value; left alone.
+    Unsupported,
+}
+
+/// Every widget whose appearance is missing or stale, with the field it belongs to.
+#[derive(Clone, Debug)]
+pub struct Regenerated {
+    /// In document tab order, each widget once.
+    pub widgets: Vec<(String, Appearances)>,
+}
+
+impl Regenerated {
+    /// How many widgets were redrawn (missing or stale).
+    pub fn drawn(&self) -> usize {
+        self.widgets.iter().filter(|(_, a)| matches!(a, Appearances::Missing | Appearances::Stale)).count()
+    }
+}
+
+/// Regenerate the appearances of text and choice fields from their current value, `/DA` and
+/// `/MK`, the same drawing [`set_value`] makes after a fill — for a form whose appearances are
+/// missing (a value set by a producer that wrote `/V` only, so the value is invisible) or stale
+/// (the value, font or colour changed under an appearance made for the old one).
+///
+/// Only an appearance that is missing or does not match what would be drawn is replaced: a widget
+/// whose `/AP` is already what this would draw keeps it, so nothing changes on a second run and an
+/// appearance a producer made more carefully than this code can is left alone. A button's icon and
+/// a signature's mark are not drawn from a value, so those widgets are reported
+/// [`Appearances::Unsupported`] and left as they are. `names` limits the work to those fields
+/// (all when `None`), and a name that is not a field is an error.
+pub fn regenerate(doc: &mut Document, names: Option<&[String]>) -> Result<Regenerated, FormError> {
+    let all = fields(doc);
+    if all.is_empty() {
+        return Err(FormError::NoForm);
+    }
+    if let Some(n) = names
+        && let Some(missing) = n.iter().find(|n| !all.iter().any(|f| &f.name == *n))
+    {
+        return Err(FormError::NoSuchField(missing.clone()));
+    }
+    let chosen: Vec<Field> = all.iter().filter(|f| names.is_none_or(|n| n.contains(&f.name))).cloned().collect();
+    let mut widgets = Vec::new();
+    for f in &chosen {
+        // A button's icon and a signature's mark are not the field's value drawn from `/DA`.
+        if matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) {
+            widgets.extend(f.widgets.iter().map(|_| (f.name.clone(), Appearances::Unsupported)));
+            continue;
+        }
+        for w in &f.widgets {
+            let want = appearance::field_appearance(doc, f, w, &f.value);
+            let state = if !has_normal(doc, w) {
+                Appearances::Missing
+            } else if same_normal(doc, w, &want) {
+                Appearances::Current
+            } else {
+                Appearances::Stale
+            };
+            if matches!(state, Appearances::Missing | Appearances::Stale) {
+                let ap = doc.add(Object::Stream(want));
+                let mut fresh = Dict::new();
+                fresh.set(b"N".to_vec(), Object::Ref(ap));
+                let apd = merged_appearance(doc, w.obj, &fresh);
+                doc.update_dict(w.obj, |d| d.set(b"AP".to_vec(), Object::Dict(apd)))?;
+            }
+            widgets.push((f.name.clone(), state));
+        }
+    }
+    Ok(Regenerated { widgets })
+}
+
+/// Whether a widget has a normal appearance at all.
+fn has_normal(doc: &Document, w: &Widget) -> bool {
+    let Some(ap) = doc.get(w.obj).as_dict().and_then(|d| d.get(b"AP").map(|a| doc.resolve(a))) else { return false };
+    let Some(n) = ap.as_dict().and_then(|d| d.get(b"N").map(|n| doc.resolve(n))) else { return false };
+    matches!(&*n, Object::Stream(_)) || n.as_dict().is_some_and(|d| !d.is_empty())
+}
+
+/// The bytes a widget's normal appearance draws, when it has one.
+fn stored_normal(doc: &Document, w: &Widget) -> Option<Vec<u8>> {
+    let ap = doc.get(w.obj).as_dict().and_then(|d| d.get(b"AP").map(|a| doc.resolve(a)))?;
+    let n = ap.as_dict().and_then(|d| d.get(b"N").map(|n| doc.resolve(n)))?;
+    match &*n {
+        Object::Stream(s) => s.decoded().ok(),
+        // A dictionary of states: the one the widget shows now.
+        Object::Dict(d) => match d.get(w.state.as_deref()?.as_bytes()).map(|s| doc.resolve(s)) {
+            Some(o) => match &*o {
+                Object::Stream(s) => s.decoded().ok(),
+                _ => None,
+            },
+            None => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether the widget's normal appearance already draws what `want` would draw. A stored stream
+/// that cannot be decoded is treated as different, so it is redrawn rather than trusted.
+fn same_normal(doc: &Document, w: &Widget, want: &Stream) -> bool {
+    match (stored_normal(doc, w), want.decoded()) {
+        (Some(have), Ok(want)) => have == want,
+        _ => false,
+    }
+}
+
+/// Acrobat's Clear form: every field (or the named ones) back to their default value.
 pub fn reset(doc: &mut Document, names: Option<&[String]>) -> Result<usize, FormError> {
     let all = fields(doc);
     if all.is_empty() {

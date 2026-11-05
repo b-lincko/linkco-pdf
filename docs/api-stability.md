@@ -33,6 +33,27 @@ A different major version is not compatible, and the command exits **3** (`unsup
 still printing the document, so a script can check the version before it starts a job rather than
 discovering the mismatch in the middle of one.
 
+The same question can be asked **per call**, so a mismatch is never discovered in the middle of a
+job — the call is refused before anything runs:
+
+* `pdfcraft-cli run <tool> … --schema-version V` (or `run --script steps.json --schema-version V`)
+  checks the whole invocation before the first tool is called: a different major exits **3**
+  (`unsupported`), and a `V` that is not a version exits **2** (`usage`). When the flag is
+  absent, the default pin is read from the environment: `PDFCRAFT_SCHEMA_VERSION` set to a
+  version applies to every `run` of that environment (a deployment pins once instead of adding
+  the flag to every call), and an explicit `--schema-version` always wins over it; an empty
+  `PDFCRAFT_SCHEMA_VERSION` is treated as unset.
+* Inside a `--script`, one step may pin its own revision — `{"tool": …, "args": …,
+  "schema_version": "V"}` — and it is answered before that step runs, through the same rule: a
+  different major exits **3** (`unsupported`) without running that step or any later one (steps
+  before it already ran, so the failure is reported as `partial`, exit **6**), and a `V` that is
+  not a version — or a non-string value — exits **2** (`usage`). Steps without the key are
+  unaffected.
+* MCP `tools/call` with `params._meta.schemaVersion: "V"`: a different major is answered as a
+  normal tool result with `isError: true` and `structuredContent.error.kind: "unsupported"`
+  (nothing ran); a value that is not a version is a protocol error (`-32602`). Clients that send
+  no `_meta` are unaffected.
+
 **Protocol version** is the MCP revision, negotiated at `initialize` from the versions the server
 lists. It has nothing to do with `schema_version`.
 

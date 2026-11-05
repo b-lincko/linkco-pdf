@@ -2,7 +2,7 @@
 //! "save changes?" prompt when closing a tab or quitting with unsaved edits.
 
 use pdfcraft_engine::Edit;
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, sync_staged};
+use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes, sync_dir, sync_staged};
 
 use crate::PdfCraftApp;
 
@@ -808,7 +808,10 @@ fn write_atomically_using(
             write_all(&mut f, bytes)?;
             sync_staged(&f, sync_all)?;
         }
-        rename(&tmp, target)
+        rename(&tmp, target)?;
+        // The bytes are on the disk; flushing the folder makes the name that points at them
+        // durable too, so a save that returned is still the file there after a power loss.
+        sync_dir(dir)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -975,7 +978,7 @@ mod tests {
         }
         if let Some(phase) = std::env::var_os(PHASE) {
             let phase = phase.to_str().unwrap();
-            assert!(matches!(phase, "partial" | "flushed" | "renamed"));
+            assert!(matches!(phase, "partial" | "flushed" | "renamed" | "synced"));
             let dir = PathBuf::from(std::env::var_os(DIRECTORY).unwrap());
             let target = dir.join("out.pdf");
             let ready = dir.join("ready");
@@ -996,10 +999,16 @@ mod tests {
                         pause(&ready, phase);
                     }
                     std::fs::rename(from, to)?;
-                    pause(&ready, phase);
+                    if phase == "renamed" {
+                        pause(&ready, phase);
+                    }
+                    Ok(())
                 },
             )
             .unwrap();
+            if phase == "synced" {
+                pause(&ready, phase);
+            }
             panic!("the child returned instead of waiting for termination");
         }
         struct Reap(std::process::Child);
@@ -1014,7 +1023,7 @@ mod tests {
         }
         let module = module_path!().split_once("::").unwrap().1;
         let test = format!("{module}::process_kill_preserves_atomic_save_boundary_and_retry");
-        for phase in ["partial", "flushed", "renamed"] {
+        for phase in ["partial", "flushed", "renamed", "synced"] {
             for existing in [false, true] {
                 let dir = staging_dir(&format!("kill-{phase}-{existing}"));
                 let target = dir.join("out.pdf");
@@ -1050,9 +1059,9 @@ mod tests {
                     use std::os::unix::process::ExitStatusExt as _;
                     assert_eq!(status.signal(), Some(9), "the child must die from SIGKILL");
                 }
-                if phase == "renamed" {
+                if phase == "renamed" || phase == "synced" {
                     assert_eq!(std::fs::read(&target).unwrap(), NEW);
-                    assert!(!staged(&dir, 7).exists());
+                    assert!(!staged(&dir, 7).exists(), "a completed save leaves no staging file");
                 } else {
                     if existing {
                         assert_eq!(read(&target), "ORIGINAL FILE");
@@ -1072,7 +1081,7 @@ mod tests {
                 write_atomically_with(&target.to_string_lossy(), b"RETRY COMPLETE", [7, 8]).unwrap();
                 assert_eq!(read(&target), "RETRY COMPLETE");
                 assert!(!staged(&dir, 8).exists());
-                if phase == "renamed" {
+                if phase == "renamed" || phase == "synced" {
                     assert!(!staged(&dir, 7).exists());
                 } else {
                     let expected = if phase == "partial" { b"PARTIAL".as_slice() } else { NEW };

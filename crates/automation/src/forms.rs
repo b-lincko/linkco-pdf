@@ -2,7 +2,7 @@
 //! prepare a form (add, change and delete fields).
 
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, Validate};
-use pdfcraft_engine::{Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
+use pdfcraft_engine::{Appearances, DocId, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
 use serde_json::{Value, json};
 
 use crate::{Args, Automation, Result, ToolError, failed};
@@ -294,6 +294,34 @@ impl Automation {
     pub(crate) fn form_reset(&mut self, a: &Args) -> Result<Value> {
         let names = a.get("fields").map(|_| a.strs("fields").map(|v| v.into_iter().map(str::to_owned).collect::<Vec<_>>())).transpose()?;
         self.apply(a, Edit::ResetForm { names })
+    }
+
+    pub(crate) fn form_regenerate_appearances(&mut self, a: &Args) -> Result<Value> {
+        let names = a.get("fields").map(|_| a.strs("fields").map(|v| v.into_iter().map(str::to_owned).collect::<Vec<_>>())).transpose()?;
+        // What the edit will touch, read from a parsed copy before it runs: the answer says which
+        // fields were missing an appearance, which were stale, and which were already right.
+        let id = DocId(u64::try_from(a.int("doc")?).map_err(|_| ToolError::InvalidArgs("doc must be positive".into()))?);
+        let plan = self.session.preview_field_appearances(id, names.as_deref()).map_err(|e| failed(e.to_string()))?;
+        let mut out = self.apply(a, Edit::RegenerateFieldAppearances { names })?;
+        let mut missing = Vec::new();
+        let mut stale = Vec::new();
+        let mut unsupported = Vec::new();
+        for (name, state) in plan.widgets {
+            let list = match state {
+                Appearances::Missing => &mut missing,
+                Appearances::Stale => &mut stale,
+                Appearances::Unsupported => &mut unsupported,
+                Appearances::Current => continue,
+            };
+            if !list.contains(&name) {
+                list.push(name);
+            }
+        }
+        out["drawn"] = json!(missing.len() + stale.len());
+        out["missing"] = json!(missing);
+        out["stale"] = json!(stale);
+        out["unsupported"] = json!(unsupported);
+        Ok(out)
     }
 
     pub(crate) fn form_add_field(&mut self, a: &Args) -> Result<Value> {
