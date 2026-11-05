@@ -32,12 +32,15 @@ fn seeded(dir: &std::path::Path) -> String {
     let bytes = s.create_blank(300.0, 400.0, 1).unwrap();
     let id = s.open("form.pdf", None, bytes, None).unwrap();
     for (i, name) in ["alpha", "beta"].iter().enumerate() {
-        s.apply(id, Edit::AddField {
-            page: 0,
-            rect: [30.0, 300.0 - 30.0 * i as f64, 210.0, 324.0 - 30.0 * i as f64],
-            kind: NewField::Text { multiline: false },
-            name: Some((*name).into()),
-        })
+        s.apply(
+            id,
+            Edit::AddField {
+                page: 0,
+                rect: [30.0, 300.0 - 30.0 * i as f64, 210.0, 324.0 - 30.0 * i as f64],
+                kind: NewField::Text { multiline: false },
+                name: Some((*name).into()),
+            },
+        )
         .unwrap();
     }
     let edit = Edit::Batch {

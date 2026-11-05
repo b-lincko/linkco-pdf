@@ -1718,7 +1718,8 @@ fn a_stale_appearance_is_redrawn_and_a_current_one_is_left_alone() {
     // Give "city" a value and an appearance that draws it...
     let city = field(&fields(&doc), "city").clone();
     doc.update_dict(city.obj, |d| d.set(b"V".to_vec(), pdfcraft_cos::PdfString::text("Doha"))).unwrap();
-    regenerate(&mut doc, Some(&["city".to_string()])).unwrap();
+    let only_city = ["city".to_string()];
+    regenerate(&mut doc, Some(&only_city)).unwrap();
     let shown = reopen(&doc);
     assert!(ap(&shown, &field(&fields(&shown), "city").widgets[0]).contains("Doha"), "the first appearance draws the old value");
     let mut doc = shown;
@@ -1734,7 +1735,7 @@ fn a_stale_appearance_is_redrawn_and_a_current_one_is_left_alone() {
     assert!(redrawn.contains("Kharkiv"), "the appearance shows the new value: {redrawn}");
     // Nothing else was stale: the rest is either already right or not drawn from a value.
     assert_eq!(plan.widgets.iter().filter(|(_, a)| *a == Appearances::Stale).count(), 1, "{:?}", plan.widgets);
-    assert!(plan.widgets.iter().filter(|(_, a)| **a != Appearances::Unsupported).all(|(n, a)| n == "city" || *a == Appearances::Current));
+    assert!(plan.widgets.iter().filter(|(_, a)| *a != Appearances::Unsupported).all(|(n, a)| n == "city" || *a == Appearances::Current));
 }
 
 /// A button's icon and a signature's mark are not drawn from a value: reported, not invented.
@@ -1754,14 +1755,16 @@ fn buttons_and_signatures_are_reported_as_unsupported_and_left_alone() {
 #[test]
 fn regenerate_can_be_limited_to_named_fields_and_refuses_unknown_ones() {
     let mut doc = fixture();
-    let plan = regenerate(&mut doc, Some(&["name".to_string()])).unwrap();
+    let only = ["name".to_string()];
+    let plan = regenerate(&mut doc, Some(&only)).unwrap();
     assert!(plan.widgets.iter().all(|(n, _)| n == "name"), "only the named field was looked at: {:?}", plan.widgets);
     assert_eq!(plan.drawn(), 1);
     // The unnamed fields still have no appearance: the limit was real.
     let other = field(&fields(&doc), "notes");
     assert!(doc.get(other.widgets[0].obj).as_dict().unwrap().get(b"AP").is_none());
 
-    assert!(matches!(regenerate(&mut doc, Some(&["nope".to_string()])), Err(FormError::NoSuchField(n)) if n == "nope"));
+    let unknown = ["nope".to_string()];
+    assert!(matches!(regenerate(&mut doc, Some(&unknown)), Err(FormError::NoSuchField(n)) if n == "nope"));
 }
 
 /// A document with no form has nothing to regenerate, and says so rather than doing nothing.

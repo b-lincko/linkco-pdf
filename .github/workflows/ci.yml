@@ -113,7 +113,8 @@ jobs:
         with:
           key: wasm32
       - name: Check library crates for wasm32
-        run: cargo xtask wasm
+        shell: bash
+        run: .github/scripts/run-annotated.sh "wasm32" cargo xtask wasm
 
   deny:
     name: dependency licences and advisories

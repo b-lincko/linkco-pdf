@@ -1199,8 +1199,11 @@ fn stored_normal(doc: &Document, w: &Widget) -> Option<Vec<u8>> {
         Object::Stream(s) => s.decoded().ok(),
         // A dictionary of states: the one the widget shows now.
         Object::Dict(d) => match d.get(w.state.as_deref()?.as_bytes()).map(|s| doc.resolve(s)) {
-            Some(Object::Stream(s)) => s.decoded().ok(),
-            _ => None,
+            Some(o) => match &*o {
+                Object::Stream(s) => s.decoded().ok(),
+                _ => None,
+            },
+            None => None,
         },
         _ => None,
     }
