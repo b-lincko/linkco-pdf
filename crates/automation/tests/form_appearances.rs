@@ -111,7 +111,7 @@ fn regenerating_can_be_limited_and_an_unknown_field_is_an_error() {
 #[test]
 fn a_document_without_a_form_says_so() {
     let dir = workdir("none");
-    let mut s = Session::new();
+    let s = Session::new();
     let bytes = s.create_blank(300.0, 400.0, 1).unwrap();
     let path = dir.join("plain.pdf");
     std::fs::write(&path, &*bytes).unwrap();
