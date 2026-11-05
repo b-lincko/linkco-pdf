@@ -1490,19 +1490,16 @@
 	Added {n} comments	Добавени са {n} коментара
 	Choose a folder for the results	Изберете папка за резултатите
 	Files for {name}	Файлове за {name}
-	An action is already running	Вече се изпълнява действие
 	Running action… file {d} of {t}	Изпълнение на действие… файл {d} от {t}
 	No unlinked web addresses were found in the text	В текста не са открити уеб адреси без връзка
 	Created 1 link	Създадена е 1 връзка
 	Created {n} links	Създадени са {n} връзки
-	Text recognition is already running	Разпознаването на текст вече се изпълнява
 	Optimizing… removing user data	Оптимизиране… премахване на потребителски данни
 	Optimizing… image {d} of {t}	Оптимизиране… изображение {d} от {t}
 	Optimizing… cleaning up	Оптимизиране… почистване
 	Optimizing… merging identical objects	Оптимизиране… сливане на еднакви обекти
 	Optimizing… writing the copy	Оптимизиране… записване на копието
 	Cancelling…	Отказване…
-	Optimization is already running	Оптимизирането вече се изпълнява
 	Optimization cancelled	Оптимизирането е отказано
 	Couldn't optimize the file	Файлът не можа да бъде оптимизиран
 	Recognizing text… file {d} of {t}	Разпознаване на текст… файл {d} от {t}
@@ -2173,4 +2170,52 @@ key	Space	Интервал
 	Driver: {driver}	Драйвер: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Състояние на принтера: {status}. Проверете връзката с принтера преди печат.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Не са намерени принтери. Включете принтера и го свържете, след което изберете „Провери отново“. Все още можете да запишете като PDF.
+	Print both sides	Печат от двете страни
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Печат от двете страни на листа, с обръщане по дългия ръб, ако принтерът може.
+	Printing on both sides of the sheet. Click to print on one side only.	Печат от двете страни на листа. Натиснете за печат само от едната страна.
+	Match page at 100%	Хартия по страницата, мащаб 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Печат при 100% върху хартия със същия размер, без промяна на диапазона от страници.
+	PDF page: {w} × {h} in	Страница на PDF: {w} × {h} инча
+	PDF scale: {scale}%	Мащаб на PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Мащабът, в който се рисува страницата; драйверът на принтера може все пак да смени хартията или да намали задачата.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	„Рязане и подреждане“ печата едностранни листове. Изберете друг ред на страниците за печат от двете страни.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Изрязва всяка страница до отпечатаната област, завърта я изправено и я побира в листа без разтягане. Един етикет на лист.
+	Turn upside down (180°)	Обърни наопаки (180°)
+	the name is not a plain file name	името не е обикновено име на файл
 	Developer: {name}	Разработчик: {name}
+	Overwrite	Запиши върху
+	Save As…	Запази като…
+	“{name}” changed on disk while you were working on it.	„{name}“ се промени на диска, докато работеше по него.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Записът върху него ще замени версията, която друга програма е записала. Запази копие, ако ти трябват и двете.
+	“{name}” was moved or renamed to “{found}”.	„{name}“ бе преместен или преименуван на „{found}“.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	„{name}“ вече не е в „{path}“; преместен е в друга папка или е изтрит.
+	Tried {n} times. Zoom or rotate the page to try again.	Опитано {n} пъти. Увеличете или завъртете страницата, за да опитате отново.
+	On disk: {n} pages, written {when}.	На диска: {n} страници, записан {when}.
+	On disk: written {when}.	На диска: записан {when}.
+	The version on disk is too large to compare here.	Версията на диска е твърде голяма, за да се сравни тук.
+	“{name}” could not be opened to compare it.	„{name}“ не можа да бъде отворен за сравнение.
+	{name} (on disk)	{name} (на диска)
+	Recognize Text in Files	Разпознаване на текст във файлове
+	 (stopped after {done} of {total})	 (спряно след {done} от {total})
+	file {d} of {t}	Файл {d} от {t}
+	Export stopped after {done} of {total} files	Експортирането спря след {done} от {total} файла
+	and {n} more	и още {n}
+	The job stopped without finishing	Задачата спря, без да завърши
+	The job couldn't start: {e}	Задачата не можа да започне: {e}
+	Run {name} on {n} files?	Да се изпълни „{name}“ за {n} файла?
+	Recognize text in {n} files?	Разпознаване на текст в {n} файла?
+	Results go to {folder}	Резултатите отиват в {folder}
+	Writes {n} file(s).	Записва {n} файл(а).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Заменя {n} вече налични файла. Заменен файл не може да бъде възстановен.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файла се записват до вече наличен, който остава непроменен.
+	Nothing that is already in the folder is replaced.	Нищо, което вече е в папката, не се заменя.
+	The folder changed since this was shown; check what this batch would write now	Папката се промени, след като това беше показано; проверете какво би записал пакетът сега
+	Export to {format}	Експортиране към {format}
+	Exporting… page {d} of {t}	Експортиране… страница {d} от {t}
+	Export cancelled	Експортирането е отменено
+	Print to {printer}	Печат към {printer}
+	Preparing the print job	Подготовка на задачата за печат
+	Rendering sheet {d} of {t}	Изобразяване на лист {d} от {t}
+	Print cancelled: nothing was sent to {printer}	Печатът е отменен: нищо не беше изпратено към {printer}
+	Waiting its turn	Чака своя ред
+	The job was cancelled before it started	Задачата беше отменена, преди да започне

@@ -39,13 +39,12 @@ impl Default for OptimizeDraft {
     }
 }
 
-/// Progress of a background optimization: the stage, the result once finished, and a cancel
-/// request.
+/// Progress of a background optimization: the stage and the result once finished. Stopping goes
+/// through the job centre's [`crate::jobs::Cancel`], shared with the worker.
 #[derive(Default)]
 pub struct OptimizeProgress {
     pub stage: OptimizeStage,
     pub result: Option<Result<Optimized, EditError>>,
-    pub cancel: bool,
 }
 
 /// Which command started an optimization: they save under different names, and only the
@@ -72,6 +71,20 @@ pub struct OptimizeRun {
     pub doc: DocId,
     pub kind: OptimizeKind,
     pub progress: Arc<Mutex<OptimizeProgress>>,
+    /// The job's row in the centre, so the card and the control channel can see and stop it.
+    pub job: crate::jobs::JobId,
+    /// Whether the worker is still going, so a poll can tell a slow run from one that ended
+    /// without reporting (REC-R06).
+    pub alive: crate::jobs::Alive,
+}
+
+/// The job's name in the card: the command that started it, under the label the menu and the
+/// tool catalogue already use (so the card needs no new string of its own).
+fn job_name(kind: OptimizeKind) -> String {
+    match kind {
+        OptimizeKind::Reduce => tl!("Reduce file size…").to_string(),
+        OptimizeKind::Advanced => tl!("Optimize PDF…").to_string(),
+    }
 }
 
 /// The notice's text for a stage.
@@ -276,21 +289,36 @@ impl PdfCraftApp {
             return;
         }
         let Some((_, id)) = self.active_ids() else { return };
+        self.start_optimize_on(id, kind, settings, discard);
+    }
+
+    /// [`Self::start_optimize`] on the document the request was made for, which matters when the
+    /// request has waited its turn: the reader may have moved to another document by then.
+    fn start_optimize_on(&mut self, id: pdfcraft_engine::DocId, kind: OptimizeKind, settings: &Settings, discard: &[Hidden]) {
+        // A second optimization waits its turn instead of being refused: its row says so, and it
+        // starts when the one in hand ends (see `crate::jobs`).
         if self.optimize_run.is_some() {
-            self.notify_tr("Optimization is already running");
+            let (settings, discard) = (settings.clone(), discard.to_vec());
+            self.queue_job(crate::jobs::Kind::Optimize, job_name(kind), move |app| app.start_optimize_on(id, kind, &settings, &discard));
             return;
         }
         let job = match self.session.optimize_job(id, settings, discard) {
             Ok(job) => job,
             Err(e) => return self.save_optimized(id, kind, Err(e)),
         };
+        // Registered before the worker starts, so the card shows the job from this frame on.
+        let (job_id, cancel) = self.jobs.begin(crate::jobs::Kind::Optimize, job_name(kind), 0);
         let progress = Arc::new(Mutex::new(OptimizeProgress::default()));
         let p = progress.clone();
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
         let work = move || {
+            // Dropped however this ends, a panic included (see `jobs::Alive`).
+            let _worker = worker;
             let result = job.run(|stage| {
                 let Ok(mut s) = p.lock() else { return false };
                 s.stage = stage;
-                !s.cancel
+                !cancel.is_cancelled()
             });
             if let Ok(mut s) = p.lock() {
                 s.result = Some(result);
@@ -307,36 +335,45 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.optimize_run = Some(OptimizeRun { doc: id, kind, progress });
+        self.optimize_run = Some(OptimizeRun { doc: id, kind, progress, job: job_id, alive });
         self.poll_optimize();
     }
 
-    /// Stop a running optimization (nothing is saved).
+    /// Stop a running optimization (nothing is saved). The worker stops at its next stage.
     pub fn cancel_optimize(&mut self) {
-        if let Some(r) = &self.optimize_run
-            && let Ok(mut s) = r.progress.lock()
-        {
-            s.cancel = true;
+        if let Some(r) = &self.optimize_run {
+            let job = r.job;
+            self.jobs.cancel(job);
         }
     }
 
     /// Show progress; save the copy once the worker is done.
     pub(crate) fn poll_optimize(&mut self) {
         let Some(run) = self.optimize_run.as_ref() else { return };
-        let (doc, kind, progress) = (run.doc, run.kind, run.progress.clone());
+        let (doc, kind, progress, job) = (run.doc, run.kind, run.progress.clone(), run.job);
         let Ok(mut s) = progress.lock() else {
-            // The worker panicked while holding the lock: it will never report back.
+            // The worker panicked while holding the lock: it will never report back. One sentence
+            // for one situation, the same one the other four kinds of work use (see jobs::Alive),
+            // not the one for an optimization that ran and refused.
             self.optimize_run = None;
-            self.progress_notice = None;
-            self.notify_tr("Couldn't optimize the file");
+            self.jobs.finish(job);
+            self.notify_tr("The job stopped without finishing");
             return;
         };
         let Some(result) = s.result.take() else {
-            let cancelling = s.cancel;
+            let ended = !run.alive.is_running();
             let stage = s.stage;
             drop(s);
-            let label = if cancelling { tl!("Cancelling…").to_string() } else { stage_label(stage) };
-            self.progress_notice = Some(crate::widgets::ProgressNotice { label, fraction: stage.fraction(), cancellable: !cancelling });
+            if ended {
+                // The worker ended without a result: it panicked, and a panic does not write.
+                // End the job here rather than leave the card spinning and the next optimization
+                // refused for the life of the session; the document is untouched either way.
+                self.optimize_run = None;
+                self.jobs.finish(job);
+                self.notify_tr("The job stopped without finishing");
+                return;
+            }
+            self.jobs.stage(job, stage_label(stage), stage.fraction());
             if let Some(ctx) = &self.ctx {
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
             }
@@ -344,7 +381,7 @@ impl PdfCraftApp {
         };
         drop(s);
         self.optimize_run = None;
-        self.progress_notice = None;
+        self.jobs.finish(job);
         match result {
             Err(EditError::Cancelled) => self.notify_tr("Optimization cancelled"),
             result => {
@@ -369,12 +406,16 @@ mod tests {
     fn the_progress_card_shows_the_stage_and_cancels() {
         let progress = Arc::new(Mutex::new(OptimizeProgress { stage: OptimizeStage::Images { done: 3, total: 10 }, ..Default::default() }));
         let p = progress.clone();
+        let token: Arc<std::sync::Mutex<Option<crate::jobs::Cancel>>> = Arc::default();
+        let t = token.clone();
         let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(move |_cc| {
             let mut app = PdfCraftApp::new();
             app.set_option("language", "en").unwrap();
             app.open_bytes("notes.txt", None, b"hello".to_vec()).unwrap();
             let (_, doc) = app.active_ids().unwrap();
-            app.optimize_run = Some(OptimizeRun { doc, kind: OptimizeKind::Advanced, progress: p });
+            let (job, cancel) = app.jobs.begin(crate::jobs::Kind::Optimize, "Optimize PDF…".into(), 0);
+            *t.lock().unwrap() = Some(cancel);
+            app.optimize_run = Some(OptimizeRun { doc, kind: OptimizeKind::Advanced, progress: p, job, alive: crate::jobs::Alive::new() });
             app.notify("Saved notes.pdf");
             app
         });
@@ -383,32 +424,79 @@ mod tests {
         if let Ok(path) = std::env::var("PDFCRAFT_OPTIMIZE_PROGRESS_SHOT") {
             h.render().unwrap().save(path).unwrap();
         }
-        h.get_by_label("Optimizing… image 4 of 10");
-        let shown = h.state().progress_notice.clone().unwrap();
-        assert!((shown.fraction - 0.275).abs() < 1e-4, "{shown:?}");
-        assert!(shown.cancellable);
+        // The card names the job and what it is doing, and shows how far it has got.
+        h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+        let job = h.state().jobs.jobs().first().cloned().expect("the job is listed");
+        assert!((job.fraction - 0.275).abs() < 1e-4, "{job:?}");
+        assert!(!job.stopping);
 
         h.get_by_label("Cancel").click();
         h.run_steps(2);
-        assert!(progress.lock().unwrap().cancel, "the worker is asked to stop");
-        h.get_by_label("Cancelling…");
+        assert!(token.lock().unwrap().as_ref().is_some_and(|c| c.is_cancelled()), "the worker is asked to stop");
+        h.get_by_label("Optimize PDF…: Cancelling…");
         assert!(h.query_by_label("Cancel").is_none(), "Cancel is not offered twice");
 
         // The worker stops and reports back.
         progress.lock().unwrap().result = Some(Err(EditError::Cancelled));
         h.run_steps(2);
-        assert!(h.state().optimize_run.is_none() && h.state().progress_notice.is_none());
+        assert!(h.state().optimize_run.is_none() && h.state().jobs.is_empty(), "the card goes with the job");
         assert_eq!(h.state().toast.as_ref().map(|t| t.0.as_str()), Some("Optimization cancelled"));
     }
 
+    /// A second optimization asked for while one is going is not refused: it waits in the centre
+    /// with a row that says so, and it starts when the one in hand ends (REC-R04's queue).
     #[test]
-    fn a_second_run_is_refused_while_one_is_going() {
+    fn a_second_run_waits_its_turn_instead_of_being_refused() {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.open_bytes("notes.txt", None, b"hello".to_vec()).unwrap();
         let (_, doc) = app.active_ids().unwrap();
-        app.optimize_run = Some(OptimizeRun { doc, kind: OptimizeKind::Reduce, progress: Arc::default() });
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Optimize, "Reduce file size…".into(), 0);
+        app.optimize_run = Some(OptimizeRun { doc, kind: OptimizeKind::Reduce, progress: Arc::default(), job, alive: crate::jobs::Alive::new() });
         app.optimize_with_draft();
-        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Optimization is already running"));
+        // Nothing is said about being refused, and the request has a row of its own.
+        assert!(app.toast.is_none(), "{:?}", app.toast);
+        let waiting = app.jobs.jobs().iter().find(|j| j.id != job).cloned().expect("the second optimization has a row");
+        assert!(waiting.queued, "{waiting:?}");
+        assert_eq!(waiting.kind, crate::jobs::Kind::Optimize);
+        assert!(app.has_waiting_jobs());
+        assert!(app.optimize_run.as_ref().is_some_and(|r| r.job == job), "the running one is untouched");
+        // While the first still runs, a frame changes nothing: the request waits rather than
+        // starting, and its row is not mistaken for a running job of its kind.
+        app.pump_queue();
+        assert_eq!(app.jobs.jobs().len(), 2, "{:?}", app.jobs.jobs());
+        assert!(app.has_waiting_jobs());
+        // When its turn comes is the queue's own business, tested in `crate::jobs`: here the
+        // waiting row is all this asks for.
+        assert!(app.jobs.is_busy(crate::jobs::Kind::Optimize), "the running one still holds the kind");
+    }
+}
+
+#[cfg(test)]
+mod worker_tests {
+    use super::*;
+
+    /// An optimization whose worker never reports — it panicked on one awkward page — used to
+    /// leave `optimize_run` set, so the card spun and every later optimization was refused for
+    /// the session (REC-R06). The worker's lifetime handle ends it instead.
+    #[test]
+    fn an_optimization_whose_worker_ended_without_a_result_ends_here() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let progress = Arc::new(Mutex::new(OptimizeProgress::default()));
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Optimize, "Optimize".into(), 0);
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        app.optimize_run = Some(OptimizeRun { doc: pdfcraft_engine::DocId(1), kind: OptimizeKind::Advanced, progress, job, alive });
+
+        app.poll_optimize();
+        assert_eq!(app.jobs.jobs().len(), 1, "a slow optimization is not a dead one");
+        assert!(app.toast.is_none());
+
+        drop(worker);
+        app.poll_optimize();
+        assert!(app.optimize_run.is_none(), "the run is over");
+        assert!(app.jobs.is_empty(), "and its row in the centre with it");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job stopped without finishing"));
     }
 }

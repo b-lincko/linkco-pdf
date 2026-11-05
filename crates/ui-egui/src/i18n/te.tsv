@@ -1513,19 +1513,16 @@ action wizard	Start	ప్రారంభించు
 	Added {n} comments	{n} వ్యాఖ్యలు జోడించబడ్డాయి
 	Choose a folder for the results	ఫలితాల కోసం ఒక ఫోల్డర్‌ను ఎంచుకోండి
 	Files for {name}	{name} కోసం ఫైల్‌లు
-	An action is already running	ఇప్పటికే ఒక చర్య అమలవుతోంది
 	Running action… file {d} of {t}	చర్య అమలవుతోంది… {t}లో {d}వ ఫైల్
 	No unlinked web addresses were found in the text	టెక్స్ట్‌లో లింక్ లేని వెబ్ చిరునామాలు ఏవీ కనుగొనబడలేదు
 	Created 1 link	1 లింక్ సృష్టించబడింది
 	Created {n} links	{n} లింక్‌లు సృష్టించబడ్డాయి
-	Text recognition is already running	టెక్స్ట్ గుర్తింపు ఇప్పటికే అమలవుతోంది
 	Optimizing… removing user data	ఆప్టిమైజ్ చేస్తోంది… వినియోగదారు డేటాను తీసివేస్తోంది
 	Optimizing… image {d} of {t}	ఆప్టిమైజ్ చేస్తోంది… {t}లో {d}వ చిత్రం
 	Optimizing… cleaning up	ఆప్టిమైజ్ చేస్తోంది… చక్కదిద్దుతోంది
 	Optimizing… merging identical objects	ఆప్టిమైజ్ చేస్తోంది… ఒకేలా ఉన్న ఆబ్జెక్ట్‌లను విలీనం చేస్తోంది
 	Optimizing… writing the copy	ఆప్టిమైజ్ చేస్తోంది… కాపీని రాస్తోంది
 	Cancelling…	రద్దు చేస్తోంది…
-	Optimization is already running	ఆప్టిమైజేషన్ ఇప్పటికే అమలవుతోంది
 	Optimization cancelled	ఆప్టిమైజేషన్ రద్దు చేయబడింది
 	Couldn't optimize the file	ఫైల్‌ను ఆప్టిమైజ్ చేయడం సాధ్యం కాలేదు
 	Recognizing text… file {d} of {t}	టెక్స్ట్‌ను గుర్తిస్తోంది… {t}లో {d}వ ఫైల్
@@ -2141,4 +2138,52 @@ key	Space	స్పేస్
 	Driver: {driver}	డ్రైవర్: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	ప్రింటర్ స్థితి: {status}. ముద్రించే ముందు ప్రింటర్ కనెక్షన్‌ను తనిఖీ చేయండి.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	ప్రింటర్లు ఏవీ కనుగొనబడలేదు. ప్రింటర్‌ను ఆన్ చేసి కనెక్ట్ చేయండి, ఆపై "మళ్లీ తనిఖీ చేయి" ఎంచుకోండి. మీరు ఇప్పటికీ PDFగా సేవ్ చేయవచ్చు.
+	Print both sides	రెండు వైపులా ముద్రించు
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	కాగితం రెండు వైపులా ముద్రించు, ప్రింటర్ చేయగలిగితే పొడవైన అంచున తిప్పి.
+	Printing on both sides of the sheet. Click to print on one side only.	కాగితం రెండు వైపులా ముద్రణ. ఒక వైపు మాత్రమే ముద్రించడానికి నొక్కండి.
+	Match page at 100%	100% వద్ద పేజీని సరిపోల్చు
+	Print at 100% on the paper of the same size, leaving the page range alone.	అదే పరిమాణం కాగితంపై 100% వద్ద ముద్రించు, పేజీ పరిధిని మార్చకుండా.
+	PDF page: {w} × {h} in	PDF పేజీ: {w} × {h} అంగుళాలు
+	PDF scale: {scale}%	PDF స్థాయి: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	పేజీ గీయబడిన స్థాయి; ప్రింటర్ డ్రైవర్ ఇప్పటికీ కాగితాన్ని మార్చవచ్చు లేదా పనిని చిన్నదిగా చేయవచ్చు.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	"కట్ అండ్ స్టాక్" ఒక వైపు మాత్రమే ఉన్న కాగితాలను ముద్రిస్తుంది. రెండు వైపులా ముద్రించడానికి మరొక పేజీ క్రమాన్ని ఎంచుకోండి.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	ప్రతి పేజీని ముద్రిత ప్రాంతానికి కత్తిరించి, నిటారుగా తిప్పి, సాగదీయకుండా షీట్‌కు సరిపెడుతుంది. ఒక్కో షీట్‌కు ఒక లేబుల్.
+	Turn upside down (180°)	తలకిందులుగా తిప్పు (180°)
+	the name is not a plain file name	పేరు సాధారణ ఫైల్ పేరు కాదు
 	Developer: {name}	డెవలపర్: {name}
+	Overwrite	పై రాయు
+	Save As…	ఇలా సేవ్ చేయి…
+	“{name}” changed on disk while you were working on it.	మీరు దానిపై పని చేస్తున్నప్పుడు “{name}” డిస్కుపై మారిపోయింది.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	దీనిపై సేవ్ చేస్తే మరొక ప్రోగ్రామ్ రాసిన వెర్షన్ భర్తీ చేయబడుతుంది. రెండూ కావాలంటే ఒక ప్రతి సేవ్ చేయండి.
+	“{name}” was moved or renamed to “{found}”.	“{name}” తరలించబడింది లేదా “{found}”గా పేరు మార్చబడింది.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}” ఇప్పుడు “{path}”లో లేదు; మరొక ఫోల్డర్కు తరలించబడింది లేదా తొలగించబడింది.
+	Tried {n} times. Zoom or rotate the page to try again.	{n} సార్లు ప్రయత్నించాం. మళ్లీ ప్రయత్నించడానికి పేజీని జూమ్ చేయండి లేదా తిప్పండి.
+	On disk: {n} pages, written {when}.	డిస్క్‌లో: {n} పేజీలు, రాయబడింది {when}.
+	On disk: written {when}.	డిస్క్‌లో: రాయబడింది {when}.
+	The version on disk is too large to compare here.	డిస్క్‌లోని వెర్షన్ ఇక్కడ పోల్చడానికి చాలా పెద్దది.
+	“{name}” could not be opened to compare it.	పోల్చడానికి “{name}” తెరవలేకపోయాం.
+	{name} (on disk)	{name} (డిస్క్‌లో)
+	Recognize Text in Files	ఫైళ్లలో టెక్స్ట్‌ను గుర్తించు
+	 (stopped after {done} of {total})	 ({total}లో {done} వద్ద ఆగింది)
+	file {d} of {t}	ఫైల్ {d} / {t}
+	Export stopped after {done} of {total} files	ఎగుమతి {total} ఫైళ్లలో {done} వద్ద ఆగిపోయింది
+	and {n} more	మరో {n}
+	The job stopped without finishing	పని పూర్తికాకుండా ఆగిపోయింది
+	The job couldn't start: {e}	పనిని ప్రారంభించలేకపోయాం: {e}
+	Run {name} on {n} files?	{n} ఫైళ్లపై {name} ను అమలు చేయాలా?
+	Recognize text in {n} files?	{n} ఫైళ్లలో వచనాన్ని గుర్తించాలా?
+	Results go to {folder}	ఫలితాలు {folder} కి వెళ్తాయి
+	Writes {n} file(s).	{n} ఫైల్(లు) రాస్తుంది.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	ఇప్పటికే ఉన్న {n} ఫైల్(ల)ను భర్తీ చేస్తుంది. భర్తీ చేసిన ఫైల్ తిరిగి రాదు.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} ఫైల్(లు) ఇప్పటికే ఉన్న దాని పక్కన రాయబడతాయి, అది మారదు.
+	Nothing that is already in the folder is replaced.	ఫోల్డర్‌లో ఇప్పటికే ఉన్నది ఏదీ భర్తీ చేయబడదు.
+	The folder changed since this was shown; check what this batch would write now	ఇది చూపిన తర్వాత ఫోల్డర్ మారింది; ఈ బ్యాచ్ ఇప్పుడు ఏమి రాస్తుందో చూడండి
+	Export to {format}	{format} కు ఎగుమతి
+	Exporting… page {d} of {t}	ఎగుమతి అవుతోంది… పేజీ {d} / {t}
+	Export cancelled	ఎగుమతి రద్దు చేయబడింది
+	Print to {printer}	{printer}కు ముద్రించు
+	Preparing the print job	ముద్రణ పనిని సిద్ధం చేస్తోంది
+	Rendering sheet {d} of {t}	షీట్ {d} / {t} రెండర్ అవుతోంది
+	Print cancelled: nothing was sent to {printer}	ముద్రణ రద్దు చేయబడింది: {printer}కు ఏమీ పంపలేదు
+	Waiting its turn	తన వంతు కోసం వేచి ఉంది
+	The job was cancelled before it started	పని ప్రారంభం కాకముందే రద్దు చేయబడింది

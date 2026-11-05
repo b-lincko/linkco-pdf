@@ -139,7 +139,7 @@ impl Automation {
         let all = self.doc(a)?.measurements().map_err(failed)?;
         let csv = measure::csv(&all.measurements);
         let target = self.resolve(a.str("out")?, true)?;
-        crate::write_atomic(&target, csv.as_bytes())?;
+        self.resources.write(&target, csv.as_bytes())?;
         Ok(json!({"path":target,"count":all.measurements.len(),"unsupported":all.unsupported.len(),"truncated":all.truncated}))
     }
 }

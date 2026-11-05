@@ -329,7 +329,8 @@ fn fetch_verified(url: &str, path: &Path, sha256: &str) -> Result<()> {
     let bytes = std::fs::read(&tmp)?;
     if sha256_hex(&bytes) != sha256 {
         let _ = std::fs::remove_file(&tmp);
-        bail!("{url}: SHA-256 mismatch (expected {sha256}); refusing to use it");
+        let actual = sha256_hex(&bytes);
+        bail!("{url}: SHA-256 mismatch (expected {sha256}, got {actual}); refusing to use it");
     }
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -341,12 +342,50 @@ fn fetch_verified(url: &str, path: &Path, sha256: &str) -> Result<()> {
 pub fn models(args: &[String]) -> Result<()> {
     let root = root();
     let m = load(&root)?;
+    if args.iter().any(|a| a == "--print-hashes") {
+        return print_model_hashes(&m);
+    }
     let dir = args.first().map(PathBuf::from).unwrap_or_else(|| root.join("assets/models"));
     for p in fetch_all(&m, &dir, "model")? {
         println!("models: {}", p.display());
     }
     std::fs::write(dir.join("ATTRIBUTION.txt"), models_attribution(&m))?;
     Ok(())
+}
+
+/// `cargo xtask models --print-hashes`: download each model and print what the server sends.
+///
+/// Upstream retires model files without much notice — the `.rten` ones were withdrawn on
+/// 2026-10-27 (robertknight/ocrs#282) — so a maintainer needs the hash of whatever is served
+/// *now* before pinning it in `ATTRIBUTION.toml`. This downloads to a temporary folder, reports
+/// each file's SHA-256 and size, and changes nothing. It never compares against the pinned value:
+/// that is `cargo xtask models`'s job.
+fn print_model_hashes(m: &Manifest) -> Result<()> {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-model-hashes-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let mut failed = false;
+    for f in m.fetched.iter().filter(|f| f.kind == "model") {
+        let tmp = dir.join(format!("{}.part", f.file));
+        println!("models: fetching {}", f.url);
+        let status = Command::new("curl").args(["-sSfL", "--retry", "3", "-o"]).arg(&tmp).arg(&f.url).status().context("running curl")?;
+        if !status.success() {
+            eprintln!("models: {}: download failed", f.url);
+            failed = true;
+            continue;
+        }
+        let bytes = std::fs::read(&tmp)?;
+        println!("models: {}  {}  sha256 {}", f.file, human_size(bytes.len()), sha256_hex(&bytes));
+        let _ = std::fs::remove_file(&tmp);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    if failed {
+        bail!("some models could not be downloaded");
+    }
+    Ok(())
+}
+
+fn human_size(bytes: usize) -> String {
+    if bytes >= 1 << 20 { format!("{:.2} MiB", bytes as f64 / f64::from(1u32 << 20)) } else { format!("{bytes} B") }
 }
 
 /// The credits shipped beside the models (their licences require attribution).

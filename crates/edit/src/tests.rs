@@ -1031,6 +1031,75 @@ fn close(a: [f64; 4], b: [f64; 4]) -> bool {
     a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
 }
 
+/// [`image_page`] with `pieces` as its `/Contents` array and a Form /Fm0 drawing 72,500–172,600.
+fn split_image_page(pieces: &[&[u8]]) -> Document {
+    let mut doc = image_page();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let mut form = pdfcraft_cos::Dict::new();
+    form.set(b"Type".to_vec(), pdfcraft_cos::Object::name("XObject"));
+    form.set(b"Subtype".to_vec(), pdfcraft_cos::Object::name("Form"));
+    form.set(b"BBox".to_vec(), pdfcraft_cos::Object::Array([72, 500, 172, 600].map(pdfcraft_cos::Object::Int).to_vec()));
+    let form = doc.add(pdfcraft_cos::Object::Stream(pdfcraft_cos::Stream::flate(form, b"0.5 g 72 500 100 100 re f")));
+    let image = doc.get(page);
+    let mut res = image.as_dict().and_then(|d| d.get(b"Resources")).and_then(|r| r.as_dict().cloned()).unwrap();
+    let mut xo = res.get(b"XObject").and_then(|x| x.as_dict().cloned()).unwrap();
+    xo.set(b"Fm0".to_vec(), pdfcraft_cos::Object::Ref(form));
+    res.set(b"XObject".to_vec(), pdfcraft_cos::Object::Dict(xo));
+    let refs: Vec<pdfcraft_cos::Object> = pieces
+        .iter()
+        .map(|b| pdfcraft_cos::Object::Ref(doc.add(pdfcraft_cos::Object::Stream(pdfcraft_cos::Stream::flate(pdfcraft_cos::Dict::new(), b)))))
+        .collect();
+    doc.update_dict(page, |d| {
+        d.set(b"Contents".to_vec(), pdfcraft_cos::Object::Array(refs));
+        d.set(b"Resources".to_vec(), pdfcraft_cos::Object::Dict(res));
+    })
+    .unwrap();
+    doc
+}
+
+/// #3113: a writer may split a page's content between any two tokens, so an image's operands
+/// can end one stream and its `Do` start the next.
+#[test]
+fn an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted() {
+    let square = [72.0, 500.0, 172.0, 600.0];
+    let cases: [(&[&[u8]], bool); 4] = [
+        (&[b"q 100 0 0 100 72 500 cm /Im0", b"Do Q"], false),
+        (&[b"q 100 0 0 100 72 500", b"cm /Im0 Do Q"], false),
+        (&[b"q /Fm0", b"Do Q"], true),
+        (&[b"q 100 0 0 100 72 500 cm /Im0 Do Q"], false),
+    ];
+    for (pieces, is_form) in cases {
+        let doc = split_image_page(pieces);
+        let label: Vec<_> = pieces.iter().map(|p| String::from_utf8_lossy(p)).collect();
+        let images = images::page_images(&doc, 0).unwrap();
+        assert_eq!(images.len(), 1, "{label:?}");
+        assert!(close(images[0].rect, square), "{label:?}: {:?}", images[0].rect);
+        assert_eq!(images[0].is_form, is_form, "{label:?}");
+        if !is_form {
+            let read = images::reading_images(&doc, 0).unwrap();
+            assert!(read.len() == 1 && close(read[0].rect, square), "{label:?}: {read:?}");
+        }
+
+        let mut deleted = doc.clone();
+        images::change_image(&mut deleted, 0, 0, &images::ImageChange::Delete).unwrap();
+        let deleted = reopen(&deleted);
+        assert!(images::page_images(&deleted, 0).unwrap().is_empty(), "{label:?}");
+
+        let target = [300.0, 500.0, 400.0, 600.0];
+        let mut moved = doc.clone();
+        images::change_image(&mut moved, 0, 0, &images::ImageChange::Transform(images::rect_to_rect(square, target))).unwrap();
+        let moved = reopen(&moved);
+        let after = images::page_images(&moved, 0).unwrap();
+        assert!(after.len() == 1 && close(after[0].rect, target), "{label:?}: {after:?}");
+
+        let mut shifted = doc.clone();
+        images::translate_images(&mut shifted, 0, &[0], [228.0, 0.0]).unwrap();
+        let shifted = reopen(&shifted);
+        let after = images::page_images(&shifted, 0).unwrap();
+        assert!(after.len() == 1 && close(after[0].rect, target), "{label:?}: {after:?}");
+    }
+}
+
 #[test]
 fn page_images_move_turn_replace_and_delete() {
     let mut doc = image_page();

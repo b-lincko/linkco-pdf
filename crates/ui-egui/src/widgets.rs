@@ -115,8 +115,8 @@ pub fn toast(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
-    // Above the progress notice while a job runs.
-    let card = if app.progress_notice.is_some() { ctx.data(|d| d.get_temp::<f32>(egui::Id::new(PROGRESS_HEIGHT))).unwrap_or(0.0) } else { 0.0 };
+    // Above the jobs card while a job runs.
+    let card = if !app.jobs.is_empty() { ctx.data(|d| d.get_temp::<f32>(egui::Id::new(JOBS_HEIGHT))).unwrap_or(0.0) } else { 0.0 };
     let lift = if card > 0.0 { 28.0 + card + 10.0 } else { 28.0 };
     egui::Area::new(egui::Id::new("toast"))
         .order(egui::Order::Tooltip)
@@ -142,24 +142,22 @@ pub fn toast(app: &mut PdfCraftApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
 }
 
-/// A background job's progress, shown at the bottom centre until the job is done.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProgressNotice {
-    /// What is happening ("Optimizing… image 3 of 40").
-    pub label: String,
-    /// From 0 to 1.
-    pub fraction: f32,
-    /// Show a Cancel button.
-    pub cancellable: bool,
-}
+/// Where the jobs card keeps its height this frame, for placing the toast above it.
+const JOBS_HEIGHT: &str = "jobs-card-height";
 
-/// Where the progress notice keeps its height this frame, for placing the toast above it.
-const PROGRESS_HEIGHT: &str = "progress-notice-height";
+/// How many running jobs the card lists; the rest are counted.
+const JOBS_SHOWN: usize = 3;
 
-/// Draw [`PdfCraftApp::progress_notice`]: the label, a bar that eases towards the fraction with
-/// a light sweeping across it, the percentage and Cancel. Returns true when Cancel was clicked.
-pub fn progress_notice(app: &PdfCraftApp, ctx: &egui::Context) -> bool {
-    let Some(p) = &app.progress_notice else { return false };
+/// Draw [`PdfCraftApp::jobs`]: one row per running job with what it is doing, how far it has got
+/// and how to stop it. Returns the job whose Cancel was clicked, if any.
+///
+/// Every background job goes through here (see [`crate::jobs`]), so a person sees the same list
+/// the control channel reports and stops the same job an agent would.
+pub fn jobs_card(app: &PdfCraftApp, ctx: &egui::Context) -> Option<crate::jobs::JobId> {
+    let jobs = app.jobs.jobs();
+    if jobs.is_empty() {
+        return None;
+    }
     let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
     // The same inverted card as the toast.
@@ -168,59 +166,91 @@ pub fn progress_notice(app: &PdfCraftApp, ctx: &egui::Context) -> bool {
     } else {
         (Color32::from_rgb(0x2A, 0x2A, 0x2F), Color32::WHITE)
     };
-    let fraction = if p.fraction.is_finite() { p.fraction.clamp(0.0, 1.0) } else { 0.0 };
-    let shown = ctx.animate_value_with_time(egui::Id::new("progress-notice-bar"), fraction, 0.3);
     let now = ctx.input(|i| i.time);
-    let mut cancel = false;
-    let area = egui::Area::new(egui::Id::new("progress-notice"))
+    let mut cancel = None;
+    let area = egui::Area::new(egui::Id::new("jobs-card"))
         .order(egui::Order::Tooltip)
         .pivot(Align2::CENTER_BOTTOM)
         .fixed_pos(screen.center_bottom() - vec2(0.0, 28.0))
         .show(ctx, |ui| {
             egui::Frame::NONE.fill(fill).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
-                let width = 340.0_f32.min(screen.width() - 64.0).max(160.0);
+                let width = 360.0_f32.min(screen.width() - 64.0).max(160.0);
                 ui.set_width(width);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(&p.label).color(text));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(format!("{:.0}%", shown * 100.0)).font(theme::medium(12.0)).color(text.gamma_multiply(0.7)));
+                for (i, job) in jobs.iter().take(JOBS_SHOWN).enumerate() {
+                    if i > 0 {
+                        ui.add_space(10.0);
+                    }
+                    let fraction = if job.fraction.is_finite() { job.fraction.clamp(0.0, 1.0) } else { 0.0 };
+                    let shown = ctx.animate_value_with_time(egui::Id::new(("jobs-bar", job.id.0)), fraction, 0.3);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(job_label(job)).color(text));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(format!("{:.0}%", shown * 100.0)).font(theme::medium(12.0)).color(text.gamma_multiply(0.7)));
+                        });
                     });
-                });
-                ui.add_space(6.0);
-                let (track, resp) = ui.allocate_exact_size(vec2(width, 6.0), Sense::hover());
-                // The label above names the job; the bar carries the percentage.
-                resp.widget_info(|| {
-                    let mut info = egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator);
-                    info.value = Some(f64::from(fraction) * 100.0);
-                    info
-                });
-                let painter = ui.painter();
-                painter.rect_filled(track, CornerRadius::same(3), text.gamma_multiply(0.18));
-                let done = Rect::from_min_size(track.min, vec2(track.width() * shown, done_h(&track)));
-                if done.width() > 0.5 {
-                    painter.rect_filled(done, CornerRadius::same(3), t.accent);
-                    // A soft light sweeping along the filled part says the job is alive between
-                    // updates.
-                    let band = 48.0;
-                    let x = done.left() - band + ((now * 160.0) % f64::from(done.width() + band)) as f32;
-                    let clip = painter.with_clip_rect(done);
-                    for (i, a) in [0.10_f32, 0.22, 0.10].into_iter().enumerate() {
-                        let r = Rect::from_min_size(egui::pos2(x + i as f32 * band / 3.0, done.top()), vec2(band / 3.0, done.height()));
-                        clip.rect_filled(r, CornerRadius::ZERO, Color32::WHITE.gamma_multiply(a));
+                    ui.add_space(4.0);
+                    let (track, resp) = ui.allocate_exact_size(vec2(width, 6.0), Sense::hover());
+                    // The row above names the job; the bar carries the percentage.
+                    resp.widget_info(|| {
+                        let mut info = egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator);
+                        info.value = Some(f64::from(fraction) * 100.0);
+                        info
+                    });
+                    let painter = ui.painter();
+                    painter.rect_filled(track, CornerRadius::same(3), text.gamma_multiply(0.18));
+                    let done = Rect::from_min_size(track.min, vec2(track.width() * shown, done_h(&track)));
+                    if done.width() > 0.5 {
+                        painter.rect_filled(done, CornerRadius::same(3), t.accent);
+                        // A soft light sweeping along the filled part says the job is alive
+                        // between updates.
+                        let band = 48.0;
+                        let x = done.left() - band + ((now * 160.0) % f64::from(done.width() + band)) as f32;
+                        let clip = painter.with_clip_rect(done);
+                        for (k, a) in [0.10_f32, 0.22, 0.10].into_iter().enumerate() {
+                            let r = Rect::from_min_size(egui::pos2(x + k as f32 * band / 3.0, done.top()), vec2(band / 3.0, done.height()));
+                            clip.rect_filled(r, CornerRadius::ZERO, Color32::WHITE.gamma_multiply(a));
+                        }
+                    }
+                    // A stop already asked for is not asked twice, and says what is happening.
+                    // A job the app has handed over (a print the spooler has taken) cannot be
+                    // stopped, so it offers nothing rather than a Cancel that would do nothing.
+                    if job.stoppable && !job.stopping {
+                        ui.add_space(4.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let b = egui::Button::new(egui::RichText::new(tl!("Cancel")).font(theme::medium(12.5)).color(text)).frame(false);
+                            if ui.add(b).clicked() {
+                                cancel = Some(job.id);
+                            }
+                        });
                     }
                 }
-                if p.cancellable {
-                    ui.add_space(4.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let b = egui::Button::new(egui::RichText::new(tl!("Cancel")).font(theme::medium(12.5)).color(text)).frame(false);
-                        cancel = ui.add(b).clicked();
-                    });
+                let rest = jobs.len().saturating_sub(JOBS_SHOWN);
+                if rest > 0 {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(crate::i18n::fmt(tl!("and {n} more"), &[("n", &rest.to_string())]))
+                            .font(theme::medium(12.0))
+                            .color(text.gamma_multiply(0.7)),
+                    );
                 }
             });
         });
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(PROGRESS_HEIGHT), area.response.rect.height()));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(JOBS_HEIGHT), area.response.rect.height()));
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
     cancel
+}
+
+/// A job's row title: its name, then what it is doing, that it is waiting its turn, or that it is
+/// stopping.
+fn job_label(job: &crate::jobs::Job) -> String {
+    if job.stopping {
+        return format!("{}: {}", job.label, tl!("Cancelling…"));
+    }
+    // Waiting jobs have nothing to report but that: they are behind another job of their kind.
+    if job.queued {
+        return format!("{}: {}", job.label, tl!("Waiting its turn"));
+    }
+    if job.stage.is_empty() { job.label.clone() } else { format!("{}: {}", job.label, job.stage) }
 }
 
 fn done_h(track: &Rect) -> f32 {
@@ -264,6 +294,25 @@ pub fn split_pill(ui: &mut egui::Ui, icon: &str, label: &str, more: &str) -> (Re
     (main.on_hover_text(label), arrow.on_hover_text(more))
 }
 
+/// A pill button that stays pressed: `on` fills it with the accent, and the state is told to
+/// assistive technology as a selected button (the Print dialog's "Print both sides").
+pub fn toggle_pill(ui: &mut egui::Ui, icon: &str, label: &str, on: bool) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::medium(12.5);
+    let w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), t.text).size().x);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w + 46.0, 30.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, label));
+    let (fill, stroke, text) = if on {
+        (if resp.hovered() { t.accent_text } else { t.accent }, Stroke::NONE, Color32::WHITE)
+    } else {
+        (if resp.hovered() { t.hover } else { t.card }, Stroke::new(1.2, t.text_muted), t.text)
+    };
+    ui.painter().rect(rect, CornerRadius::same(15), fill, stroke, egui::StrokeKind::Inside);
+    crate::icons::paint(ui, Rect::from_min_size(rect.min + vec2(12.0, 7.0), vec2(16.0, 16.0)), icon, 15.0, text);
+    ui.painter().text(rect.left_center() + vec2(34.0, 0.0), Align2::LEFT_CENTER, label, font, text);
+    resp
+}
+
 /// A pill button with an icon (primary = filled accent).
 pub fn icon_pill(ui: &mut egui::Ui, icon: &str, label: &str, primary: bool) -> Response {
     let t = Tokens::get(ui.ctx());
@@ -286,6 +335,24 @@ pub fn icon_pill(ui: &mut egui::Ui, icon: &str, label: &str, primary: bool) -> R
 mod tests {
     use super::*;
     use egui::Pos2;
+
+    /// A waiting job's row says it is waiting, a running one says what it is doing, and a stopped
+    /// one says it is stopping — the three states the card draws.
+    #[test]
+    fn the_card_names_each_state_of_a_job() {
+        crate::i18n::set_current(crate::i18n::Lang::from_code("en").unwrap());
+        let mut jobs = crate::jobs::Jobs::default();
+        let (running, _) = jobs.begin(crate::jobs::Kind::Export, "Export to Image".into(), 3);
+        let waiting = jobs.begin_queued(crate::jobs::Kind::Export, "Export to Text".into());
+        assert_eq!(job_label(jobs.get(waiting).unwrap()), "Export to Text: Waiting its turn");
+        jobs.stage(running, "Page 2 of 3", 0.5);
+        assert_eq!(job_label(jobs.get(running).unwrap()), "Export to Image: Page 2 of 3");
+        jobs.cancel(running);
+        assert_eq!(job_label(jobs.get(running).unwrap()), "Export to Image: Cancelling…");
+        // A job with nothing to say yet is named without a colon.
+        let (fresh, _) = jobs.begin(crate::jobs::Kind::Print, "Print to Front Desk".into(), 0);
+        assert_eq!(job_label(jobs.get(fresh).unwrap()), "Print to Front Desk");
+    }
 
     #[test]
     fn search_placeholder_never_overlaps_the_shortcut() {

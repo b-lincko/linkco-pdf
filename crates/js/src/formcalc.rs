@@ -1995,6 +1995,10 @@ fn word_num(n: f64, cents: bool) -> String {
     }
     let cents_total = (n * 100.0).round() as u64;
     let whole = if cents { cents_total / 100 } else { n.trunc() as u64 };
+    if whole >= 1_000_000_000_000 {
+        // Rounding to cents carried past the supported range.
+        return String::new();
+    }
     let mut parts = Vec::new();
     let groups = [(1_000_000_000u64, "Billion"), (1_000_000, "Million"), (1_000, "Thousand")];
     let mut rest = whole;
@@ -2337,9 +2341,16 @@ impl Interp<'_> {
             }
             "time2num" | "isotime2num" => {
                 let s = self.arg_str(args, 0)?;
-                let parts: Vec<u64> = s.split(':').filter_map(|p| p.trim().parse::<u64>().ok()).map(|v| v.min(1_000_000)).collect();
-                let (h, m, sec) = (parts.first().copied().unwrap_or(0), parts.get(1).copied().unwrap_or(0), parts.get(2).copied().unwrap_or(0));
-                Val::Num(((h * 3600 + m * 60 + sec) * 1000) as f64)
+                // ISO 8601 allows a leading "T", a trailing "Z" and fractional seconds.
+                let t = s.trim();
+                let t = t.strip_prefix(['T', 't']).unwrap_or(t);
+                let t = t.strip_suffix(['Z', 'z']).unwrap_or(t);
+                let mut parts = t.split(':');
+                let mut whole = || parts.next().and_then(|p| p.trim().parse::<u64>().ok()).unwrap_or(0).min(1_000_000);
+                let (h, m) = (whole(), whole());
+                let sec =
+                    parts.next().and_then(|p| p.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0).min(1_000_000.0);
+                Val::Num(((h * 3600 + m * 60) * 1000) as f64 + (sec * 1000.0).round())
             }
             // ── financial
             "fv" => {
@@ -2447,10 +2458,10 @@ impl Interp<'_> {
                 let v = parse_num(&s).unwrap_or(0.0);
                 let unit: String = s.trim().chars().skip_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+').collect();
                 let per_in = |u: &str| match u.trim().to_ascii_lowercase().as_str() {
-                    "mm" => 25.4,
-                    "cm" => 2.54,
-                    "pt" => 72.0,
-                    "pc" => 6.0,
+                    "mm" | "millimeter" | "millimeters" => 25.4,
+                    "cm" | "centimeter" | "centimeters" => 2.54,
+                    "pt" | "point" | "points" => 72.0,
+                    "pc" | "pica" => 6.0,
                     _ => 1.0,
                 };
                 let target = if to.trim().is_empty() { unit.clone() } else { to };
@@ -2560,6 +2571,7 @@ mod tests {
         assert_eq!(parse_date("2/3/01", "M/D/YY"), Some((2001, 2, 3)));
         assert_eq!(format_date(2001, 2, 3, "MMMM D, YYYY"), "February 3, 2001");
         assert_eq!(word_num(1234.5, true), "One Thousand Two Hundred Thirty-Four Dollars And 50 Cents");
+        assert_eq!(word_num(999_999_999_999.999, true), "");
         assert_eq!(num_text(3.0), "3");
         assert_eq!(num_text(2.5), "2.5");
         assert_eq!(num_text(0.1 + 0.2), "0.3");

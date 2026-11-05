@@ -76,10 +76,40 @@ impl PdfString {
 /// A name object (without the leading `/`, with `#xx` escapes already decoded).
 pub type Name = Vec<u8>;
 
+#[cfg(test)]
+thread_local! {
+    /// Key comparisons and index lookups made by [`Dict`] on this thread.
+    static KEY_COMPARES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Entries from which a [`Dict`] keeps a key index. Smaller dictionaries (nearly all of them)
+/// search their entries; a parsed file controls the key count, and a linear search per
+/// inserted key would make a dictionary of many distinct keys quadratic to build.
+const INDEX_FROM: usize = 32;
+
 /// An ordered dictionary.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default)]
+// The key index is a `Box<HashMap<..>>` on purpose: it is absent for every dictionary below
+// `INDEX_FROM` entries, which is most of them, and boxing keeps the struct itself small.
+#[allow(clippy::box_collection)]
 pub struct Dict {
     entries: Vec<(Name, Object)>,
+    /// Key to position in `entries`, kept once the dictionary reaches [`INDEX_FROM`] entries.
+    /// Boxed to keep `Dict` itself small: most dictionaries stay below [`INDEX_FROM`] entries and
+    /// so never carry an index at all.
+    index: Option<Box<std::collections::HashMap<Name, usize>>>,
+}
+
+impl PartialEq for Dict {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl std::fmt::Debug for Dict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dict").field("entries", &self.entries).finish()
+    }
 }
 
 impl Dict {
@@ -87,26 +117,53 @@ impl Dict {
         Self::default()
     }
 
+    fn position(&self, key: &[u8]) -> Option<usize> {
+        if let Some(index) = &self.index {
+            #[cfg(test)]
+            KEY_COMPARES.with(|c| c.set(c.get() + 1));
+            return index.get(key).copied();
+        }
+        self.entries.iter().position(|(k, _)| {
+            #[cfg(test)]
+            KEY_COMPARES.with(|c| c.set(c.get() + 1));
+            k == key
+        })
+    }
+
     pub fn get(&self, key: &[u8]) -> Option<&Object> {
-        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        self.position(key).and_then(|i| self.entries.get(i)).map(|(_, v)| v)
     }
 
     pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut Object> {
-        self.entries.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v)
+        let i = self.position(key)?;
+        self.entries.get_mut(i).map(|(_, v)| v)
     }
 
     /// Insert or replace, keeping the position of an existing key.
     pub fn set(&mut self, key: impl Into<Name>, value: impl Into<Object>) {
         let key = key.into();
         let value = value.into();
-        match self.entries.iter_mut().find(|(k, _)| *k == key) {
+        match self.position(&key).and_then(|i| self.entries.get_mut(i)) {
             Some((_, v)) => *v = value,
-            None => self.entries.push((key, value)),
+            None => {
+                let at = self.entries.len();
+                if let Some(index) = &mut self.index {
+                    index.insert(key.clone(), at);
+                } else if at + 1 >= INDEX_FROM {
+                    let index = self.entries.iter().enumerate().map(|(i, (k, _))| (k.clone(), i)).chain([(key.clone(), at)]).collect();
+                    self.index = Some(Box::new(index));
+                }
+                self.entries.push((key, value));
+            }
         }
     }
 
     pub fn remove(&mut self, key: &[u8]) -> Option<Object> {
-        let i = self.entries.iter().position(|(k, _)| k == key)?;
+        let i = self.position(key)?;
+        if let Some(index) = &mut self.index {
+            index.remove(key);
+            index.values_mut().filter(|at| **at > i).for_each(|at| *at -= 1);
+        }
         Some(self.entries.remove(i).1)
     }
 
@@ -372,6 +429,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parsing_many_distinct_keys_is_not_quadratic() {
+        let n = 20_000;
+        let body: String = (0..n).map(|i| format!("/K{i} {i} ")).collect();
+        let text = format!("<< {body}/K7 true >>");
+        KEY_COMPARES.with(|c| c.set(0));
+        let Ok(Object::Dict(d)) = crate::parser::Lexer::new(text.as_bytes(), 0).object() else { panic!("not a dict") };
+        let compares = KEY_COMPARES.with(|c| c.get());
+        assert!(compares < 8 * n, "{compares} key comparisons for {n} keys");
+        // Order and replace-in-place semantics stay those of a plain ordered dictionary.
+        assert_eq!(d.len(), n);
+        assert_eq!(d.iter().next().map(|(k, _)| k.as_slice()), Some(&b"K0"[..]));
+        assert_eq!(d.get(b"K7"), Some(&Object::Bool(true)));
+        assert_eq!(d.iter().nth(7).map(|(_, v)| v), Some(&Object::Bool(true)));
+        let mut d = d;
+        assert_eq!(d.remove(b"K3"), Some(Object::Int(3)));
+        assert_eq!(d.get(b"K4"), Some(&Object::Int(4)));
+        assert_eq!(d.iter().nth(3).map(|(k, _)| k.as_slice()), Some(&b"K4"[..]));
+        d.set(b"K3".to_vec(), Object::Null);
+        assert_eq!(d.iter().last().map(|(k, _)| k.as_slice()), Some(&b"K3"[..]));
+        assert!(d.get(b"K20000").is_none());
+    }
+
+    #[test]
     fn text_strings_round_trip() {
         for s in ["Plain ASCII", "Café — naïve", "日本語", "emoji 📄"] {
             assert_eq!(PdfString::text(s).to_text(), s);
@@ -469,5 +549,18 @@ mod tests {
         assert!(matches!(stream.decoded_within(2), Err(CosError::Filter(_))));
         assert_eq!(stream.decoded_within(3).unwrap(), b"abc");
         assert_eq!(stream.decoded_strict().unwrap(), b"abc");
+    }
+
+    #[test]
+    fn raw_flate_fallback_streams_preserve_the_caller_limit() {
+        // Raw deflate with a stored byte and a final empty block. 78 01 also
+        // passes the zlib header check, so decoding must retry the whole input.
+        let mut dict = Dict::new();
+        dict.set(b"Filter".to_vec(), Object::name("FlateDecode"));
+        let stream = Stream::from_raw(dict, vec![0x78, 0x01, 0x00, 0xfe, 0xff, b'A', 0x01, 0x00, 0x00, 0xff, 0xff]);
+        let result = stream.decoded_within(0);
+        assert!(matches!(&result, Err(CosError::Filter(detail)) if detail.contains("exceeds the limit of 0 bytes")), "{result:?}");
+        assert_eq!(stream.decoded_within(1).unwrap(), b"A");
+        assert_eq!(stream.decoded_strict().unwrap(), b"A");
     }
 }

@@ -1538,12 +1538,10 @@
 	Added {n} comments	أُضيف {n} تعليقات
 	Choose a folder for the results	اختر مجلدًا للنتائج
 	Files for {name}	ملفات {name}
-	An action is already running	يوجد إجراء قيد التشغيل بالفعل
 	Running action… file {d} of {t}	جارٍ تشغيل الإجراء… الملف {d} من {t}
 	No unlinked web addresses were found in the text	لم يُعثر في النص على عناوين ويب غير مرتبطة
 	Created 1 link	أُنشئ رابط واحد
 	Created {n} links	أُنشئ {n} روابط
-	Text recognition is already running	التعرف على النص قيد التشغيل بالفعل
 	Recognizing text… file {d} of {t}	جارٍ التعرف على النص… الملف {d} من {t}
 	Recognizing text… page {d} of {t}	جارٍ التعرف على النص… الصفحة {d} من {t}
 	Recognized 1 word	تم التعرف على كلمة واحدة
@@ -2020,7 +2018,6 @@
 	Created a PDF from {n} files; left out: {names}	أُنشئ ملف PDF من {n} ملفات؛ استُبعد: {names}
 	Created a PDF from the first {n} files	أُنشئ ملف PDF من أول {n} ملفات
 	Go to page…	الانتقال إلى صفحة…
-	Optimization is already running	التحسين قيد التشغيل بالفعل
 	Optimization cancelled	أُلغي التحسين
 	Couldn't optimize the file	تعذّر تحسين الملف
 	Files are combined in this order. Leave Pages empty to take every page.	تُدمج الملفات بهذا الترتيب. اترك «الصفحات» فارغًا لأخذ كل الصفحات.
@@ -2231,4 +2228,52 @@ key	Space	مسافة
 	Driver: {driver}	برنامج التشغيل: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	حالة الطابعة: {status}. تحقق من اتصال الطابعة قبل الطباعة.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	لم يتم العثور على أي طابعة. شغّل الطابعة ووصّلها، ثم اختر «إعادة الفحص». لا يزال بإمكانك الحفظ بصيغة PDF.
+	Print both sides	طباعة على الوجهين
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	الطباعة على وجهي الورقة، مع قلبها من حافتها الطويلة، إن كان ذلك ممكنًا للطابعة.
+	Printing on both sides of the sheet. Click to print on one side only.	الطباعة على وجهي الورقة. اضغط للطباعة على وجه واحد فقط.
+	Match page at 100%	مطابقة الورق للصفحة بنسبة 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	الطباعة بنسبة 100% على ورق من الحجم نفسه، دون تغيير نطاق الصفحات.
+	PDF page: {w} × {h} in	صفحة PDF: {w} × {h} بوصة
+	PDF scale: {scale}%	مقياس PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	المقياس الذي تُرسم به الصفحة؛ ولا يزال بإمكان برنامج التشغيل استبدال الورق أو تصغير العمل.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	يطبع «القص والتكديس» صفحات أحادية الوجه. اختر ترتيب صفحات آخر للطباعة على الوجهين.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	يقص كل صفحة إلى المنطقة المطبوعة، ويديرها لتصبح مستقيمة ويلائمها مع الورقة دون تمديد. ملصق واحد لكل ورقة.
+	Turn upside down (180°)	اقلب رأسًا على عقب (180°)
+	the name is not a plain file name	الاسم ليس اسم ملف بسيطًا
 	Developer: {name}	المطوّر: {name}
+	Overwrite	استبدال
+	Save As…	حفظ باسم…
+	“{name}” changed on disk while you were working on it.	تغيّر «{name}» على القرص بينما كنت تعمل عليه.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	الحفظ فوقه سيستبدل النسخة التي كتبها برنامج آخر. احفظ نسخة إذا كنت تحتاج إلى الاثنين معًا.
+	“{name}” was moved or renamed to “{found}”.	تم نقل «{name}» أو تغيير اسمه إلى «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» لم يعد موجودًا في «{path}»؛ فقد نُقل إلى مجلد آخر أو حُذف.
+	Tried {n} times. Zoom or rotate the page to try again.	تمت المحاولة {n} مرات. قرّب الصفحة أو أدرها للمحاولة مرة أخرى.
+	On disk: {n} pages, written {when}.	على القرص: {n} صفحات، كُتبت {when}.
+	On disk: written {when}.	على القرص: كُتب الملف {when}.
+	The version on disk is too large to compare here.	النسخة الموجودة على القرص كبيرة جدًا للمقارنة هنا.
+	“{name}” could not be opened to compare it.	تعذّر فتح «{name}» للمقارنة معه.
+	{name} (on disk)	{name} (على القرص)
+	Recognize Text in Files	التعرف على النص في الملفات
+	 (stopped after {done} of {total})	 (توقف بعد {done} من {total})
+	file {d} of {t}	الملف {d} من {t}
+	Export stopped after {done} of {total} files	توقف التصدير بعد {done} من {total} ملفًا
+	and {n} more	و{n} أخرى
+	The job stopped without finishing	انتهت المهمة دون أن تكتمل
+	The job couldn't start: {e}	تعذّر بدء المهمة: {e}
+	Run {name} on {n} files?	هل تريد تشغيل {name} على {n} ملفات؟
+	Recognize text in {n} files?	هل تريد التعرف على النص في {n} ملفات؟
+	Results go to {folder}	تذهب النتائج إلى {folder}
+	Writes {n} file(s).	يكتب {n} ملف.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	يستبدل {n} ملفات موجودة بالفعل. لا يمكن استعادة الملف المستبدل.
+	{n} file(s) are written beside one that is already there, which is left as it is.	تُكتب {n} ملفات بجانب ملف موجود بالفعل، ويبقى كما هو.
+	Nothing that is already in the folder is replaced.	لا يتم استبدال أي شيء موجود بالفعل في المجلد.
+	The folder changed since this was shown; check what this batch would write now	تغيّر المجلد منذ عرض هذا؛ تحقق مما ستكتبه هذه الدفعة الآن
+	Export to {format}	تصدير إلى {format}
+	Exporting… page {d} of {t}	جارٍ التصدير… الصفحة {d} من {t}
+	Export cancelled	أُلغي التصدير
+	Print to {printer}	طباعة إلى {printer}
+	Preparing the print job	جارٍ تحضير مهمة الطباعة
+	Rendering sheet {d} of {t}	جارٍ عرض الورقة {d} من {t}
+	Print cancelled: nothing was sent to {printer}	أُلغيت الطباعة: لم يُرسل شيء إلى {printer}
+	Waiting its turn	في انتظار دورها
+	The job was cancelled before it started	أُلغي العمل قبل أن يبدأ

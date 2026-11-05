@@ -49,7 +49,10 @@ The PDF object graph *is* the model (`crates/engine/README.md` §The editing mod
 3. After every edit an incremental write produces the working file (original bytes plus one
    revision); the view is refreshed from those bytes, so what you see is what Save writes.
 4. Saves are incremental and atomic. A full rewrite happens only where it must: redaction, PDF/A
-   conversion, print imposition, a changed password, Save As with garbage collection.
+   conversion, print imposition, a changed password, Save As to another file (garbage-collected,
+   unless the document is signed). The command line writes every file it produces the same way —
+   private staging file beside the target, flushed, then renamed over it — so a script that runs
+   unattended cannot leave an empty or half-written document behind.
 5. Autosave and crash recovery keep encrypted documents encrypted. Signed documents are protected
    from rewrites.
 
@@ -94,6 +97,15 @@ Every user-facing feature is reachable headlessly (`AGENTS.md` §3):
 - `unsafe_code = "forbid"` workspace-wide; crates deny `unwrap`/`expect`/`panic!`; engine entry
   points keep a last-resort `catch_unwind` (`AGENTS.md` §4).
 - Every input-derived size is bounded (decompression, images, recursion, content per page).
+- A batch of files is planned before it writes anything: Action Wizard and Recognize Text in Files
+  show what would be written, into which folder, and which files would be replaced, and start
+  nothing until that is answered. The plan is the writer's own naming rule, and it is worked out
+  again when the answer is given, so a folder that changed under the question is not the batch
+  that runs (`crates/ui-egui/src/batch_plan.rs`).
+- A background job's worker holds a lifetime handle (`crates/ui-egui/src/jobs.rs`, `Alive`) and
+  drops it when it ends, so a worker that panics or returns early ends its job instead of leaving
+  the interface waiting for a report that will never come: the card retires, the document is left
+  as it was, and the next job of that kind can start.
 - `cargo xtask fuzz` runs nightly; every finding becomes a synthetic regression test.
 
 ## Build and quality gates

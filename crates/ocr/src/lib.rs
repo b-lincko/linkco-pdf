@@ -15,8 +15,13 @@ use std::path::{Path, PathBuf};
 pub use pdfcraft_fonts::helvetica_width;
 
 /// The model files, as named in ATTRIBUTION.toml.
-pub const DETECTION_MODEL: &str = "text-detection.rten";
-pub const RECOGNITION_MODEL: &str = "text-recognition.rten";
+pub const DETECTION_MODEL: &str = "text-detection.onnx";
+pub const RECOGNITION_MODEL: &str = "text-recognition.onnx";
+
+/// The same models in the format releases before 2026-10-27 shipped. Upstream deprecated those
+/// files and stopped serving them, so they are only found where an older install left them.
+pub const LEGACY_DETECTION_MODEL: &str = "text-detection.rten";
+pub const LEGACY_RECOGNITION_MODEL: &str = "text-recognition.rten";
 
 /// The recognition model's alphabet, as it was trained (ocrs-models' `DEFAULT_ALPHABET`): its
 /// output classes follow this order. The ocrs crate's own copy has an `E` where the training had
@@ -50,8 +55,12 @@ pub struct Models {
 impl Models {
     /// The models in `dir`, if both files are there.
     pub fn in_dir(dir: &Path) -> Option<Models> {
-        let m = Models { detection: dir.join(DETECTION_MODEL), recognition: dir.join(RECOGNITION_MODEL) };
-        (m.detection.is_file() && m.recognition.is_file()).then_some(m)
+        // The model upstream serves now first, then the format an older install still has.
+        let formats = [(DETECTION_MODEL, RECOGNITION_MODEL), (LEGACY_DETECTION_MODEL, LEGACY_RECOGNITION_MODEL)];
+        formats.into_iter().find_map(|(detection, recognition)| {
+            let m = Models { detection: dir.join(detection), recognition: dir.join(recognition) };
+            (m.detection.is_file() && m.recognition.is_file()).then_some(m)
+        })
     }
 
     /// Look for the models: `$PDFCRAFT_MODELS`, then where the release packages install them
@@ -281,6 +290,32 @@ mod tests {
             assert_eq!(models.detection.canonicalize().unwrap(), models_dir.join(DETECTION_MODEL).canonicalize().unwrap(), "{name}");
         }
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A folder left by an older release still has the `.rten` files: it keeps working, and the
+    /// current format wins when a folder has both.
+    #[test]
+    fn the_previous_model_format_is_still_accepted_and_loses_to_the_current_one() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-ocr-formats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(Models::in_dir(&dir), None, "an empty folder has no models");
+        for file in [LEGACY_DETECTION_MODEL, LEGACY_RECOGNITION_MODEL] {
+            std::fs::write(dir.join(file), b"old").unwrap();
+        }
+        let old = Models::in_dir(&dir).expect("the older format is found");
+        assert_eq!(old.detection, dir.join(LEGACY_DETECTION_MODEL));
+        for file in [DETECTION_MODEL, RECOGNITION_MODEL] {
+            std::fs::write(dir.join(file), b"new").unwrap();
+        }
+        let current = Models::in_dir(&dir).expect("the current format is found");
+        assert_eq!(current.detection, dir.join(DETECTION_MODEL), "the current format wins");
+        assert_eq!(current.recognition, dir.join(RECOGNITION_MODEL));
+        // One file of a pair is not a pair: the older, complete set is still used.
+        std::fs::remove_file(dir.join(RECOGNITION_MODEL)).unwrap();
+        let fallback = Models::in_dir(&dir).expect("the complete older set is still used");
+        assert_eq!(fallback.detection, dir.join(LEGACY_DETECTION_MODEL));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The message tells end users what to do; release builds have no cargo.

@@ -20,6 +20,16 @@ pub struct Wizard {
     pub add: usize,
 }
 
+/// A run over files: its progress and its row in the job centre.
+#[derive(Clone)]
+pub struct ActionRun {
+    pub progress: Arc<Mutex<RunProgress>>,
+    pub job: crate::jobs::JobId,
+    /// Whether the worker is still going, so a poll can tell a slow run from one that ended
+    /// without reporting (REC-R06).
+    pub alive: crate::jobs::Alive,
+}
+
 /// Progress of a run: files done, total, and the summary once finished.
 #[derive(Default)]
 pub struct RunProgress {
@@ -28,34 +38,23 @@ pub struct RunProgress {
     pub message: Option<String>,
 }
 
-/// Keep each desktop result, including when input basenames repeat or an earlier run already
-/// used the name. The search is bounded and never falls back to an occupied destination.
-#[cfg(not(target_arch = "wasm32"))]
-fn write_result(dir: &std::path::Path, name: &str, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
-    use std::io::{Error, ErrorKind};
-    let source = std::path::Path::new(name);
-    let filename = source.file_name().ok_or_else(|| Error::from(ErrorKind::InvalidInput))?;
-    let stem = source.file_stem().unwrap_or(filename).to_string_lossy();
-    for number in 1..=10_000 {
-        let path = if number == 1 {
-            dir.join(filename)
-        } else {
-            let suffix = match source.extension() {
-                Some(ext) => format!("{stem} ({number}).{}", ext.to_string_lossy()),
-                None => format!("{stem} ({number})"),
-            };
-            dir.join(suffix)
-        };
-        match std::fs::symlink_metadata(&path) {
-            Ok(_) => continue,
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                crate::editing::write_atomically(&path.to_string_lossy(), bytes)?;
-                return Ok(path);
-            }
-            Err(e) => return Err(e),
-        }
+/// Where a result goes: the destination the approved plan named (see [`crate::batch_plan`]), or —
+/// on the web build, which has no folder — a download.
+///
+/// The naming rule is not repeated here: it is the plan's, so the file written is the file the
+/// reader was shown. A destination is always present on the desktop path; the web build passes
+/// none because a download cannot replace anything.
+fn write_to(destination: Option<&std::path::Path>, name: &str, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = destination.ok_or_else(|| format!("{name}: this run has no destination"))?;
+        crate::editing::write_atomically(&path.to_string_lossy(), bytes).map_err(|e| format!("{name}: {e}"))
     }
-    Err(Error::from(ErrorKind::AlreadyExists))
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = destination;
+        crate::editing::download(name, bytes)
+    }
 }
 
 impl PdfCraftApp {
@@ -69,10 +68,6 @@ impl PdfCraftApp {
     /// Run `action` on files, writing the results into a folder the user picks (the export
     /// folder override in tests), in the background.
     pub fn run_action_on(&mut self, action: Action, files: Vec<(String, Vec<u8>)>) {
-        if self.action_run.is_some() {
-            self.notify_tr("An action is already running");
-            return;
-        }
         #[cfg(not(target_arch = "wasm32"))]
         match self.export_dir_override.clone() {
             Some(d) => self.run_action_into(action, files, d.into()),
@@ -86,40 +81,80 @@ impl PdfCraftApp {
     }
 
     /// [`Self::run_action_on`] once the folder for the results is known.
+    ///
+    /// On the desktop this no longer starts anything: it works out what the run would write (see
+    /// [`crate::batch_plan`]) and asks the reader. The run itself is [`Self::start_action`], called
+    /// with the plan that was approved.
     fn run_action_into(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, #[cfg(not(target_arch = "wasm32"))] dir: std::path::PathBuf) {
-        // Another run may have started while the folder picker was open.
+        // Desktop: nothing runs until the plan is answered (see [`crate::batch_plan`]).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let names: Vec<String> = files.iter().map(|(name, _)| name.clone()).collect();
+            let plan = crate::batch_plan::plan(&dir, crate::batch_plan::Kind::Action, &names);
+            self.ask_batch(crate::batch_plan::Pending { plan, work: crate::batch_plan::Work::Action { action, files } });
+        }
+        // Web: each result is a download, so there is nothing to approve.
+        #[cfg(target_arch = "wasm32")]
+        self.start_action(action, files, None);
+    }
+
+    /// Run `action` over `files`, writing each result where `plan` said it would go.
+    ///
+    /// `plan` is the approved plan (the desktop path) or `None` on the web build, where each result
+    /// is a download and nothing on disk can be replaced.
+    pub(crate) fn start_action(&mut self, action: Action, files: Vec<(String, Vec<u8>)>, plan: Option<crate::batch_plan::Plan>) {
+        // A second run waits its turn instead of being refused: it keeps the plan it was approved
+        // with, so when it starts it writes exactly what the reader agreed to (see `crate::jobs`).
         if self.action_run.is_some() {
-            self.notify_tr("An action is already running");
+            let label = action.name.clone();
+            self.queue_job(crate::jobs::Kind::Action, label, move |app| app.start_action(action, files, plan));
             return;
         }
+        // Where each result goes, in the order the files are offered (`None` on the web build).
+        let mut destinations = plan.as_ref().into_iter().flat_map(|p| p.targets.iter().map(|t| t.output.clone()));
+        let files: Vec<crate::batch_plan::RunItem> = files.into_iter().map(|file| (destinations.next(), file)).collect();
+        let (job, cancel) = self.jobs.begin(crate::jobs::Kind::Action, action.name.clone(), files.len());
         let progress = Arc::new(Mutex::new(RunProgress { total: files.len(), ..Default::default() }));
         let p = progress.clone();
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
         // The summary is written on the worker thread: draw it in the UI's language.
         let lang = crate::i18n::current();
         let work = move || {
+            // Dropped however this ends, a panic included: the poll reads that as "no report is
+            // coming" and ends the job instead of leaving it running for the session.
+            let _worker = worker;
             crate::i18n::set_current(lang);
-            let (mut ok, mut failed) = (0, Vec::new());
-            for (i, (name, bytes)) in files.into_iter().enumerate() {
-                if let Ok(mut s) = p.lock() {
-                    s.done = i;
-                }
-                let r = pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| {}).and_then(|r| {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    write_result(&dir, &name, &r.bytes).map_err(|e| e.to_string())?;
-                    #[cfg(target_arch = "wasm32")]
-                    crate::editing::download(&name, &r.bytes)?;
-                    Ok(())
-                });
-                match r {
-                    Ok(()) => ok += 1,
-                    Err(e) => failed.push(format!("{name}: {}", e)),
-                }
-            }
-            let done =
-                if ok == 1 { crate::i18n::fmt(tl!("1 file done"), &[]) } else { crate::i18n::fmt(tl!("{n} files done"), &[("n", &ok.to_string())]) };
+            let total = files.len();
+            let outcome = crate::jobs::run_batch(
+                &cancel,
+                files,
+                |done| {
+                    if let Ok(mut s) = p.lock() {
+                        s.done = done;
+                    }
+                },
+                |(destination, (name, bytes))| {
+                    pdfcraft_engine::actions::run_on(&action, &name, Arc::new(bytes), |_, _| {}).and_then(|r| {
+                        // The file written is the file that was approved.
+                        write_to(destination.as_deref(), &name, &r.bytes)
+                    })
+                },
+            );
+            let done = if outcome.done == 1 {
+                crate::i18n::fmt(tl!("1 file done"), &[])
+            } else {
+                crate::i18n::fmt(tl!("{n} files done"), &[("n", &outcome.done.to_string())])
+            };
             let mut msg = format!("{}: {done}", action.name);
-            if !failed.is_empty() {
-                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &failed.join("; "))]));
+            if outcome.cancelled {
+                msg.push_str(&crate::i18n::fmt(
+                    tl!(" (stopped after {done} of {total})"),
+                    &[("done", &outcome.done.to_string()), ("total", &total.to_string())],
+                ));
+            }
+            if !outcome.failed.is_empty() {
+                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &outcome.failed.join("; "))]));
             }
             if let Ok(mut s) = p.lock() {
                 s.done = s.total;
@@ -129,37 +164,50 @@ impl PdfCraftApp {
         #[cfg(not(target_arch = "wasm32"))]
         if self.run_inline {
             work();
-        } else {
-            std::thread::Builder::new().name("pdfcraft-action".into()).spawn(work).ok();
+        } else if let Err(e) = std::thread::Builder::new().name("pdfcraft-action".into()).spawn(work) {
+            // No worker thread: the run never starts, so say that rather than wait for it.
+            if let Ok(mut s) = progress.lock() {
+                s.done = s.total;
+                s.message = Some(crate::i18n::fmt(tl!("The job couldn't start: {e}"), &[("e", &e.to_string())]));
+            }
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.action_run = Some(progress);
+        self.action_run = Some(ActionRun { progress, job, alive });
         self.poll_action();
     }
 
     /// Show the running action's progress, and its summary when done.
     pub(crate) fn poll_action(&mut self) {
-        let Some(p) = self.action_run.clone() else { return };
-        let state = p.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
+        let Some(run) = self.action_run.clone() else { return };
+        let state = run.progress.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
+        // A worker that ended without a summary — it panicked, or a thread could not be made —
+        // would otherwise leave this run marked in progress for the session, refusing every later
+        // action. The handle says whether one is still coming.
+        if run.alive.ended_without_report(matches!(state, Some(Ok(_)))) {
+            self.action_run = None;
+            self.jobs.finish(run.job);
+            self.notify_tr("The job stopped without finishing");
+            return;
+        }
         match state {
             Some(Ok(m)) => {
                 self.action_run = None;
+                self.jobs.finish(run.job);
                 self.notify(m);
             }
             Some(Err((done, total))) => {
-                let m = crate::i18n::fmt(
-                    tl!("Running action… file {d} of {t}"),
-                    &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())],
-                );
-                if self.toast.as_ref().is_none_or(|t| t.0 != m) {
-                    self.notify(m);
-                }
+                let stage =
+                    crate::i18n::fmt(tl!("file {d} of {t}"), &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())]);
+                self.jobs.stage(run.job, stage, if total == 0 { 0.0 } else { done as f32 / total as f32 });
                 if let Some(ctx) = &self.ctx {
                     ctx.request_repaint_after(std::time::Duration::from_millis(200));
                 }
             }
-            None => self.action_run = None,
+            None => {
+                self.action_run = None;
+                self.jobs.finish(run.job);
+            }
         }
     }
 
@@ -383,4 +431,51 @@ fn edit_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
         app.wizard.selected = Some(name);
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run whose worker never reports — a panic inside the action, or no thread at all — used
+    /// to stay "running" for the life of the session, refusing every later action (REC-R06).
+    #[test]
+    fn an_action_whose_worker_ended_without_reporting_ends_here() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let progress = Arc::new(Mutex::new(RunProgress { total: 3, ..Default::default() }));
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Action, "Prepare for Distribution".into(), 3);
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        app.action_run = Some(ActionRun { progress: progress.clone(), job, alive });
+
+        // Still going: the card stays and nothing is claimed about the run.
+        app.poll_action();
+        assert_eq!(app.jobs.jobs().len(), 1);
+        assert!(app.toast.is_none());
+
+        // Ended without a summary.
+        drop(worker);
+        app.poll_action();
+        assert!(app.action_run.is_none(), "the run is over");
+        assert!(app.jobs.is_empty(), "and its row in the centre with it");
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job stopped without finishing"));
+        // Nothing is left holding the slot: the next run may start.
+        app.poll_action();
+    }
+
+    /// A worker that ended and did write its summary is the ordinary path.
+    #[test]
+    fn an_action_that_reports_is_shown_as_it_always_was() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let progress = Arc::new(Mutex::new(RunProgress { total: 1, done: 0, message: Some("Prepare for Distribution: 1 file done".into()) }));
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Action, "Prepare for Distribution".into(), 1);
+        let alive = crate::jobs::Alive::new();
+        app.action_run = Some(ActionRun { progress, job, alive });
+        app.poll_action();
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Prepare for Distribution: 1 file done"));
+        assert!(app.action_run.is_none());
+        assert!(app.jobs.is_empty());
+    }
 }

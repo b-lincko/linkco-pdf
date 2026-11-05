@@ -5,6 +5,11 @@
 //! dispatch and the milestone (plan/execution-plan.md) in which it ships, so the UI can be honest
 //! about what works today.
 //!
+//! [`Availability::Ready`] is a promise that the command is in the registry (tests in
+//! `commands.rs` hold both directions), and `docs/implementation/check_disclosure.py` holds
+//! `README.md` and the Home cards to this table, so a tool cannot be announced as planned in one
+//! place and shipped in another.
+//!
 //! Source of the inventory: plan/acrobat/02-ui-ux.md §2 (observed in Acrobat Pro 26.002).
 
 /// Where a tool or item stands.
@@ -191,6 +196,7 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
                     item("Set page boxes", "square-dashed-mouse-pointer", "page.boxes", Ready),
                     item("Crop pages", "crop", "page.crop", Ready),
                     item("Duplicate pages", "copy-plus", "page.duplicate", Ready),
+                    item("Reverse pages", "arrow-up-down", "page.reverse", Ready),
                     item("Page labels", "tag", "page.number", Ready),
                     item("Page transitions", "presentation", "page.transitions", Planned("M4")),
                 ],
@@ -224,8 +230,8 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
                     item("Oval", "circle", "comment.circle", Ready),
                     item("Line", "minus", "comment.line", Ready),
                     item("Arrow", "move-right", "comment.arrow", Ready),
-                    item("Cloud", "cloud", "comment.cloud", Planned("M5")),
-                    item("Stamp", "stamp", "comment.stamp", Planned("M5")),
+                    item("Cloud", "cloud", "comment.cloud", Ready),
+                    item("Stamp", "stamp", "comment.stamp", Ready),
                 ],
             },
             ToolSection {

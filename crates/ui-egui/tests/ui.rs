@@ -664,6 +664,21 @@ fn preferences_selects_default_workspace_for_next_open() {
     assert_eq!(h.state().mode, Mode::Read);
 }
 
+/// The mode bar matches Acrobat's: All tools, Edit, Convert and E-Sign, with no Read tab. Read
+/// mode is still a View command.
+#[test]
+fn the_mode_bar_has_no_read_tab() {
+    use pdfcraft_ui_egui::Mode;
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    for label in ["All tools", "Edit", "Convert", "E-Sign"] {
+        assert!(h.query_all_by_label(label).next().is_some(), "the {label} tab is there");
+    }
+    assert!(h.query_all_by_label("Read").next().is_none(), "no Read tab");
+    h.state_mut().run_command("view.read_mode");
+    h.run_steps(2);
+    assert_eq!(h.state().mode, Mode::Read);
+}
+
 #[test]
 fn explicit_mode_preserves_independent_tool_and_panel_options() {
     use pdfcraft_ui_egui::LeftPanel;
@@ -859,4 +874,62 @@ fn combine_tab_uses_tab_interaction_without_changing_close_or_document_state() {
     close_named_tab(&mut h, "Combine files");
     assert!(h.query_by_role_and_label(Role::Tab, "Combine files").is_none());
     assert_eq!(h.state().views.iter().map(|v| v.id).collect::<Vec<_>>(), document_ids);
+}
+
+/// The jobs card lists every running job with its own Cancel, says which one is stopping, offers
+/// no second Cancel for it, and stops the job whose row was asked — not the others.
+#[test]
+fn the_jobs_card_lists_each_job_and_shows_which_one_is_stopping() {
+    use pdfcraft_ui_egui::jobs::{Cancel as JobToken, Kind};
+    let tokens: std::sync::Arc<std::sync::Mutex<Vec<JobToken>>> = std::sync::Arc::default();
+    let held = tokens.clone();
+    let mut h = harness(move |app| {
+        // A document tab, as when these jobs are started: the card is drawn over the canvas.
+        app.open_bytes("doc.pdf", None, FIXTURE.to_vec()).unwrap();
+        let (optimize, a) = app.jobs.begin(Kind::Optimize, "Optimize PDF…".into(), 10);
+        app.jobs.stage(optimize, "Optimizing… image 4 of 10", 0.275);
+        let (_, b) = app.jobs.begin(Kind::Export, "Export to Image".into(), 4);
+        held.lock().unwrap().extend([a, b]);
+    });
+    // Two rows, each naming its own job and what it is doing, each with its own Cancel.
+    h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+    h.get_by_label("Export to Image");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 2, "one per running job");
+    let ids: Vec<_> = h.state().jobs.jobs().iter().map(|j| j.id).collect();
+    assert_eq!(ids.len(), 2);
+
+    // The row's Cancel calls exactly this, with exactly that row's id.
+    assert!(h.state_mut().cancel_job(ids[1]), "the export was running");
+    h.run_steps(2);
+    let guard = tokens.lock().unwrap();
+    assert!(guard[1].is_cancelled(), "the export is asked to stop");
+    assert!(!guard[0].is_cancelled(), "the optimization is left alone");
+    drop(guard);
+
+    // The stopped job says so, offers no second Cancel, and keeps its place while it finishes.
+    h.get_by_label("Export to Image: Cancelling…");
+    h.get_by_label("Optimize PDF…: Optimizing… image 4 of 10");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 1, "Cancel is not offered twice");
+    assert_eq!(h.state().jobs.jobs().len(), 2, "both rows are still listed");
+
+    // The one Cancel left belongs to the other job, and stops it and nothing else. (The button's
+    // click is wired by `show_progress` to this same call with its own row's id, which
+    // `optimize_ui::the_progress_card_shows_the_stage_and_cancels` drives through a real click.)
+    let remaining: Vec<_> = h.state().jobs.jobs().iter().filter(|j| !j.stopping).map(|j| j.id).collect();
+    assert_eq!(remaining, vec![ids[0]], "only the running job is still offered a Cancel");
+    assert!(h.state_mut().cancel_job(remaining[0]));
+    h.run_steps(2);
+    h.get_by_label("Optimize PDF…: Cancelling…");
+    assert_eq!(h.query_all_by_label("Cancel").count(), 0, "nothing is left to stop");
+
+    // A finished job's row goes; so does the last one.
+    h.state_mut().jobs.finish(ids[1]);
+    h.run_steps(2);
+    assert_eq!(h.state().jobs.jobs().len(), 1);
+    assert!(h.query_by_label("Export to Image: Cancelling…").is_none());
+    h.get_by_label("Optimize PDF…: Cancelling…");
+    h.state_mut().jobs.finish(ids[0]);
+    h.run_steps(2);
+    assert!(h.state().jobs.is_empty(), "the card goes with the last job");
+    assert!(h.query_by_label("Cancel").is_none());
 }

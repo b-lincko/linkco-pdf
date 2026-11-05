@@ -225,7 +225,7 @@ pub(crate) fn show(
             ui.add_space(2.0);
         }
         let thread = replies_of(a);
-        if let Some(e) = card(ui, t, a, &thread, view, prefs, allowed, nav) {
+        if let Some(e) = card(ui, t, a, &thread, info, view, prefs, allowed, nav) {
             edit = Some(e);
         }
     }
@@ -238,6 +238,7 @@ fn card(
     t: &Tokens,
     a: &Annotation,
     thread: &[&Annotation],
+    info: &DocInfo,
     view: &mut DocView,
     prefs: &CommentPrefs,
     allowed: bool,
@@ -414,6 +415,7 @@ fn card(
         .layout(Layout::top_down_justified(Align::Min))
         .show(|ui| {
             ui.set_min_width(160.0);
+            crate::comments::attachment_items(ui, view, info, a);
             if ui.button(tl_ctx!("comment menu", "Edit")).clicked() {
                 view.comments.editing = Some((a.page, a.index, a.contents.clone().unwrap_or_default()));
                 ui.close();

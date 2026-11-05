@@ -6,7 +6,7 @@ use pdfcraft_engine::sign::{self, Certificate, DigitalId, Modification, Name, Pr
 use pdfcraft_engine::{SignOptions, SignatureInfo, SignatureStatus};
 use serde_json::{Value, json};
 
-use crate::{Args, Automation, Result, ToolError, failed, write_atomic};
+use crate::{Args, Automation, Result, ToolError, failed};
 
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
@@ -113,7 +113,7 @@ impl Automation {
         let cert = Certificate::self_signed(&dn, &key, time(now), years, &serial).map_err(failed)?;
         let id = DigitalId { key, certificate: cert, chain: Vec::new(), friendly_name: Some(name) };
         let p12 = sign::pkcs12::write(&id, password).map_err(failed)?;
-        write_atomic(&path, &p12)?;
+        self.resources.write(&path, &p12)?;
         Ok(json!({ "path": path.to_string_lossy(), "certificate": cert_json(&id.certificate) }))
     }
 
@@ -183,7 +183,7 @@ impl Automation {
             ..SignOptions::default()
         };
         let signed = self.session.sign(doc_id, &id, opts).map_err(failed)?;
-        write_atomic(&out, &signed)?;
+        self.resources.write(&out, &signed)?;
         let path = out.to_string_lossy().into_owned();
         self.session.mark_signed(doc_id, signed.clone(), Some(path.clone())).map_err(failed)?;
         let doc = self.doc(a)?;

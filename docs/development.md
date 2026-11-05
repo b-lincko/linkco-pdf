@@ -27,6 +27,28 @@ By default PdfCraft's own crates (`pdfcraft*`) log at `info` and everything else
 covers every target starting with it (`pdfcraft*=debug`). The logger is
 `apps/pdfcraft/src/logging.rs`. It never records the control-channel token or document passwords.
 
+## OCR models: ONNX, from the model card (2026-10-27)
+
+`cargo xtask models` fetches the two models Scan & OCR needs into `assets/models/`, verifying each
+SHA-256 before it is used. Until 2026-10-27 it fetched `.rten` files from
+`https://ocrs-models.s3-accelerate.amazonaws.com/`; that host answered **HTTP 403** for them:
+upstream deprecated the `.rten` variants and "temporarily made them unavailable at their original
+URLs" as a brownout ([robertknight/ocrs#282](https://github.com/robertknight/ocrs/issues/282)),
+pointing consumers at the ONNX models. Those are what the project fetches now, from
+`https://huggingface.co/robertknight/ocrs/` — the model card ocrs publishes, whose LFS entries give
+the SHA-256 of every file, so `ATTRIBUTION.toml` pins a hash that can be checked by reading the
+card rather than by trusting whatever a bucket serves that day. `crates/ocr` builds `ocrs` and
+`rten` with their ONNX support (and keeps their `.rten` support, so an installation that still has
+the old files keeps working), and looks for `text-detection.onnx` and `text-recognition.onnx`
+first, falling back to the `.rten` names.
+
+Two tools help when a host changes again: `cargo xtask models DIR` reports
+`expected <pinned>, got <served>` when a download no longer matches, and
+`cargo xtask models --print-hashes` downloads nothing into the project: it fetches each model to a
+temporary folder, prints its size and SHA-256, and leaves `ATTRIBUTION.toml` alone for that
+deliberate edit. Release packaging greps the packages for `models/*.onnx`
+(`.github/workflows/{release,freebsd}.yml`).
+
 ## GPU surface limits
 
 The desktop renderer enables the selected adapter's supported 2D texture extent, while keeping
@@ -44,6 +66,14 @@ startup `renderer:` line, which records the wgpu adapter, device type, backend a
 limit, or the OpenGL renderer. Also look for the `drawing it at … and scaling it up` warning: it
 means PdfCraft hit the surface-size safety fallback and rendered below the physical window size, so
 softness is expected.
+
+## Screenshots for the README
+
+`docs/images/capture.sh` regenerates both README screenshots with `examples/shot.rs`, at twice the
+size they are displayed at and without downscaling: a screenshot holds only the pixels that were
+captured, so an image that was scaled on the way out is soft however sharp the app was. Do not pass
+`--width` — it resamples. (A snapshot taken inside the app, `Edit ▸ Take a Snapshot`, is rendered at
+the same scale the page is drawn at, so it too holds one image pixel per screen pixel.)
 
 ## Renderer fallback
 

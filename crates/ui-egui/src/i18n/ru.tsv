@@ -1539,12 +1539,10 @@
 	Added {n} comments	Добавлено {n} комментариев
 	Choose a folder for the results	Выберите папку для результатов
 	Files for {name}	Файлы для {name}
-	An action is already running	Действие уже выполняется
 	Running action… file {d} of {t}	Выполняется действие… файл {d} из {t}
 	No unlinked web addresses were found in the text	В тексте не найдено несвязанных веб-адресов
 	Created 1 link	Создана 1 ссылка
 	Created {n} links	Создано {n} ссылок
-	Text recognition is already running	Распознавание текста уже выполняется
 	Recognizing text… file {d} of {t}	Распознавание текста… файл {d} из {t}
 	Recognizing text… page {d} of {t}	Распознавание текста… стр. {d} из {t}
 	Recognized 1 word	Распознано 1 слово
@@ -2135,4 +2133,52 @@ key	Space	Пробел
 	Driver: {driver}	Драйвер: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Состояние принтера: {status}. Перед печатью проверьте подключение принтера.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Принтеры не найдены. Включите принтер и подключите его, затем нажмите «Проверить снова». Сохранить как PDF по-прежнему можно.
+	Print both sides	Двусторонняя печать
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Печать на обеих сторонах листа с переворотом по длинному краю, если принтер это поддерживает.
+	Printing on both sides of the sheet. Click to print on one side only.	Печать на обеих сторонах листа. Нажмите, чтобы печатать только на одной стороне.
+	Match page at 100%	Подобрать бумагу, масштаб 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Печать в масштабе 100 % на бумаге того же размера, не изменяя диапазон страниц.
+	PDF page: {w} × {h} in	Страница PDF: {w} × {h} дюйм
+	PDF scale: {scale}%	Масштаб PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Масштаб, в котором рисуется страница; драйвер принтера всё же может подменить бумагу или уменьшить задание.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	«Разрезать и сложить» печатает односторонние листы. Для печати на обеих сторонах выберите другой порядок страниц.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Обрезает каждую страницу по напечатанной области, разворачивает её прямо и вписывает в лист без искажений. Одна этикетка на лист.
+	Turn upside down (180°)	Перевернуть (180°)
+	the name is not a plain file name	имя не является простым именем файла
 	Developer: {name}	Разработчик: {name}
+	Overwrite	Перезаписать
+	Save As…	Сохранить как…
+	“{name}” changed on disk while you were working on it.	«{name}» изменён на диске, пока вы с ним работали.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Запись поверх заменит версию, записанную другой программой. Сохраните копию, если нужны обе.
+	“{name}” was moved or renamed to “{found}”.	«{name}» перемещён или переименован в «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» больше не находится в «{path}»: файл перемещён в другую папку или удалён.
+	Tried {n} times. Zoom or rotate the page to try again.	Попыток: {n}. Измените масштаб или поверните страницу, чтобы повторить.
+	On disk: {n} pages, written {when}.	На диске: {n} страниц, записано {when}.
+	On disk: written {when}.	На диске: записано {when}.
+	The version on disk is too large to compare here.	Версия на диске слишком велика для сравнения здесь.
+	“{name}” could not be opened to compare it.	Не удалось открыть «{name}» для сравнения.
+	{name} (on disk)	{name} (на диске)
+	Recognize Text in Files	Распознать текст в файлах
+	 (stopped after {done} of {total})	 (остановлено после {done} из {total})
+	file {d} of {t}	Файл {d} из {t}
+	Export stopped after {done} of {total} files	Экспорт остановлен после {done} из {total} файлов
+	and {n} more	и ещё {n}
+	The job stopped without finishing	Задача остановилась, не завершившись
+	The job couldn't start: {e}	Не удалось запустить задачу: {e}
+	Run {name} on {n} files?	Выполнить «{name}» для {n} файлов?
+	Recognize text in {n} files?	Распознать текст в {n} файлах?
+	Results go to {folder}	Результаты будут в {folder}
+	Writes {n} file(s).	Записывает {n} файл(ов).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Заменяет {n} уже существующих файл(ов). Заменённый файл восстановить нельзя.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} файл(ов) будут записаны рядом с существующим, который останется как есть.
+	Nothing that is already in the folder is replaced.	Ничего из уже лежащего в папке не заменяется.
+	The folder changed since this was shown; check what this batch would write now	Папка изменилась после показа этого плана; проверьте, что этот пакет запишет сейчас
+	Export to {format}	Экспорт в {format}
+	Exporting… page {d} of {t}	Экспорт… страница {d} из {t}
+	Export cancelled	Экспорт отменён
+	Print to {printer}	Печать на {printer}
+	Preparing the print job	Подготовка задания печати
+	Rendering sheet {d} of {t}	Отрисовка листа {d} из {t}
+	Print cancelled: nothing was sent to {printer}	Печать отменена: на {printer} ничего не отправлено
+	Waiting its turn	Ожидает своей очереди
+	The job was cancelled before it started	Задание отменено до начала

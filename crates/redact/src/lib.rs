@@ -9,6 +9,10 @@
 //! - the marks themselves, replaced by boxes in their fill colour (with their overlay text)
 //!   drawn into the page.
 //!
+//! A redacted page keeps no copy of itself either: its thumbnail (`/Thumb`), a picture of the
+//! page before, and its `/PieceInfo`, the producing application's private data, go with the
+//! content. The next save is a full rewrite, so the earlier revision leaves the file.
+//!
 //! A verification pass then re-reads every redacted page; if any glyph or inline image is still
 //! under a region the whole operation fails (callers keep the previous document: fail-closed).
 
@@ -107,6 +111,10 @@ pub struct Report {
     pub fields: usize,
     /// Structure elements that lost alternate/actual text or emptied marked content.
     pub tags: usize,
+    /// Page thumbnails (`/Thumb`) removed: a picture of the page as it was before.
+    pub thumbnails: usize,
+    /// `/PieceInfo` dictionaries removed: the producing application's own copy of the page.
+    pub private_data: usize,
 }
 
 fn rect_of(doc: &Document, o: Option<&Object>) -> Option<[f64; 4]> {
@@ -378,9 +386,25 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
                 d.set(b"Annots".to_vec(), Object::Array(kept));
             }
         })?;
+
+        // 3. Copies of the page that no mark can reach. `/Thumb` is a picture of the whole page
+        // as it was, so it still shows what the marks covered; `/PieceInfo` is the producing
+        // application's private data, which can hold its own copy of the page description.
+        // Readers make their own thumbnails, so neither is worth keeping on a redacted page.
+        let page_dict = doc.get(page.obj).as_dict().cloned().unwrap_or_default();
+        let thumb = page_dict.contains(b"Thumb");
+        let private = page_dict.contains(b"PieceInfo");
+        if thumb || private {
+            doc.update_dict(page.obj, |d| {
+                d.remove(b"Thumb");
+                d.remove(b"PieceInfo");
+            })?;
+            report.thumbnails += usize::from(thumb);
+            report.private_data += usize::from(private);
+        }
     }
 
-    // 3. Form fields with a widget under a mark (all their widgets go).
+    // 4. Form fields with a widget under a mark (all their widgets go).
     for name in &doomed_fields {
         if pdfcraft_forms::fields(doc).iter().any(|f| &f.name == name) {
             pdfcraft_forms::delete_field(doc, name)?;
@@ -388,7 +412,7 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
         }
     }
 
-    // 4. The boxes.
+    // 5. The boxes.
     for &pi in &by_page {
         let page_marks: Vec<&Mark> = chosen.iter().copied().filter(|m| m.page == pi).collect();
         let content = overlay_content(&page_marks);
@@ -397,7 +421,7 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
         }
     }
 
-    // 5. Verify: nothing readable may remain under a region.
+    // 6. Verify: nothing readable may remain under a region.
     let mut residue = 0;
     for &pi in &by_page {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);

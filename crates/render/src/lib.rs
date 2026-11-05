@@ -26,6 +26,12 @@ pub use raster::{
 pub use text::{PageText, TextGlyph};
 
 /// Errors surfaced to the user when a document cannot be opened.
+///
+/// The variants say *whose* problem the failure is, because a caller has to act differently on
+/// each: `Invalid` is the file (it is not a document, or is too damaged to be one), `NeedsPassword`
+/// and `WrongPassword` are the caller's to fix, `Empty` is a real document with nothing in it,
+/// `Unsupported` is this build's limit, and `Internal` is ours to fix — nothing about the file is
+/// being claimed when that one is raised.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
     #[error("the file is not a readable PDF: {0}")]
@@ -34,6 +40,10 @@ pub enum OpenError {
     NeedsPassword,
     #[error("the password is incorrect")]
     WrongPassword,
+    #[error("the document has no pages")]
+    Empty,
     #[error("{0}")]
     Unsupported(String),
+    #[error("reading it failed unexpectedly: {0}")]
+    Internal(String),
 }

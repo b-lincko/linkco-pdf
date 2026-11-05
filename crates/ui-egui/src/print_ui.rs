@@ -3,6 +3,10 @@
 //! (Size, Poster, Multiple, Booklet); orientation; comments & forms; and a live preview of the
 //! sheets. Printing sends the print-ready PDF to the system spooler; "Save as PDF" writes it.
 
+// The desktop spools on a worker thread; a browser has no thread to hand the job to.
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Arc, Mutex};
+
 use egui::{Color32, Pos2, Rect, Stroke, pos2, vec2};
 use pdfcraft_engine::print::{self, Binding, BookletSubset, Content, Layout, Orientation, PAPERS, PageOrder, SizeMode, Subset, spool};
 
@@ -15,6 +19,9 @@ const PREVIEW_W: f32 = 320.0;
 const PREVIEW_H: f32 = 380.0;
 const PREVIEW_INSET: f32 = 12.0;
 pub(crate) const PREVIEW_BOX: (f32, f32) = (PREVIEW_W - 2.0 * PREVIEW_INSET, PREVIEW_H - 2.0 * PREVIEW_INSET);
+/// Label printing reads the printed area of at most this many pages (each is a quick render on
+/// the UI thread); further pages print whole.
+pub(crate) const LABEL_CROP_PAGES: usize = 50;
 /// The settings column, and the gap between it and the preview pane.
 const SETTINGS_W: f32 = 470.0;
 const COLUMN_GAP: f32 = 12.0;
@@ -26,8 +33,9 @@ const MAX_DIALOG: (f32, f32) = (1600.0, 1200.0);
 const WINDOW_MARGIN: f32 = 24.0;
 /// The dialog above and below its two columns: the title, the Print / Cancel row and the frame.
 const DIALOG_CHROME: f32 = 120.0;
-/// Under the preview pane: the sheet navigation row and the paper size line.
-const PREVIEW_FOOTER: f32 = 60.0;
+/// Under the preview pane: the sheet navigation row, and the row holding the "Print both sides"
+/// button and the sheet's size.
+const PREVIEW_FOOTER: f32 = 68.0;
 
 /// The Print dialog's size in a window: as large as a normal window (within [`WINDOW_MARGIN`] of
 /// the app window's edges and up to [`MAX_DIALOG`]), never smaller than the original dialog. The
@@ -97,6 +105,8 @@ pub enum Handling {
     Poster,
     Multiple,
     Booklet,
+    /// Shipping label: cut to the printed area, turned upright, one per sheet.
+    Label,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -148,6 +158,13 @@ pub struct PrintDraft {
     pub show_driver_options: bool,
     /// Why the printer's preferences window didn't open (Windows).
     pub driver_error: Option<String>,
+    /// Label: turn a further 180°.
+    pub label_flip: bool,
+    /// Label: each page's printed area and text direction, read when Label is chosen
+    /// ([`PdfCraftApp::read_label_crops`]); empty until then.
+    pub crops: Vec<Option<print::Crop>>,
+    /// The pages `crops` were read for, so a changed page selection reads them again.
+    pub crop_pages: Option<Vec<usize>>,
 }
 
 impl Default for PrintDraft {
@@ -190,6 +207,9 @@ impl Default for PrintDraft {
             driver_choices: Default::default(),
             show_driver_options: false,
             driver_error: None,
+            label_flip: false,
+            crops: Vec::new(),
+            crop_pages: None,
         }
     }
 }
@@ -201,15 +221,15 @@ impl PrintDraft {
             return Err("Cut and stack needs Two-sided: Off. Print single-sided sheets.".into());
         }
         let range = match self.which {
-            Which::All | Which::Selected => None,
-            Which::Current => Some(self.current_page.saturating_add(1).to_string()),
+            Which::All | Which::Selected | Which::Current => None,
             Which::Range => Some(self.range.clone()),
         };
-        let pages = if self.which == Which::Selected {
-            // Positions, not a typed range: a range would read numbers as page labels first.
-            print::select_listed(count, &self.selected, self.subset, self.reverse)
-        } else {
-            print::select_pages(count, range.as_deref(), labels, self.subset, self.reverse)
+        // Selected and Current are positions, not a typed range: a range reads numbers as page
+        // labels first, so Current would print the page labelled with the number on screen (#1308).
+        let pages = match self.which {
+            Which::Selected => print::select_listed(count, &self.selected, self.subset, self.reverse),
+            Which::Current => print::select_listed(count, &[self.current_page], self.subset, self.reverse),
+            Which::All | Which::Range => print::select_pages(count, range.as_deref(), labels, self.subset, self.reverse),
         }
         .map_err(|e| e.to_string())?;
         let layout = match self.handling {
@@ -225,8 +245,16 @@ impl PrintDraft {
             },
             Handling::Booklet => Layout::Booklet { subset: self.booklet_subset, binding: self.binding },
             Handling::Poster => Layout::Poster { scale: self.poster_scale, overlap: self.overlap, cut_marks: self.cut_marks },
+            Handling::Label => Layout::Label { flip: self.label_flip },
         };
-        Ok(print::Settings { pages, paper: PAPERS[self.paper.min(PAPERS.len() - 1)].1, orientation: self.orientation, layout, content: self.content })
+        Ok(print::Settings {
+            pages,
+            paper: PAPERS[self.paper.min(PAPERS.len() - 1)].1,
+            orientation: self.orientation,
+            layout,
+            content: self.content,
+            crops: self.crops.clone(),
+        })
     }
 
     pub fn job(&self, title: &str) -> spool::Job {
@@ -241,7 +269,11 @@ impl PrintDraft {
             options: match (&self.printer, &self.driver_options) {
                 (Some(p), Some((read_for, _))) if p == read_for => self.driver_choices.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                 _ => Vec::new(),
-            },
+            }
+            .into_iter()
+            // The sheet the PDF was laid out on, not the queue's default paper.
+            .chain(print::cups_media(self.paper).map(|m| ("media".to_string(), m.to_string())))
+            .collect(),
         }
     }
 }
@@ -256,8 +288,8 @@ pub fn system_printers() -> PrinterSource {
     std::sync::Arc::new(spool::printers_detailed)
 }
 
-/// The Print dialog's work in the background: the printer list being read, and the jobs being
-/// spooled (the printer each was sent to, and the spooler's answer).
+/// The Print dialog's work in the background: the printer list being read, and the print jobs
+/// being rendered and spooled.
 #[derive(Default)]
 pub(crate) struct PrintTasks {
     #[cfg(not(target_arch = "wasm32"))]
@@ -265,8 +297,40 @@ pub(crate) struct PrintTasks {
     /// The list being read was asked for by "Check again" (see [`PdfCraftApp::apply_printer_list`]).
     #[cfg(not(target_arch = "wasm32"))]
     recheck: bool,
+    /// Prints running now. Several can run at once, each with its own row in the job centre and
+    /// its own stop (see `crate::jobs`).
     #[cfg(not(target_arch = "wasm32"))]
-    jobs: Vec<(String, std::sync::mpsc::Receiver<Result<String, String>>)>,
+    runs: Vec<PrintRun>,
+}
+
+/// A print job running in the background.
+///
+/// The slow part is rendering the sheets on Windows (at 600 dpi a long document takes a while),
+/// which is why the job leaves the interface thread at all. It is a job like any other: a row in
+/// the centre, a stage as each sheet is rendered, and a stop that is answered between sheets —
+/// before anything has been sent, so a stop leaves no print job at all. Once the spooler takes the
+/// job that is no longer true, and [`crate::jobs::Jobs::hand_over`] withdraws the stop rather than
+/// pretending it still works.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct PrintRun {
+    job: crate::jobs::JobId,
+    printer: String,
+    status: Arc<Mutex<PrintStatus>>,
+    alive: crate::jobs::Alive,
+}
+
+/// Where a print job has got to, and how it ended.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct PrintStatus {
+    /// Sheets rendered so far, and how many there are (0 until the first ask says).
+    rendered: usize,
+    total: usize,
+    /// The spooler has taken the job: from here on it cannot be stopped.
+    handed_over: bool,
+    /// The spooler's message (`Some`), a stop before anything was sent (`None`), or what went
+    /// wrong.
+    result: Option<Result<Option<String>, String>>,
 }
 
 /// The printer the dialog preselects: the system default if it is online, else the default, else
@@ -288,14 +352,58 @@ struct SheetRender {
     grayscale: bool,
 }
 
-/// Render the sheets if the spooler needs them, then hand the job over. Runs on a worker thread
-/// on the desktop: a long document at 600 dpi takes a while.
+/// Render the sheets if the spooler needs them, then hand the job over. The browser has no
+/// worker thread to hand it to and nothing to stop, so it runs in place (see `send_to_printer`).
+#[cfg(target_arch = "wasm32")]
 fn spool_job(bytes: &[u8], job: &spool::Job, render: Option<SheetRender>) -> Result<String, String> {
     let sheets = match render {
         Some(r) => pdfcraft_engine::render_imposed_sheets(bytes, r.dpi, r.max_dpi, r.grayscale).map_err(|e| e.to_string())?,
         None => Vec::new(),
     };
     spool::submit_sheets(bytes, &sheets, job).map_err(|e| e.to_string())
+}
+
+/// [`spool_job`] with a stop and a report — what the job centre drives on the desktop.
+///
+/// `Ok(Some(msg))` is the spooler's answer, `Ok(None)` a stop that arrived before anything was
+/// sent (nothing is printed then, which is what makes the stop safe) and `Err` what went wrong.
+/// `status` is where the card reads from, so it is written before each sheet and at the moment the
+/// spooler takes the job.
+#[cfg(not(target_arch = "wasm32"))]
+fn spool_with(
+    bytes: &[u8],
+    job: &spool::Job,
+    render: Option<SheetRender>,
+    cancel: &crate::jobs::Cancel,
+    status: &Mutex<PrintStatus>,
+) -> Result<Option<String>, String> {
+    let sheets = match render {
+        Some(r) => {
+            let asked = pdfcraft_engine::render_imposed_sheets_with(bytes, r.dpi, r.max_dpi, r.grayscale, |done, total| {
+                if let Ok(mut s) = status.lock() {
+                    s.rendered = done;
+                    s.total = total;
+                }
+                !cancel.is_cancelled()
+            })
+            .map_err(|e| e.to_string())?;
+            match asked {
+                Some(sheets) => sheets,
+                // Stopped between sheets: nothing has been sent, and what was rendered is dropped.
+                None => return Ok(None),
+            }
+        }
+        None => Vec::new(),
+    };
+    // A stop that arrived while the last sheet rendered, or that arrives just before the hand-over,
+    // is still a stop: nothing has been given to the spooler yet.
+    if cancel.is_cancelled() {
+        return Ok(None);
+    }
+    if let Ok(mut s) = status.lock() {
+        s.handed_over = true;
+    }
+    spool::submit_sheets(bytes, &sheets, job).map(Some).map_err(|e| e.to_string())
 }
 
 impl PdfCraftApp {
@@ -323,6 +431,8 @@ impl PdfCraftApp {
             (true, other) => other,
         };
         self.print_draft = PrintDraft {
+            crops: Vec::new(),
+            crop_pages: None,
             printers,
             printer_details: details,
             printers_loading,
@@ -336,6 +446,49 @@ impl PdfCraftApp {
             ..keep
         };
         self.dialog = Some(crate::Dialog::Print);
+    }
+
+    /// Label printing: find each printed page's printed area (a quick low-resolution render, as
+    /// Fit Visible does) and which way its text runs. Only the pages being printed are read, at
+    /// most [`LABEL_CROP_PAGES`] of them (the rest print whole); read again when they change.
+    pub(crate) fn read_label_crops(&mut self, id: pdfcraft_engine::DocId) {
+        let Some(doc) = self.session.get(id) else { return };
+        let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
+        let mut pages = self.print_draft.settings(doc.info.pages.len(), &labels).map(|s| s.pages).unwrap_or_default();
+        pages.sort_unstable();
+        pages.dedup();
+        pages.truncate(LABEL_CROP_PAGES);
+        if self.print_draft.crop_pages.as_ref() == Some(&pages) {
+            return;
+        }
+        let up = self.session.print_text_up(id, &pages);
+        let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
+        let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
+        self.print_draft.crops = doc
+            .info
+            .pages
+            .iter()
+            .enumerate()
+            .map(|(page, p)| {
+                let (w, h) = (f64::from(p.width), f64::from(p.height));
+                if pages.binary_search(&page).is_err() || w <= 0.0 || h <= 0.0 {
+                    return None;
+                }
+                let out = r.render(pdfcraft_render::RenderRequest {
+                    page,
+                    kind: pdfcraft_render::RequestKind::Pixels,
+                    tile: None,
+                    scale: (1000.0 / w.max(h) as f32).clamp(0.1, 4.0),
+                    tag: 0,
+                });
+                let [u0, v0, u1, v1] = crate::zoom_snap::ink_bounds(out.width as usize, out.height as usize, &out.rgba)?;
+                // Image rows run down from the top; display space runs up. Half a millimetre of slack.
+                let pad = 1.5;
+                let rect = [f64::from(u0) * w - pad, (1.0 - f64::from(v1)) * h - pad, f64::from(u1) * w + pad, (1.0 - f64::from(v0)) * h + pad];
+                Some(print::Crop { rect, text_up: up.get(page).copied().unwrap_or(false) })
+            })
+            .collect();
+        self.print_draft.crop_pages = Some(pages);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -400,21 +553,15 @@ impl PdfCraftApp {
                     self.apply_printer_list(details, recheck);
                 }
             }
-            let mut finished = Vec::new();
-            self.print_tasks.jobs.retain(|(printer, rx)| match rx.try_recv() {
-                Ok(r) => {
-                    finished.push((printer.clone(), r));
-                    false
+            // Each print job: its stage while it runs, its answer when it ends.
+            let runs = std::mem::take(&mut self.print_tasks.runs);
+            let mut still_running = Vec::with_capacity(runs.len());
+            for run in runs {
+                if self.poll_print_run(&run) {
+                    still_running.push(run);
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    finished.push((printer.clone(), Err("the print job stopped unexpectedly".into())));
-                    false
-                }
-            });
-            for (printer, result) in finished {
-                self.report_print_job(&printer, result);
             }
+            self.print_tasks.runs = still_running;
         }
     }
 
@@ -424,6 +571,54 @@ impl PdfCraftApp {
             Ok(msg) => self.notify(crate::i18n::fmt(tl!("Sent to {printer}: {msg}"), &[("printer", printer), ("msg", &msg)])),
             Err(e) => self.notify_error(e),
         }
+    }
+
+    /// Show a print job's progress in the centre, then say how it ended. Returns `true` while it
+    /// is still running. A worker that died without saying anything ends its row rather than
+    /// leaving it spinning (see [`crate::jobs::Alive`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_print_run(&mut self, run: &PrintRun) -> bool {
+        let Ok(mut s) = run.status.lock() else {
+            // The worker panicked while holding the lock: it will never report back.
+            self.jobs.finish(run.job);
+            self.notify_tr("The job stopped without finishing");
+            return false;
+        };
+        if let Some(result) = s.result.take() {
+            drop(s);
+            self.jobs.finish(run.job);
+            match result {
+                Ok(Some(msg)) => self.report_print_job(&run.printer, Ok(msg)),
+                Ok(None) => self.notify_fmt("Print cancelled: nothing was sent to {printer}", &[("printer", &run.printer)]),
+                Err(e) => self.notify_error(e),
+            }
+            return false;
+        }
+        let (rendered, total, handed_over) = (s.rendered, s.total, s.handed_over);
+        drop(s);
+        if run.alive.ended_without_report(false) {
+            self.jobs.finish(run.job);
+            self.notify_tr("The job stopped without finishing");
+            return false;
+        }
+        if handed_over {
+            // The spooler has it: this app cannot call it back, so the row stops offering a stop.
+            self.jobs.hand_over(run.job);
+            self.jobs.stage(run.job, crate::i18n::fmt(tl!("Sending to {printer}…"), &[("printer", &run.printer)]), 1.0);
+        } else {
+            self.jobs.count(run.job, rendered, total);
+            let stage = if total == 0 {
+                tl!("Preparing the print job").to_string()
+            } else {
+                crate::i18n::fmt(tl!("Rendering sheet {d} of {t}"), &[("d", &(rendered + 1).min(total).to_string()), ("t", &total.to_string())])
+            };
+            let fraction = if total == 0 { 0.0 } else { rendered as f32 / total as f32 };
+            self.jobs.stage(run.job, stage, fraction);
+        }
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        true
     }
 
     /// Print (or save) with the dialog's settings. Returns `true` on success. Save as PDF without
@@ -476,20 +671,42 @@ impl PdfCraftApp {
 
     /// Spool a job off the UI thread: on Windows every sheet is rendered at the printer's
     /// resolution first, which can take minutes for a long document. The dialog closes at once
-    /// and the spooler's answer arrives as a notice.
+    /// and the job appears in the centre — with a stop, until the spooler takes it.
     #[cfg(not(target_arch = "wasm32"))]
     fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job, render: Option<SheetRender>) -> bool {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let label = crate::i18n::fmt(tl!("Print to {printer}"), &[("printer", &printer)]);
+        // Registered before the worker starts, so the card shows the job from this frame on.
+        let (id, cancel) = self.jobs.begin(crate::jobs::Kind::Print, label, 0);
+        let status = Arc::new(Mutex::new(PrintStatus::default()));
+        let st = status.clone();
+        let showing = st.clone();
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
         let ctx = self.ctx.clone();
-        std::thread::spawn(move || {
-            // The receiver may be gone (the app quit): nothing to report to then.
-            let _ = tx.send(spool_job(&bytes, &job, render));
-            if let Some(ctx) = ctx {
+        let lang = crate::i18n::current();
+        let work = move || {
+            // Dropped however this ends, a panic included (see `jobs::Alive`).
+            let _worker = worker;
+            crate::i18n::set_current(lang);
+            let answer = spool_with(&bytes, &job, render, &cancel, &showing);
+            if let Ok(mut s) = st.lock() {
+                s.result = Some(answer);
+            }
+            if let Some(ctx) = &ctx {
                 ctx.request_repaint();
             }
-        });
-        self.notify(crate::i18n::fmt(tl!("Sending to {printer}…"), &[("printer", &printer)]));
-        self.print_tasks.jobs.push((printer, rx));
+        };
+        if self.run_inline {
+            work(); // tests and automation: synchronous
+        } else if let Err(e) = std::thread::Builder::new().name("pdfcraft-print".into()).spawn(work) {
+            // No worker thread: say so now rather than leave a row waiting for a report that will
+            // never come.
+            if let Ok(mut s) = status.lock() {
+                s.result = Some(Err(e.to_string()));
+            }
+        }
+        self.print_tasks.runs.push(PrintRun { job: id, printer, status, alive });
+        self.poll_print();
         true
     }
 
@@ -716,6 +933,39 @@ fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, choice
     });
 }
 
+/// The layout prints sheets that are turned over by hand: cut and stack arranges the pages on
+/// single-sided sheets to cut into piles, so two-sided printing is refused for it (see
+/// [`PrintDraft::settings`]).
+fn single_sided_only(d: &PrintDraft) -> bool {
+    d.handling == Handling::Multiple && d.order == PageOrder::CutStack
+}
+
+/// What the preview's "Print both sides" button switches to: on, flipped on the long edge (what
+/// most two-sided printers do with the sheet), or off. A short-edge flip, chosen under Two-sided
+/// in the settings, counts as on, and the button turns it off.
+fn toggled_duplex(d: &PrintDraft) -> spool::Duplex {
+    if d.duplex == spool::Duplex::Off { spool::Duplex::LongEdge } else { spool::Duplex::Off }
+}
+
+/// The "Print both sides" button under the preview: one click prints on both sides of the sheet,
+/// another goes back to one side (the caller sets [`toggled_duplex`]). It stays off for cut and
+/// stack, whose sheets are printed single-sided, but is still clickable there while two-sided is
+/// on, so it is also the way out of the error the preview shows for that combination.
+fn both_sides_button(ui: &mut egui::Ui, d: &PrintDraft) -> egui::Response {
+    let on = d.duplex != spool::Duplex::Off;
+    let blocked = single_sided_only(d) && !on;
+    let label = tl!("Print both sides");
+    let tip = if blocked {
+        tl!("Cut and stack prints single-sided sheets. Choose another page order to print on both sides.")
+    } else if on {
+        tl!("Printing on both sides of the sheet. Click to print on one side only.")
+    } else {
+        tl!("Print on both sides of the sheet, turning it over on its long edge, if the printer can.")
+    };
+    let resp = ui.add_enabled_ui(!blocked, |ui| widgets::toggle_pill(ui, "copy", label, on)).inner;
+    resp.on_hover_text(tip)
+}
+
 /// Draw the dialog, sized by `layout`. `thumb` gives the texture to draw a page with when there is
 /// one, given the width in device pixels it is drawn at. Returns (print, cancel).
 pub(crate) fn body(
@@ -848,11 +1098,19 @@ pub(crate) fn body(
                     });
                     ui.end_row();
                     ui.label(tl!("Paper:"));
-                    egui::ComboBox::from_id_salt("paper").selected_text(PAPERS[d.paper].0).width(160.0).show_ui(ui, |ui| {
+                    // The saved draft can name a paper this catalog no longer has (#1123).
+                    let paper_name = PAPERS.get(d.paper).map_or("US Letter", |p| p.0);
+                    let before = d.paper;
+                    egui::ComboBox::from_id_salt("paper").selected_text(tl!(paper_name)).width(260.0).show_ui(ui, |ui| {
                         for (i, (name, _)) in PAPERS.iter().enumerate() {
-                            ui.selectable_value(&mut d.paper, i, *name);
+                            ui.selectable_value(&mut d.paper, i, tl!(name));
                         }
                     });
+                    // Label stock gets the label layout (cut, turned upright, fitted).
+                    if d.paper != before && d.paper == print::LABEL_PAPER {
+                        d.handling = Handling::Label;
+                        d.sheet = 0;
+                    }
                     ui.end_row();
                 });
                 if let Some(e) = &d.driver_error {
@@ -861,6 +1119,24 @@ pub(crate) fn body(
                 }
                 if d.show_driver_options {
                     driver_options_panel(ui, d, t);
+                }
+                // The page on screen, and one click to print it at its own size on the sheet that fits.
+                if let Some(&source) = sizes.get(d.current_page) {
+                    ui.horizontal_wrapped(|ui| {
+                        let (w, h) = (source.0 / 72.0, source.1 / 72.0);
+                        ui.label(crate::i18n::fmt(tl!("PDF page: {w} × {h} in"), &[("w", &format!("{w:.2}")), ("h", &format!("{h:.2}"))]));
+                        let matched = print::matching_paper(source);
+                        let tip = tl!("Print at 100% on the paper of the same size, leaving the page range alone.");
+                        if ui.add_enabled(matched.is_some(), egui::Button::new(tl!("Match page at 100%"))).on_hover_text(tip).clicked()
+                            && let Some(paper) = matched
+                        {
+                            d.paper = paper;
+                            d.handling = Handling::Size;
+                            d.size = SizeMode::Actual;
+                            d.orientation = Orientation::Auto;
+                            d.sheet = 0;
+                        }
+                    });
                 }
                 ui.add_space(6.0);
                 widgets::section_title(ui, tl!("Pages to Print"));
@@ -900,10 +1176,15 @@ pub(crate) fn body(
                         (Handling::Poster, tl!("Poster")),
                         (Handling::Multiple, tl!("Multiple")),
                         (Handling::Booklet, tl!("Booklet")),
+                        (Handling::Label, tl!("Label")),
                     ] {
                         if widgets::mode_tab(ui, label, d.handling == h).clicked() {
                             d.handling = h;
                             d.sheet = 0;
+                            // A label goes on label stock.
+                            if h == Handling::Label {
+                                d.paper = print::LABEL_PAPER;
+                            }
                         }
                     }
                 });
@@ -922,6 +1203,14 @@ pub(crate) fn body(
                             }
                             ui.add_enabled(custom, egui::DragValue::new(&mut d.custom_scale).range(1.0..=1000.0).suffix(" %"));
                         });
+                    }
+                    Handling::Label => {
+                        ui.checkbox(&mut d.label_flip, tl!("Turn upside down (180°)"));
+                        ui.label(
+                            egui::RichText::new(tl!("Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet."))
+                                .small()
+                                .color(t.text_muted),
+                        );
                     }
                     Handling::Poster => {
                         ui.horizontal(|ui| {
@@ -1098,10 +1387,27 @@ pub(crate) fn body(
                     d.sheet += 1;
                 }
             });
-            if let Some(s) = sheets.first() {
-                let (w, h) = (s.size.0 / 72.0, s.size.1 / 72.0);
-                ui.label(egui::RichText::new(format!("{w:.2} × {h:.2} in")).small().color(t.text_muted));
-            }
+            ui.horizontal(|ui| {
+                if both_sides_button(ui, d).clicked() {
+                    d.duplex = toggled_duplex(d);
+                }
+                // The sheet's size on the right of the same row.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(s) = sheets.get(d.sheet) {
+                        let (w, h) = (s.size.0 / 72.0, s.size.1 / 72.0);
+                        ui.label(egui::RichText::new(format!("{w:.2} × {h:.2} in")).small().color(t.text_muted));
+                        // The scale the page is drawn at on the previewed sheet (#1123).
+                        if d.handling == Handling::Size
+                            && let Some(p) = s.placed.first()
+                        {
+                            let scale = p.matrix.0[0].hypot(p.matrix.0[1]) * 100.0;
+                            let text = crate::i18n::fmt(tl!("PDF scale: {scale}%"), &[("scale", &format!("{scale:.2}"))]);
+                            let tip = tl!("The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.");
+                            ui.label(egui::RichText::new(text).small().color(t.text_muted)).on_hover_text(tip);
+                        }
+                    }
+                });
+            });
         });
     });
     ui.add_space(12.0);
@@ -1164,6 +1470,54 @@ mod tests {
         later.sheet = 2;
         let rasters = preview_rasters(&later, &sizes, &labels, 2.0, 8192.0, PREVIEW_BOX);
         assert!(rasters.iter().any(|(page, _)| *page == 2));
+    }
+
+    /// Issue #1308 (upstream #1411): Current page is the page on screen, even when a later page is
+    /// labelled with its number. A typed range still reads labels first.
+    #[test]
+    fn current_page_is_the_viewed_page_not_a_label() {
+        let labels: Vec<String> = ["i", "ii", "iii", "1", "2"].map(String::from).to_vec();
+        for (current, want) in [(0, vec![0]), (1, vec![1]), (3, vec![3])] {
+            let d = PrintDraft { which: Which::Current, current_page: current, ..PrintDraft::default() };
+            assert_eq!(d.settings(5, &labels).map(|s| s.pages), Ok(want), "viewing page {}", current + 1);
+        }
+        let typed = PrintDraft { which: Which::Range, range: "1".into(), ..PrintDraft::default() };
+        assert_eq!(typed.settings(5, &labels).map(|s| s.pages), Ok(vec![3]));
+    }
+
+    #[test]
+    fn the_both_sides_button_switches_two_sided_printing_on_and_off() {
+        let mut d = PrintDraft::default();
+        assert_eq!(d.duplex, spool::Duplex::Off);
+        // One click on: flip on the long edge, what most two-sided printers do with the sheet.
+        d.duplex = toggled_duplex(&d);
+        assert_eq!(d.duplex, spool::Duplex::LongEdge);
+        // And off again.
+        d.duplex = toggled_duplex(&d);
+        assert_eq!(d.duplex, spool::Duplex::Off);
+        // A short-edge flip, chosen under Two-sided in the settings, is on: the button turns it off.
+        let short = PrintDraft { duplex: spool::Duplex::ShortEdge, ..PrintDraft::default() };
+        assert_eq!(toggled_duplex(&short), spool::Duplex::Off);
+    }
+
+    #[test]
+    fn cut_and_stack_keeps_the_both_sides_button_off() {
+        // Cut and stack lays pages out on sheets to be cut into piles, which are printed one
+        // sided: the draft refuses two-sided for it, so the button stays off and disabled.
+        let cut_stack = PrintDraft { handling: Handling::Multiple, order: PageOrder::CutStack, ..PrintDraft::default() };
+        assert!(single_sided_only(&cut_stack));
+        let on = PrintDraft { duplex: spool::Duplex::LongEdge, ..cut_stack.clone() };
+        assert!(on.settings(2, &["1".into(), "2".into()]).is_err(), "the dialog says why");
+        // Switched on some other way, the button is still the way back off.
+        assert_eq!(toggled_duplex(&on), spool::Duplex::Off);
+        // Every other order and handling prints on both sides.
+        for d in [
+            PrintDraft::default(),
+            PrintDraft { handling: Handling::Multiple, order: PageOrder::Horizontal, ..PrintDraft::default() },
+            PrintDraft { handling: Handling::Booklet, order: PageOrder::CutStack, ..PrintDraft::default() },
+        ] {
+            assert!(!single_sided_only(&d), "{d:?}");
+        }
     }
 
     #[test]
@@ -1248,5 +1602,145 @@ mod tests {
         assert_eq!(pick_preview_texture(&[(799, id(1)), (1_000, id(3))], 800.0), Some(id(1)));
         assert_eq!(pick_preview_texture(&[(800, id(1)), (800, id(3))], 800.0), Some(id(1)));
         assert_eq!(pick_preview_texture(&[(800, id(1)), (800, id(3))], f32::NAN), Some(id(1)));
+    }
+
+    /// An imposed three-sheet print-ready PDF, as the dialog makes it before it spools.
+    fn three_sheets() -> (Vec<u8>, spool::Job) {
+        let mut session = pdfcraft_engine::Session::new();
+        let pdf = session.create_blank(200.0, 300.0, 3).unwrap();
+        let id = session.open("print.pdf", None, pdf, None).unwrap();
+        let settings = pdfcraft_engine::print::Settings {
+            pages: vec![0, 1, 2],
+            paper: (200.0, 300.0),
+            orientation: Orientation::Portrait,
+            layout: Layout::Size(SizeMode::Fit),
+            content: Content::DocumentAndMarkups,
+            crops: Vec::new(),
+        };
+        let imposed = session.print_pdf(id, &settings).unwrap();
+        (imposed.to_vec(), spool::Job { printer: Some("Front Desk".into()), ..Default::default() })
+    }
+
+    /// The slow half of a print — the sheets — is where a stop is answered: the sheet in hand
+    /// finishes, no sheet after it starts, and nothing is sent. This is the promise print jobs
+    /// were missing: before, a long render could not be stopped at all.
+    #[test]
+    fn a_print_stopped_while_rendering_sends_nothing() {
+        let (imposed, job) = three_sheets();
+        let stop = crate::jobs::Cancel::new();
+        stop.cancel();
+        let status = Mutex::new(PrintStatus::default());
+        let render = Some(SheetRender { dpi: 72, max_dpi: 600, grayscale: false });
+        let answer = spool_with(&imposed, &job, render, &stop, &status).expect("a stop is not a failure");
+        assert!(answer.is_none(), "a stopped print is not a sent one");
+        let s = status.lock().unwrap();
+        assert_eq!((s.rendered, s.total), (0, 3), "the ask ran and refused the first sheet");
+        assert!(!s.handed_over, "the spooler was never called");
+    }
+
+    /// A stop that arrives before the spooler has the job is still a stop, on every platform —
+    /// including the ones where nothing is rendered first and the PDF goes straight out.
+    #[test]
+    fn a_print_stopped_before_the_hand_over_sends_nothing() {
+        let (imposed, job) = three_sheets();
+        let stop = crate::jobs::Cancel::new();
+        stop.cancel();
+        let status = Mutex::new(PrintStatus::default());
+        let answer = spool_with(&imposed, &job, None, &stop, &status).expect("a stop is not a failure");
+        assert!(answer.is_none());
+        assert!(!status.lock().unwrap().handed_over);
+    }
+
+    /// A print job is a row in the centre like any other: it says which sheet is rendering, how
+    /// far it has got, and — once the spooler has taken the job — it stops offering a Cancel that
+    /// could not work, because the system queue is not this app's to empty.
+    #[test]
+    fn a_print_job_reports_its_sheets_and_loses_its_stop_at_the_spooler() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Print, "Print to Front Desk".into(), 0);
+        let status = Arc::new(Mutex::new(PrintStatus { rendered: 1, total: 4, ..Default::default() }));
+        let alive = crate::jobs::Alive::new();
+        app.print_tasks.runs.push(PrintRun { job, printer: "Front Desk".into(), status: status.clone(), alive });
+        app.poll_print();
+        let row = &app.jobs.jobs()[0];
+        assert_eq!(row.kind, crate::jobs::Kind::Print);
+        assert_eq!(row.label, "Print to Front Desk");
+        assert_eq!(row.stage, "Rendering sheet 2 of 4");
+        assert!((row.fraction - 0.25).abs() < 1e-6, "{row:?}");
+        assert!(row.stoppable, "the sheets are still being rendered");
+
+        // Before the first ask says how many sheets there are, the row says what it is doing.
+        status.lock().unwrap().total = 0;
+        app.poll_print();
+        assert_eq!(app.jobs.jobs()[0].stage, "Preparing the print job", "nothing rendered yet");
+
+        // The spooler takes the job: the row stays, the stop goes.
+        status.lock().unwrap().handed_over = true;
+        app.poll_print();
+        let row = &app.jobs.jobs()[0];
+        assert_eq!(row.stage, "Sending to Front Desk…");
+        assert!(!row.stoppable, "the spooler has it");
+        assert!(!app.cancel_job(job), "a stop that cannot happen is refused, not recorded");
+        assert!(!app.jobs.jobs()[0].stopping, "and the row does not pretend it is stopping");
+
+        // The spooler's answer ends the row and is shown a person.
+        status.lock().unwrap().result = Some(Ok(Some("job 42".into())));
+        app.poll_print();
+        assert!(app.jobs.is_empty(), "the row is gone");
+        assert!(app.print_tasks.runs.is_empty());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Sent to Front Desk: job 42"));
+    }
+
+    /// A print stopped before the spooler saw it says so, and says the truth: nothing was sent, so
+    /// there is no job in the printer's queue to cancel.
+    #[test]
+    fn a_stopped_print_says_nothing_was_sent() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Print, "Print to Front Desk".into(), 0);
+        let status = Arc::new(Mutex::new(PrintStatus { rendered: 1, total: 3, result: Some(Ok(None)), ..Default::default() }));
+        let alive = crate::jobs::Alive::new();
+        app.print_tasks.runs.push(PrintRun { job, printer: "Front Desk".into(), status, alive });
+        app.poll_print();
+        assert!(app.jobs.is_empty(), "the row is gone");
+        assert!(app.print_tasks.runs.is_empty());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Print cancelled: nothing was sent to Front Desk"));
+    }
+
+    /// A print that fails says what the spooler said, and does not leave its row behind.
+    #[test]
+    fn a_failed_print_says_why_and_ends_its_row() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Print, "Print to Front Desk".into(), 0);
+        let failure = Err("printer \"Front Desk\" is currently offline".to_string());
+        let status = Arc::new(Mutex::new(PrintStatus { result: Some(failure), ..Default::default() }));
+        let alive = crate::jobs::Alive::new();
+        app.print_tasks.runs.push(PrintRun { job, printer: "Front Desk".into(), status, alive });
+        app.poll_print();
+        assert!(app.jobs.is_empty());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("printer \"Front Desk\" is currently offline"));
+    }
+
+    /// A worker that ended without reporting — it panicked — ends the row here rather than
+    /// leaving a card spinning for ever (REC-R06).
+    #[test]
+    fn a_print_whose_worker_died_ends_its_row() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let (job, _) = app.jobs.begin(crate::jobs::Kind::Print, "Print to Front Desk".into(), 0);
+        let alive = crate::jobs::Alive::new();
+        let worker = alive.worker();
+        let status = Arc::new(Mutex::new(PrintStatus { rendered: 0, total: 3, ..Default::default() }));
+        app.print_tasks.runs.push(PrintRun { job, printer: "Front Desk".into(), status, alive });
+        app.poll_print();
+        assert_eq!(app.jobs.jobs().len(), 1, "a slow print is not a dead one");
+
+        drop(worker);
+        app.poll_print();
+        assert!(app.jobs.is_empty(), "the row is retired");
+        assert!(app.print_tasks.runs.is_empty());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("The job stopped without finishing"));
     }
 }

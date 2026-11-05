@@ -1,7 +1,7 @@
 //! The Print dialog in the real shell (egui_kittest): settings, preview sheets, Save as PDF.
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
 
 fn harness() -> Harness<'static, PdfCraftApp> {
@@ -95,6 +95,42 @@ fn invalid_ranges_are_explained_in_the_preview() {
     h.get_by_label_contains("out of range");
 }
 
+/// "Print both sides" under the preview switches two-sided printing on and off, and stays off for
+/// cut and stack, whose sheets are printed single-sided.
+#[test]
+fn the_preview_switches_two_sided_printing_on_and_off() {
+    use pdfcraft_engine::print::{PageOrder, spool::Duplex};
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::LongEdge);
+    // The button and the Two-sided dropdown are the one setting.
+    h.get_by_value("Flip on long edge");
+    // A second click goes back to one side.
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    // Cut and stack prints single-sided sheets: the button is disabled there.
+    h.state_mut().print_draft.handling = pdfcraft_ui_egui::PrintHandling::Multiple;
+    h.state_mut().print_draft.order = PageOrder::CutStack;
+    h.run_steps(2);
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    // Two-sided on for that order (from the dropdown, or another document) is switched off by it:
+    // the button is the way out of the error the preview shows.
+    h.state_mut().print_draft.duplex = Duplex::ShortEdge;
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("Cut and stack needs Two-sided: Off").is_some());
+    h.get_by_label("Print both sides").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.duplex, Duplex::Off);
+    assert!(h.query_by_label_contains("Cut and stack needs Two-sided: Off").is_none(), "the preview is clean again");
+}
+
 #[test]
 fn cut_stack_dialog_previews_saves_and_refuses_duplex() {
     use pdfcraft_engine::print::{PageOrder, spool::Duplex};
@@ -181,14 +217,18 @@ fn print_dialog_shows_the_printer_driver_options() {
     h.get_by_label("Printer properties");
     h.get_by_label("Media");
     h.get_by_label("Paper tray");
-    assert_eq!(h.state().print_draft.job("form.pdf").options, [("InputSlot".to_string(), "Tray2".to_string())]);
+    // The sheet the PDF was laid out on rides along with the driver's own choices.
+    assert_eq!(
+        h.state().print_draft.job("form.pdf").options,
+        [("InputSlot".to_string(), "Tray2".to_string()), ("media".to_string(), "Letter".to_string())]
+    );
     h.get_by_label("Reset to printer defaults").click();
     h.run_steps(2);
-    assert!(h.state().print_draft.job("form.pdf").options.is_empty(), "defaults are not sent");
+    assert_eq!(h.state().print_draft.job("form.pdf").options, [("media".to_string(), "Letter".to_string())], "defaults are not sent");
     // Options read for another printer never go with this one's job.
     h.state_mut().print_draft.driver_choices.insert("InputSlot".into(), "Tray2".into());
     h.state_mut().print_draft.printer = Some("Other_Queue".into());
-    assert!(h.state().print_draft.job("form.pdf").options.is_empty());
+    assert_eq!(h.state().print_draft.job("form.pdf").options, [("media".to_string(), "Letter".to_string())]);
 }
 
 /// The desktop app lists printers in the background (PowerShell on Windows takes a second or
@@ -322,4 +362,42 @@ fn printer_row_describes_network_printers_and_an_empty_list() {
     assert_eq!(h.state().print_draft.printer, None);
     h.get_by_label_contains("No printers were found.");
     assert!(h.query_by_label_contains("Network printer").is_none());
+}
+
+#[test]
+fn architectural_page_can_be_matched_at_100_percent() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1000.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let bytes = app.session.create_blank(2592.0, 1728.0, 1).unwrap();
+        app.open_bytes("architectural.pdf", None, bytes.as_ref().clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_label("PDF page: 36.00 × 24.00 in");
+    h.get_by_label("Match page at 100%").click();
+    h.run_steps(3);
+    h.get_by_value("ARCH D (24 x 36 in)");
+    h.get_by_label("PDF scale: 100.00%");
+    h.get_by_label("36.00 × 24.00 in");
+    let settings = h.state().print_draft.settings(1, &[]).unwrap();
+    assert_eq!(settings.paper, (1728.0, 2592.0));
+    assert_eq!(settings.layout, pdfcraft_engine::print::Layout::Size(pdfcraft_engine::print::SizeMode::Actual));
+}
+
+#[test]
+fn custom_page_cannot_silently_match_a_standard_paper() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    // The 300 x 400 pt fixture is not a standard sheet.
+    assert!(pdfcraft_engine::print::matching_paper((300.0, 400.0)).is_none());
+    let before = h.state().print_draft.clone();
+    assert!(h.get_by_label("Match page at 100%").accesskit_node().is_disabled());
+    h.get_by_label("Match page at 100%").click();
+    h.run_steps(3);
+    assert_eq!(h.state().print_draft.paper, before.paper);
+    assert_eq!(h.state().print_draft.size, before.size);
 }

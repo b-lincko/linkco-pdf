@@ -247,6 +247,19 @@ impl Automation {
                             o.insert("max_length".into(), json!(m));
                         }
                     }
+                    FormFieldKind::PushButton => {
+                        o.insert("caption".into(), json!(w.and_then(|w| w.caption.as_deref()).unwrap_or_default()));
+                        o.insert(
+                            "captions".into(),
+                            json!(
+                                f.widgets
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, w)| { json!({"widget": i.saturating_add(1), "caption": w.caption.as_deref().unwrap_or_default()}) })
+                                    .collect::<Vec<_>>()
+                            ),
+                        );
+                    }
                     _ => {}
                 }
                 if let Value::Object(m) = &mut v {
@@ -327,6 +340,9 @@ impl Automation {
     }
 
     pub(crate) fn form_set_props(&mut self, a: &Args) -> Result<Value> {
+        if a.get("widget").is_some() && a.get("caption").is_none() {
+            return Err(bad("widget requires caption"));
+        }
         let single = a.opt_str("field")?;
         let bulk = a.get("fields").is_some();
         if single.is_some() == bulk {
@@ -344,7 +360,7 @@ impl Automation {
                     return Err(bad(format!("field {name:?} is listed more than once")));
                 }
             }
-            for key in ["name", "rect", "rotation"] {
+            for key in ["name", "rect", "rotation", "caption", "widget"] {
                 if a.get(key).is_some() {
                     return Err(bad(format!("{key} applies to one field; use field instead of fields")));
                 }
@@ -398,6 +414,15 @@ impl Automation {
             rect,
             name: a.opt_str("name")?.map(str::to_owned),
             tooltip: a.opt_str("tooltip")?.map(str::to_owned),
+            caption: a
+                .opt_str("caption")?
+                .map(|caption| -> Result<_> {
+                    let wi = a.opt_int("widget")?.unwrap_or(1);
+                    let wi =
+                        usize::try_from(wi).ok().and_then(|wi| wi.checked_sub(1)).ok_or_else(|| bad("widget must be a positive 1-based index"))?;
+                    Ok((wi, caption.to_owned()))
+                })
+                .transpose()?,
             read_only: a.opt_bool("read_only")?,
             required: a.opt_bool("required")?,
             multiline: a.opt_bool("multiline")?,
@@ -531,7 +556,7 @@ impl Automation {
             return Err(bad("comments travel as .xfdf or .fdf; .xml, .csv and .txt hold form data (use what: fields)"));
         }
         let bytes = self.session.export_data(id, format, comments, fields).map_err(failed)?;
-        crate::write_atomic(&path, &bytes)?;
+        self.resources.write(&path, &bytes)?;
         Ok(json!({ "path": path.to_string_lossy(), "bytes": bytes.len() }))
     }
 

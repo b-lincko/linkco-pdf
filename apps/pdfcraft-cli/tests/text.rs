@@ -146,7 +146,8 @@ mod page_argument_tests {
         for input in [&path, &missing] {
             for args in &invalid {
                 let out = Command::new(BIN).arg("text").arg(input).args(args).output().unwrap();
-                assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+                // An unusable --page is a usage error (exit 2): nothing was read, nothing printed.
+                assert_eq!(out.status.code(), Some(2), "{args:?}: {out:?}");
                 assert!(out.stdout.is_empty(), "{args:?}: no text may be printed");
                 assert_eq!(String::from_utf8(out.stderr).unwrap().trim(), "pdfcraft-cli: bad --page: expected a positive page number");
                 assert_eq!(std::fs::read(&path).unwrap(), bytes);

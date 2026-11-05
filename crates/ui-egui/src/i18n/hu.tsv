@@ -1507,19 +1507,16 @@
 	Added {n} comments	{n} megjegyzés hozzáadva
 	Choose a folder for the results	Válassz mappát az eredményeknek
 	Files for {name}	Fájlok ehhez: {name}
-	An action is already running	Már fut egy művelet
 	Running action… file {d} of {t}	Művelet fut… {d}. fájl / {t}
 	No unlinked web addresses were found in the text	A szövegben nem találtunk hivatkozás nélküli webcímet
 	Created 1 link	1 hivatkozás létrehozva
 	Created {n} links	{n} hivatkozás létrehozva
-	Text recognition is already running	A szövegfelismerés már fut
 	Optimizing… removing user data	Optimalizálás… felhasználói adatok eltávolítása
 	Optimizing… image {d} of {t}	Optimalizálás… {d}. kép / {t}
 	Optimizing… cleaning up	Optimalizálás… tisztítás
 	Optimizing… merging identical objects	Optimalizálás… azonos objektumok egyesítése
 	Optimizing… writing the copy	Optimalizálás… a másolat írása
 	Cancelling…	Megszakítás…
-	Optimization is already running	Az optimalizálás már fut
 	Optimization cancelled	Optimalizálás megszakítva
 	Couldn't optimize the file	A fájlt nem sikerült optimalizálni
 	Recognizing text… file {d} of {t}	Szövegfelismerés… {d}. fájl / {t}
@@ -2209,4 +2206,52 @@ key	Space	Szóköz
 	Driver: {driver}	Illesztőprogram: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Nyomtató állapota: {status}. Nyomtatás előtt ellenőrizze a nyomtató kapcsolatát.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Nem található nyomtató. Kapcsolja be és csatlakoztassa a nyomtatót, majd válassza az „Újraellenőrzés” lehetőséget. PDF-ként továbbra is mentheti.
+	Print both sides	Kétoldalas nyomtatás
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Nyomtatás a lap mindkét oldalára, hosszabb élénél megfordítva, ha a nyomtató tudja.
+	Printing on both sides of the sheet. Click to print on one side only.	Nyomtatás a lap mindkét oldalára. Kattintson, ha csak az egyik oldalra nyomtatna.
+	Match page at 100%	Papír illesztése az oldalhoz, 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	100 %-os nyomtatás azonos méretű papírra, az oldaltartomány változatlanul hagyásával.
+	PDF page: {w} × {h} in	PDF-oldal: {w} × {h} hüvelyk
+	PDF scale: {scale}%	PDF-méretarány: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	Az a méretarány, amelyen az oldal rajzolódik; a nyomtató-illesztőprogram ettől még helyettesítheti a papírt vagy kicsinyítheti a munkát.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	A „Vágás és egymásra rakás” egyoldalas lapokat nyomtat. Válasszon másik oldalsorrendet a kétoldalas nyomtatáshoz.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Minden oldalt a nyomtatott területére vág, függőlegesre fordítja, és torzítás nélkül a laphoz igazítja. Laponként egy címke.
+	Turn upside down (180°)	Fejjel lefelé fordítás (180°)
+	the name is not a plain file name	a név nem egyszerű fájlnév
 	Developer: {name}	Fejlesztő: {name}
+	Overwrite	Felülírás
+	Save As…	Mentés másként…
+	“{name}” changed on disk while you were working on it.	A(z) „{name}“ megváltozott a lemezen, míg Ön dolgozott rajta.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	A felülírás lecserélné a másik program által mentett változatot. Mentse másolatként, ha mindkettőre szüksége van.
+	“{name}” was moved or renamed to “{found}”.	A(z) „{name}“ át lett helyezve vagy átnevezve erre: „{found}“.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	A(z) „{name}“ már nincs itt: „{path}“; másik mappába helyezték vagy törölték.
+	Tried {n} times. Zoom or rotate the page to try again.	Próbálkozások: {n}. Nagyítsa vagy forgassa el az oldalt az újrapróbáláshoz.
+	On disk: {n} pages, written {when}.	A lemezen: {n} oldal, írva: {when}.
+	On disk: written {when}.	A lemezen: írva: {when}.
+	The version on disk is too large to compare here.	A lemezen lévő változat túl nagy az itteni összehasonlításhoz.
+	“{name}” could not be opened to compare it.	A(z) „{name}” nem nyitható meg az összehasonlításhoz.
+	{name} (on disk)	{name} (a lemezen)
+	Recognize Text in Files	Szövegfelismerés fájlokban
+	 (stopped after {done} of {total})	 (leállítva {done} / {total} után)
+	file {d} of {t}	{d}. fájl / {t}
+	Export stopped after {done} of {total} files	Az exportálás {done} / {total} fájl után leállt
+	and {n} more	és további {n}
+	The job stopped without finishing	A feladat befejezés nélkül állt le
+	The job couldn't start: {e}	A feladatot nem sikerült elindítani: {e}
+	Run {name} on {n} files?	Futtatja a(z) {name} műveletet {n} fájlon?
+	Recognize text in {n} files?	Szöveg felismerése {n} fájlban?
+	Results go to {folder}	Az eredmények ide kerülnek: {folder}
+	Writes {n} file(s).	{n} fájl íródik.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Lecserél {n} már meglévő fájlt. A lecserélt fájl nem állítható vissza.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} fájl egy már meglévő mellé íródik, amely érintetlen marad.
+	Nothing that is already in the folder is replaced.	Semmi, ami már a mappában van, nem cserélődik le.
+	The folder changed since this was shown; check what this batch would write now	A mappa megváltozott, mióta ez megjelent; nézze meg, mit írna most ez a köteg
+	Export to {format}	Exportálás ide: {format}
+	Exporting… page {d} of {t}	Exportálás… {t} oldalból {d}.
+	Export cancelled	Exportálás megszakítva
+	Print to {printer}	Nyomtatás erre: {printer}
+	Preparing the print job	A nyomtatási feladat előkészítése
+	Rendering sheet {d} of {t}	{d}. lap előállítása, összesen {t}
+	Print cancelled: nothing was sent to {printer}	A nyomtatás megszakítva: semmi nem került a(z) {printer} nyomtatóra
+	Waiting its turn	Vár a sorára
+	The job was cancelled before it started	A feladat a kezdés előtt megszakítva

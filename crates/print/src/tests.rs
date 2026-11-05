@@ -145,6 +145,17 @@ fn posters_tile_with_overlap() {
     assert!(layout(&[(200.0, 300.0)], &settings(vec![0], Layout::Poster { scale: 400.0, overlap: 400.0, cut_marks: false })).is_err());
 }
 
+/// Issue #1335: a scale so large that the tile counts saturate is refused with the sheet-limit
+/// error, not an overflow in counting the sheets.
+#[test]
+fn huge_posters_are_refused_at_the_sheet_limit() {
+    let refused = Err(PrintError::Invalid("the poster would need more than 1024 sheets".into()));
+    for scale in [100_000.0, 1e22, f64::MAX] {
+        let poster = settings(vec![0], Layout::Poster { scale, overlap: 18.0, cut_marks: true });
+        assert_eq!(layout(&[(200.0, 300.0)], &poster), refused, "scale {scale}");
+    }
+}
+
 #[test]
 fn imposed_pdf_has_the_sheets_and_honours_comments_and_forms() {
     let doc = fixture(3);
@@ -575,6 +586,133 @@ fn printer_option_defaults_and_job_arguments() {
     assert!(spool::printer_options("../../etc/passwd").is_empty(), "not a queue name");
 }
 
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+mod cups_options {
+    use crate::spool;
+
+    const RECORD: &str = "PDFCRAFT_LPOPTIONS_TEST_RECORD";
+    const ANSWER: &str = "PDFCRAFT_LPOPTIONS_TEST_ANSWER";
+
+    /// The child process stands in for lpoptions, recording its real arguments.
+    #[test]
+    fn stand_in_for_lpoptions() {
+        let Some(record) = std::env::var_os(RECORD) else { return };
+        let args: Vec<String> = std::env::args().skip_while(|a| a != "--").skip(1).collect();
+        std::fs::write(std::path::Path::new(&record).join("args"), args.join("\n")).unwrap();
+        println!("{}", std::env::var(ANSWER).unwrap());
+    }
+
+    fn command(record: &std::path::Path, answer: &str) -> std::process::Command {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        // Serial libtest otherwise prefixes the first output line with the test name,
+        // corrupting the mocked lpoptions key. Quiet mode leaves the answer on its own line.
+        c.args(["--quiet", "--exact", "tests::cups_options::stand_in_for_lpoptions", "--nocapture", "--"]).env(RECORD, record).env(ANSWER, answer);
+        c
+    }
+
+    fn folder() -> std::path::PathBuf {
+        use std::io::Read as _;
+        use std::os::unix::fs::DirBuilderExt as _;
+        let mut random = std::fs::File::open("/dev/urandom").unwrap();
+        for _ in 0..32 {
+            let mut nonce = [0; 16];
+            random.read_exact(&mut nonce).unwrap();
+            let path = std::env::temp_dir().join(format!("pdfcraft-cups-options-{:032x}", u128::from_be_bytes(nonce)));
+            // Atomic creation, private permissions from the outset; never reuse an existing
+            // path (including a symlink) in the shared temporary directory.
+            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => return path,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => panic!("create private CUPS test directory: {e}"),
+            }
+        }
+        panic!("could not create a unique CUPS test directory");
+    }
+
+    #[test]
+    fn lpoptions_child_output_is_independent_of_harness_threads() {
+        let dir = folder();
+        for threads in ["1", "2"] {
+            let output =
+                command(&dir, "InputSlot/Paper tray: *Tray2").env("RUST_TEST_THREADS", threads).args(["-p", "Office/duplex", "-l"]).output().unwrap();
+            assert!(output.status.success(), "threads={threads}: {output:?}");
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(spool::parse_lpoptions(&stdout), [("InputSlot".into(), "Tray2".into())], "threads={threads}: {stdout}");
+            assert_eq!(std::fs::read_to_string(dir.join("args")).unwrap(), "-p\nOffice/duplex\n-l");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn instances_read_the_queue_ppd_and_their_own_defaults() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = folder();
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        // One synthetic queue PPD; there is deliberately no Office/ subdirectory.
+        std::fs::write(
+            dir.join("Office.ppd"),
+            "*OpenUI *InputSlot/Paper tray: PickOne\n*DefaultInputSlot: Auto\n*InputSlot Auto/Automatic: \"\"\n*InputSlot Tray2/Tray 2: \"\"\n*CloseUI: *InputSlot\n",
+        )
+        .unwrap();
+        let boundary_queue = "Q".repeat(64);
+        let boundary_instance = format!("Office/{}", "I".repeat(64));
+        std::fs::copy(dir.join("Office.ppd"), dir.join(format!("{boundary_queue}.ppd"))).unwrap();
+        for (destination, current, expected) in [
+            ("Office", "Auto", "Auto"),
+            ("Office/duplex", "Tray2", "Tray2"),
+            ("Office/draft", "Auto", "Auto"),
+            ("Office/unknown-default", "Bogus", "Auto"),
+            (boundary_queue.as_str(), "Tray2", "Tray2"),
+            (boundary_instance.as_str(), "Tray2", "Tray2"),
+        ] {
+            let options = spool::printer_options_via(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}")));
+            assert_eq!(options.len(), 1, "{destination}: the queue's PPD must be read");
+            assert_eq!(options[0].default, expected, "{destination}: only valid instance choices override the PPD default");
+            assert_eq!(options[0].choices, [("Auto".into(), "Automatic".into()), ("Tray2".into(), "Tray 2".into())]);
+            assert_eq!(std::fs::read_to_string(dir.join("args")).unwrap(), format!("-p\n{destination}\n-l"));
+        }
+        let job = spool::Job { printer: Some("Office/duplex".into()), ..Default::default() };
+        assert_eq!(&spool::lp_args(&job)[..2], ["-d", "Office/duplex"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn invalid_destinations_are_rejected_before_running_lpoptions() {
+        let dir = folder();
+        let long_queue = "Q".repeat(65);
+        let long_queue_instance = format!("{long_queue}/duplex");
+        let long_instance = format!("Office/{}", "I".repeat(65));
+        for destination in [
+            "",
+            ".",
+            "..",
+            "/Office",
+            "Office/",
+            "Office/a/b",
+            "../../etc/passwd",
+            "./duplex",
+            "../duplex",
+            "Office/.",
+            "Office/..",
+            "Office\\duplex",
+            "Office/\\duplex",
+            "Office/with space",
+            "Office/line\nbreak",
+            "Office/quote\"",
+            "Office/equals=",
+            "Office/a:b",
+            "Office/\0",
+            long_queue.as_str(),
+            long_queue_instance.as_str(),
+            long_instance.as_str(),
+        ] {
+            assert!(spool::printer_options_via(destination, &dir, command(&dir, "InputSlot: *Auto")).is_empty(), "{destination:?}");
+            assert!(!dir.join("args").exists(), "{destination:?}: rejected before spawning");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 #[test]
 fn a_scaled_appearance_is_not_scaled_twice() {
     let doc = fixture(1);
@@ -626,4 +764,82 @@ fn network_printer_ports_are_told_from_local_ones() {
     ] {
         assert!(!is_network_port(port), "{port:?} is a local port");
     }
+}
+
+#[test]
+fn architectural_sheets_preserve_full_scale() {
+    let index = matching_paper((2592.0, 1728.0)).unwrap();
+    assert_eq!(PAPERS[index].0, "ARCH D (24 x 36 in)");
+    assert_eq!(matching_paper((1728.0, 2592.0)), Some(index));
+    assert_eq!(matching_paper((f64::NAN, 2592.0)), None);
+    let s = Settings { pages: vec![0], paper: PAPERS[index].1, layout: Layout::Size(SizeMode::Actual), ..Settings::default() };
+    let sheets = layout(&[(2592.0, 1728.0)], &s).unwrap();
+    assert_eq!(sheets[0].size, (2592.0, 1728.0));
+    assert_eq!(sheets[0].placed[0].matrix.0, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let fit = layout(&[(2592.0, 1728.0)], &Settings { layout: Layout::Size(SizeMode::Fit), ..s }).unwrap();
+    assert!(fit[0].placed[0].matrix.0[0] < 1.0, "Fit adds margins and must not masquerade as full scale");
+}
+
+#[test]
+fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes() {
+    for (i, (_, (w, h))) in PAPERS.iter().enumerate() {
+        assert_eq!(matching_paper((*w, *h)), Some(i));
+        assert_eq!(matching_paper((*h, *w)), Some(i));
+        assert_eq!(matching_paper((w.round(), h.round())), Some(i));
+        assert_eq!(matching_paper((w + 0.51, *h)), None);
+    }
+    for size in [(0.0, 0.0), (-1728.0, 2592.0), (f64::INFINITY, 2592.0), (1728.0, f64::NAN), (1000.0, 1000.0)] {
+        assert_eq!(matching_paper(size), None);
+    }
+}
+
+#[test]
+fn label_is_cut_turned_upright_and_fitted_without_distortion() {
+    let label = LABEL_PAPER;
+    assert_eq!(PAPERS[label].0, "4 x 6 in label (101.6 x 152.4 mm)");
+    assert_eq!(PAPERS[label].1, (288.0, 432.0));
+    assert_eq!(cups_media(label), Some("w288h432"));
+    // A sideways label in the lower half of an A4 sheet, text running bottom-to-top.
+    let rect = [40.0, 30.0, 560.0, 420.0];
+    for (text_up, flip, want_text_dir) in [(true, false, (1.0, 0.0)), (false, false, (1.0, 0.0)), (true, true, (-1.0, 0.0))] {
+        // Text direction on the page: up when text_up, down otherwise.
+        let page_dir = if text_up { (0.0, 1.0) } else { (0.0, -1.0) };
+        let s = Settings {
+            pages: vec![0],
+            paper: PAPERS[label].1,
+            layout: Layout::Label { flip },
+            crops: vec![Some(Crop { rect, text_up })],
+            ..Settings::default()
+        };
+        let sheets = layout(&[(595.0, 842.0)], &s).unwrap();
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].size, (288.0, 432.0));
+        let pl = sheets[0].placed[0];
+        assert_eq!(pl.clip, rect);
+        let [a, b, c, d, _, _] = pl.matrix.0;
+        // A pure quarter turn with one scale: no stretching.
+        assert!((a.hypot(b) - c.hypot(d)).abs() < 1e-9 && (a * c + b * d).abs() < 1e-9);
+        let dir = (a * page_dir.0 + c * page_dir.1, b * page_dir.0 + d * page_dir.1);
+        let n = dir.0.hypot(dir.1);
+        assert!((dir.0 / n - want_text_dir.0).abs() < 1e-9 && (dir.1 / n - want_text_dir.1).abs() < 1e-9, "text_up={text_up} flip={flip}");
+        let corners = [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])].map(|(x, y)| pl.matrix.apply(x, y));
+        let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |m, p| (m.0.min(p.0), m.1.max(p.0)));
+        let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |m, p| (m.0.min(p.1), m.1.max(p.1)));
+        assert!(x0 >= LABEL_MARGIN - 1e-6 && x1 <= 288.0 - LABEL_MARGIN + 1e-6 && y0 >= LABEL_MARGIN - 1e-6 && y1 <= 432.0 - LABEL_MARGIN + 1e-6);
+        // Fills the label's width (the crop's height, 390 pt, becomes it).
+        assert!((x1 - x0 - (288.0 - 2.0 * LABEL_MARGIN)).abs() < 1e-6);
+    }
+    // No crop: the whole page, upright.
+    let whole =
+        layout(&[(200.0, 300.0)], &Settings { pages: vec![0], paper: (288.0, 432.0), layout: Layout::Label { flip: false }, ..Settings::default() })
+            .unwrap();
+    assert_eq!(whole[0].placed[0].clip, [0.0, 0.0, 200.0, 300.0]);
+    assert_eq!(whole[0].placed[0].matrix.0[1], 0.0);
+}
+
+#[test]
+fn text_direction_is_read_from_text_and_form_matrices() {
+    let doc = fixture(1);
+    assert!(!text_reads_up(&doc, 0), "upright text");
+    assert!(!text_reads_up(&doc, 9), "no such page");
 }

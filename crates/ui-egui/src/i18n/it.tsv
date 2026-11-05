@@ -1533,19 +1533,16 @@
 	Added {n} comments	Aggiunti {n} commenti
 	Choose a folder for the results	Scegli una cartella per i risultati
 	Files for {name}	File per {name}
-	An action is already running	Un'azione è già in esecuzione
 	Running action… file {d} of {t}	Esecuzione azione… file {d} di {t}
 	No unlinked web addresses were found in the text	Nel testo non sono stati trovati indirizzi web senza collegamento
 	Created 1 link	Creato 1 collegamento
 	Created {n} links	Creati {n} collegamenti
-	Text recognition is already running	Il riconoscimento del testo è già in esecuzione
 	Optimizing… removing user data	Ottimizzazione… rimozione dati utente
 	Optimizing… image {d} of {t}	Ottimizzazione… immagine {d} di {t}
 	Optimizing… cleaning up	Ottimizzazione… pulizia
 	Optimizing… merging identical objects	Ottimizzazione… unione oggetti identici
 	Optimizing… writing the copy	Ottimizzazione… scrittura della copia
 	Cancelling…	Annullamento…
-	Optimization is already running	L'ottimizzazione è già in esecuzione
 	Optimization cancelled	Ottimizzazione annullata
 	Couldn't optimize the file	Impossibile ottimizzare il file
 	Recognizing text… file {d} of {t}	Riconoscimento testo… file {d} di {t}
@@ -2218,4 +2215,52 @@ key	Space	Spazio
 	Driver: {driver}	Driver: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Stato della stampante: {status}. Controlla il collegamento della stampante prima di stampare.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Nessuna stampante trovata. Accendi la stampante e collegala, poi seleziona «Controlla di nuovo». Puoi comunque salvare come PDF.
+	Print both sides	Stampa fronte-retro
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Stampa su entrambi i lati del foglio, rivoltandolo sul lato lungo, se la stampante può.
+	Printing on both sides of the sheet. Click to print on one side only.	Stampa su entrambi i lati del foglio. Fai clic per stampare su un solo lato.
+	Match page at 100%	Adatta il foglio alla pagina al 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Stampa al 100% su carta della stessa dimensione, senza modificare l’intervallo di pagine.
+	PDF page: {w} × {h} in	Pagina PDF: {w} × {h} pollici
+	PDF scale: {scale}%	Scala PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	La scala con cui la pagina viene disegnata; un driver della stampante può comunque sostituire la carta o rimpicciolire il lavoro.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	«Taglia e impila» stampa fogli a un solo lato. Scegli un altro ordine delle pagine per stampare fronte-retro.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Ritaglia l'area stampata di ogni pagina, la raddrizza e la adatta al foglio senza deformarla. Un'etichetta per foglio.
+	Turn upside down (180°)	Capovolgi (ruota di 180°)
+	the name is not a plain file name	il nome non è un semplice nome file
 	Developer: {name}	Sviluppatore: {name}
+	Overwrite	Sovrascrivi
+	Save As…	Salva con nome…
+	“{name}” changed on disk while you were working on it.	«{name}» è cambiato su disco mentre ci lavoravi.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Salvando sopra sostituirai la versione scritta da un altro programma. Salva una copia se ti servono entrambe.
+	“{name}” was moved or renamed to “{found}”.	«{name}» è stato spostato o rinominato in «{found}».
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	«{name}» non è più in «{path}»; è stato spostato in un'altra cartella o eliminato.
+	Tried {n} times. Zoom or rotate the page to try again.	Tentato {n} volte. Ingrandisci o ruota la pagina per riprovare.
+	On disk: {n} pages, written {when}.	Sul disco: {n} pagine, scritto {when}.
+	On disk: written {when}.	Sul disco: scritto {when}.
+	The version on disk is too large to compare here.	La versione sul disco è troppo grande per essere confrontata qui.
+	“{name}” could not be opened to compare it.	Impossibile aprire «{name}» per il confronto.
+	{name} (on disk)	{name} (sul disco)
+	Recognize Text in Files	Riconosci testo nei file
+	 (stopped after {done} of {total})	 (interrotto dopo {done} di {total})
+	file {d} of {t}	File {d} di {t}
+	Export stopped after {done} of {total} files	Esportazione interrotta dopo {done} di {total} file
+	and {n} more	e altri {n}
+	The job stopped without finishing	L'operazione si è fermata senza finire
+	The job couldn't start: {e}	Impossibile avviare l'operazione: {e}
+	Run {name} on {n} files?	Eseguire {name} su {n} file?
+	Recognize text in {n} files?	Riconoscere il testo in {n} file?
+	Results go to {folder}	I risultati vanno in {folder}
+	Writes {n} file(s).	Scrive {n} file.
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Sostituisce {n} file già presenti. Un file sostituito non può essere recuperato.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} file vengono scritti accanto a uno già presente, che resta com'è.
+	Nothing that is already in the folder is replaced.	Niente di ciò che è già nella cartella viene sostituito.
+	The folder changed since this was shown; check what this batch would write now	La cartella è cambiata da quando è stato mostrato; controlla cosa scriverebbe ora questo lotto
+	Export to {format}	Esporta in {format}
+	Exporting… page {d} of {t}	Esportazione… pagina {d} di {t}
+	Export cancelled	Esportazione annullata
+	Print to {printer}	Stampa su {printer}
+	Preparing the print job	Preparazione del processo di stampa
+	Rendering sheet {d} of {t}	Rendering del foglio {d} di {t}
+	Print cancelled: nothing was sent to {printer}	Stampa annullata: non è stato inviato nulla a {printer}
+	Waiting its turn	In attesa del proprio turno
+	The job was cancelled before it started	Il processo è stato annullato prima di iniziare

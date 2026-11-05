@@ -1,0 +1,254 @@
+//! Saving must not silently destroy a file another program replaced while it was open.
+
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use pdfcraft_engine::Edit;
+use pdfcraft_ui_egui::{PdfCraftApp, SaveTarget};
+
+/// A two-page PDF, so an edit can delete one page without emptying the document.
+fn fixture(n: usize) -> Vec<u8> {
+    let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into()];
+    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 4 + 2 * i)).collect();
+    objs.push(format!("<< /Type /Pages /Kids [{}] /Count {n} /MediaBox [0 0 200 300] >>", kids.join(" ")));
+    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into());
+    for i in 0..n {
+        objs.push(format!("<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 5 + 2 * i));
+        let body = format!("BT /F1 24 Tf 20 150 Td (Page {}) Tj ET", i + 1);
+        objs.push(format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()));
+    }
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+fn store(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-conflict-app-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn harness() -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app
+    });
+    h.run_steps(4);
+    h
+}
+
+/// Open `path` in the harness and make one edit, so saving has something to write.
+fn open_and_edit(h: &mut Harness<'static, PdfCraftApp>, path: &std::path::Path) {
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1, "the file opened");
+    assert!(h.state_mut().apply_edit(Edit::DeletePages { pages: vec![0] }), "the edit applied");
+    h.run_steps(2);
+}
+
+#[test]
+fn saving_an_unchanged_file_writes_in_place_without_a_prompt() {
+    let dir = store("clean");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    open_and_edit(&mut h, &path);
+    assert!(h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    assert!(h.state().save_conflict.is_none());
+    assert_ne!(std::fs::read(&path).unwrap(), fixture(2), "the edit was written");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn an_external_change_blocks_the_save_until_the_user_overwrites() {
+    let dir = store("conflict");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    open_and_edit(&mut h, &path);
+    // Another program replaces the file while the document is open.
+    let mut other = fixture(2);
+    other.extend_from_slice(b"\n% written by another program\n");
+    std::fs::write(&path, &other).unwrap();
+
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace), "the save is held back");
+    h.run_steps(2);
+    assert!(h.state().save_conflict.is_some());
+    assert_eq!(std::fs::read(&path).unwrap(), other, "the other version is still on disk");
+    h.get_by_label_contains("changed on disk");
+
+    h.get_by_label("Overwrite").click();
+    h.run_steps(3);
+    assert!(h.state().save_conflict.is_none());
+    let written = std::fs::read(&path).unwrap();
+    assert_ne!(written, other, "the document replaced the other version");
+    assert!(written.starts_with(b"%PDF-"), "a PDF was written");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cancelling_keeps_the_other_version_and_the_next_save_asks_again() {
+    let dir = store("cancel");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    open_and_edit(&mut h, &path);
+    let mut other = fixture(2);
+    other.extend_from_slice(b"\n% another editor\n");
+    std::fs::write(&path, &other).unwrap();
+
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    assert!(h.state().save_conflict.is_some());
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert!(h.state().save_conflict.is_none(), "the prompt closed");
+    assert_eq!(std::fs::read(&path).unwrap(), other, "nothing was written");
+
+    // The remembered stamp still describes the loaded version, so the next save asks again.
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    assert!(h.state().save_conflict.is_some(), "the conflict is raised again");
+    assert_eq!(std::fs::read(&path).unwrap(), other);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The prompt says what the other version holds, and the reader can look at it before deciding:
+/// comparing opens that version beside the document, shows the differences, and writes nothing.
+#[test]
+fn the_other_version_can_be_compared_before_anything_is_written() {
+    let dir = store("compare");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    open_and_edit(&mut h, &path);
+    // Another program writes a three-page version over the file.
+    std::fs::write(&path, fixture(3)).unwrap();
+    let other = std::fs::read(&path).unwrap();
+
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace), "the save is held back");
+    h.run_steps(2);
+    let conflict = h.state().save_conflict.clone().expect("the prompt is up");
+    assert_eq!(conflict.disk.and_then(|d| d.pages()), Some(3), "the prompt knows the other version's pages");
+    assert_eq!(conflict.disk.map(|d| d.bytes()), Some(other.len() as u64));
+    // The prompt states it in the reader's language.
+    h.get_by_label_contains("On disk:");
+
+    h.get_all_by_label("Compare").last().expect("the Compare button").click();
+    h.run_steps(4);
+    let s = h.state();
+    assert!(s.save_conflict.is_none(), "the prompt closed once it was answered");
+    assert_eq!(std::fs::read(&path).unwrap(), other, "comparing wrote nothing");
+    assert_eq!(s.views.len(), 2, "the other version opened beside this one");
+    let copy = s.views[1].id;
+    let original = s.views[0].id;
+    let state = s.compare.as_ref().expect("the differences are shown");
+    assert_eq!((state.old, state.new), (copy, original), "the file on disk is the older version");
+    assert_eq!(s.right, Some(pdfcraft_ui_egui::RightPanel::Compare));
+    assert!(s.session.get(copy).is_some_and(|d| d.path.is_none()), "the copy has no file of its own to save over");
+    assert!(s.session.get(original).is_some_and(|d| d.dirty), "this document is still unsaved");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// An open document's file can be deleted behind the app's back. The poll says so once, without
+/// writing, moving or reopening anything, and the document stays usable.
+#[test]
+fn a_deleted_file_is_reported_once_while_the_document_stays_open() {
+    let dir = store("watch-deleted");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1);
+    h.state_mut().toast = None;
+    assert!(h.state_mut().check_disk_now().is_empty(), "an untouched file raises nothing");
+    assert!(h.state().toast.is_none(), "and nothing is said about it");
+
+    // Another program deletes it.
+    std::fs::remove_file(&path).unwrap();
+    let states = h.state_mut().check_disk_now();
+    assert_eq!(states.len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("no longer at") && toast.contains("work.pdf"), "the notice says the file is gone: {toast}");
+    assert_eq!(h.state().views.len(), 1, "the document stays open");
+    assert!(!path.exists(), "nothing was re-created");
+
+    // The same situation is not repeated on the next poll.
+    h.state_mut().toast = None;
+    assert_eq!(h.state_mut().check_disk_now().len(), 1, "the state is still known");
+    assert!(h.state().toast.is_none(), "but it is not said twice");
+
+    // Saving still saves the document, back to the path the document belongs to.
+    assert!(h.state_mut().apply_edit(Edit::DeletePages { pages: vec![0] }));
+    assert!(h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    assert!(path.exists(), "the save wrote the path the document belongs to");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Unix keeps a file's identity (device and inode), so a rename inside the folder is reported as
+/// the move it was and names where the file went. The notice names the new path, and the moved
+/// file is still the one the document remembers.
+#[cfg(unix)]
+#[test]
+fn a_renamed_file_is_reported_with_where_it_went() {
+    let dir = store("watch-renamed");
+    let path = dir.join("work.pdf");
+    let moved = dir.join("moved.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    h.state_mut().toast = None;
+
+    std::fs::rename(&path, &moved).unwrap();
+    assert_eq!(h.state_mut().check_disk_now().len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("moved or renamed") && toast.contains("moved.pdf"), "the notice names where it went: {toast}");
+    assert!(!path.exists(), "nothing was re-created");
+
+    // The same file under its new name is not a change, and the old name is not reclaimed.
+    h.state_mut().toast = None;
+    assert_eq!(h.state_mut().check_disk_now().len(), 1);
+    assert!(h.state().toast.is_none(), "a settled state is not repeated");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A file another program rewrote is reported while the document sits idle, not only when the
+/// user tries to save it.
+#[test]
+fn an_idle_document_reports_that_its_file_changed_on_disk() {
+    let dir = store("watch-changed");
+    let path = dir.join("work.pdf");
+    std::fs::write(&path, fixture(2)).unwrap();
+    let mut h = harness();
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(4);
+    h.state_mut().toast = None;
+    assert!(h.state_mut().check_disk_now().is_empty());
+
+    let mut other = fixture(2);
+    other.extend_from_slice(b"\n% written elsewhere\n");
+    std::fs::write(&path, &other).unwrap();
+    let states = h.state_mut().check_disk_now();
+    assert_eq!(states.len(), 1);
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(toast.contains("changed on disk"), "{toast}");
+    // The file is untouched by the notice, and the save prompt still guards the write.
+    assert_eq!(std::fs::read(&path).unwrap(), other);
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace), "the save is still held back");
+    std::fs::remove_dir_all(dir).unwrap();
+}

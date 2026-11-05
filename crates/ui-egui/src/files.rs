@@ -153,6 +153,14 @@ pub(crate) fn file_stem_from_user(name: &str) -> String {
     if reserved { format!("_{stem}") } else { stem.to_string() }
 }
 
+/// Whether `name` names a file directly inside a folder: not empty, `.` or `..`, with no `/` or
+/// `\\`, and no drive (`C:`). On Windows any `:` is refused, which also rules out alternate data
+/// streams.
+pub(crate) fn is_plain_file_name(name: &str) -> bool {
+    let drive = matches!(name.as_bytes(), [letter, b':', ..] if letter.is_ascii_alphabetic());
+    !(name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) || drive || (cfg!(windows) && name.contains(':')))
+}
+
 /// Pages ▸ Rotate Pages.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RotateDraft {
@@ -515,7 +523,12 @@ impl PdfCraftApp {
 
     /// [`Self::write_files`], then `after` once every file is written: now, or on a later frame
     /// when the user chooses the folder. `after` never runs when writing fails or is cancelled.
+    /// Every name must be a plain file name ([`is_plain_file_name`]); otherwise nothing is written.
     pub(crate) fn write_files_then(&mut self, named: Vec<(String, Arc<Vec<u8>>)>, title: &str, after: impl FnOnce(&mut Self) + Send + 'static) {
+        if let Some((name, _)) = named.iter().find(|(name, _)| !is_plain_file_name(name)) {
+            self.notify_fmt("Couldn't write {name}: {e}", &[("name", name), ("e", tl!("the name is not a plain file name"))]);
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let write = move |app: &mut Self, dir: std::path::PathBuf| {
@@ -688,12 +701,19 @@ impl PdfCraftApp {
         let Some(doc) = self.session.get(id) else { return };
         let stem = doc.name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string();
         let ext = format.extension();
-        let bytes = doc.export_office(format);
+        // Desktop: where to save first, then the conversion — on a worker, with a card and a stop,
+        // rather than on this thread with the window frozen (REC-R04).
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let write = move |app: &mut Self, path: std::path::PathBuf| match crate::editing::write_atomically(&path.to_string_lossy(), &bytes) {
-                Ok(()) => app.notify_fmt("Exported to {path}", &[("path", &path.display().to_string())]),
-                Err(e) => app.notify_fmt("Couldn't write {name}: {e}", &[("name", &path.display().to_string()), ("e", &e.to_string())]),
+            let write = move |app: &mut Self, path: std::path::PathBuf| {
+                // What the export reads is taken here, where the document is; the pages are read
+                // and the file built on the worker.
+                let job = match app.session.office_job(id, format) {
+                    Ok(j) => j,
+                    Err(e) => return app.notify_error(e),
+                };
+                let name = path.display().to_string();
+                app.start_office_export(job, path, name, format);
             };
             match self.save_override.clone() {
                 Some(p) => write(self, p.into()),
@@ -707,8 +727,11 @@ impl PdfCraftApp {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        if let Err(e) = crate::editing::download(&format!("{stem}.{ext}"), &bytes) {
-            self.notify_error(e);
+        {
+            let bytes = doc.export_office(format);
+            if let Err(e) = crate::editing::download(&format!("{stem}.{ext}"), &bytes) {
+                self.notify_error(e);
+            }
         }
     }
 
@@ -829,7 +852,7 @@ impl PdfCraftApp {
 
 #[cfg(test)]
 mod stem_tests {
-    use super::file_stem_from_user;
+    use super::{file_stem_from_user, is_plain_file_name};
 
     #[test]
     fn user_file_names_stay_inside_the_folder_and_writable_everywhere() {
@@ -845,5 +868,37 @@ mod stem_tests {
         // At most 200 bytes, cut on a character boundary.
         let long = file_stem_from_user(&"文".repeat(300));
         assert!(long.len() <= 200 && long.chars().all(|c| c == '文'), "{}", long.len());
+    }
+
+    #[test]
+    fn write_files_refuses_names_that_leave_the_folder() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-write-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let out = dir.join("a").join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let absolute = dir.join("abs.pdf").to_string_lossy().into_owned();
+        let mut app = crate::PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.export_dir_override = Some(out.to_string_lossy().into_owned());
+        for bad in ["../x.pdf", "..", ".", "", "sub/x.pdf", "sub\\x.pdf", "C:x.pdf", absolute.as_str()] {
+            assert!(!is_plain_file_name(bad), "{bad}");
+            // A plain name first: nothing is written when any name in the batch is refused.
+            app.write_files(&[("ok.pdf".into(), std::sync::Arc::new(b"%PDF".to_vec())), (bad.into(), std::sync::Arc::new(b"%PDF".to_vec()))], "t");
+            assert!(app.toast.as_ref().is_some_and(|t| t.0.contains("not a plain file name")), "{bad}");
+        }
+        let names: Vec<_> = walk(&dir);
+        assert!(names.is_empty(), "{names:?}");
+        app.write_files(&[("x.pdf".into(), std::sync::Arc::new(b"%PDF".to_vec()))], "t");
+        assert_eq!(walk(&dir), vec![out.join("x.pdf")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() { out.extend(walk(&path)) } else { out.push(path) }
+        }
+        out
     }
 }

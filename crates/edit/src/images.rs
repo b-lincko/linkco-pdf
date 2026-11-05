@@ -3,8 +3,8 @@
 //! `q … cm … Q` with the extra transform), replace (it draws another XObject in the same place),
 //! or delete. Only the stream that draws it is rewritten, as a new object.
 
-use pdfcraft_content::{Matrix, Op, parse, serialize_ops};
-use pdfcraft_cos::{Dict, Document, ObjRef, Object, Stream};
+use pdfcraft_content::{Matrix, Op, Pieces, parse};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
 use crate::EditError;
 
@@ -48,6 +48,11 @@ fn streams(doc: &Document, page: &Dict) -> Vec<(Object, Vec<u8>)> {
         .collect()
 }
 
+/// The page's streams joined into the one stream they are: an operator may span two of them.
+fn joined(streams: &[(Object, Vec<u8>)]) -> Pieces {
+    Pieces::join(&streams.iter().map(|(_, data)| data.as_slice()).collect::<Vec<_>>())
+}
+
 fn page_of(doc: &Document, page: usize) -> Result<pdfcraft_model::Page, EditError> {
     pdfcraft_model::pages(doc).into_iter().nth(page).ok_or(EditError::NoSuchPage(page))
 }
@@ -65,78 +70,77 @@ pub fn page_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, EditEr
     let p = page_of(doc, page)?;
     let xo = xobjects(doc, &p.dict);
     let mut out = Vec::new();
-    // The graphics state carries over from one stream to the next.
+    // The streams are one stream in pieces, so the graphics state and operators carry over.
     let mut ctm = Matrix::IDENTITY;
     let mut stack = Vec::new();
-    for (si, (_, data)) in streams(doc, &p.dict).into_iter().enumerate() {
-        for (i, op) in parse(&data).ops.iter().enumerate() {
-            match op.op.as_slice() {
-                b"q" => stack.push(ctm),
-                b"Q" => ctm = stack.pop().unwrap_or(ctm),
-                b"cm" => {
-                    if let Some(m) = op.nums::<6>() {
-                        ctm = Matrix(m).then(&ctm);
-                    }
+    let pieces = joined(&streams(doc, &p.dict));
+    for (i, op) in pieces.parse().ops.iter().enumerate() {
+        match op.op.as_slice() {
+            b"q" => stack.push(ctm),
+            b"Q" => ctm = stack.pop().unwrap_or(ctm),
+            b"cm" => {
+                if let Some(m) = op.nums::<6>() {
+                    ctm = Matrix(m).then(&ctm);
                 }
-                b"Do" => {
-                    let Some(name) = op.name(0) else { continue };
-                    let Some(resource) = xo.get(name) else { continue };
-                    let obj = doc.resolve(resource);
-                    let Object::Stream(s) = &*obj else { continue };
-                    let is_form = s.dict.name(b"Subtype") == Some(b"Form");
-                    let (matrix, bounds) = if is_form {
-                        let Some(bounds) = s.dict.get(b"BBox").map(|v| doc.resolve(v)).and_then(|v| {
-                            v.as_array().and_then(|a| {
-                                if a.len() != 4 {
-                                    return None;
-                                }
-                                let mut b = [0.0; 4];
-                                for (n, v) in b.iter_mut().zip(a) {
-                                    *n = v.as_f64()?;
-                                }
-                                Some(b)
-                            })
-                        }) else {
-                            continue;
-                        };
-                        let matrix = match s.dict.get(b"Matrix") {
-                            Some(v) => {
-                                let v = doc.resolve(v);
-                                let Some(m) = v.as_array().and_then(|a| Matrix::from_operands(a)) else { continue };
-                                m
+            }
+            b"Do" => {
+                let Some(name) = op.name(0) else { continue };
+                let Some(resource) = xo.get(name) else { continue };
+                let obj = doc.resolve(resource);
+                let Object::Stream(s) = &*obj else { continue };
+                let is_form = s.dict.name(b"Subtype") == Some(b"Form");
+                let (matrix, bounds) = if is_form {
+                    let Some(bounds) = s.dict.get(b"BBox").map(|v| doc.resolve(v)).and_then(|v| {
+                        v.as_array().and_then(|a| {
+                            if a.len() != 4 {
+                                return None;
                             }
-                            None => Matrix::IDENTITY,
-                        };
-                        (matrix.then(&ctm), bounds)
-                    } else if s.dict.name(b"Subtype") == Some(b"Image") {
-                        (ctm, [0.0, 0.0, 1.0, 1.0])
-                    } else {
+                            let mut b = [0.0; 4];
+                            for (n, v) in b.iter_mut().zip(a) {
+                                *n = v.as_f64()?;
+                            }
+                            Some(b)
+                        })
+                    }) else {
                         continue;
                     };
-                    let rect = matrix.bbox(bounds);
-                    if !bounds.iter().chain(matrix.0.iter()).chain(rect.iter()).all(|v| v.is_finite())
-                        || bounds[2] <= bounds[0]
-                        || bounds[3] <= bounds[1]
-                        || rect[2] <= rect[0]
-                        || rect[3] <= rect[1]
-                    {
-                        continue;
-                    }
-                    out.push(PageImage {
-                        rect,
-                        matrix: matrix.0,
-                        name: String::from_utf8_lossy(name).into_owned(),
-                        object: resource.as_ref(),
-                        is_form,
-                        width: if is_form { 0 } else { s.dict.int(b"Width").unwrap_or(0).clamp(0, u32::MAX as i64) as u32 },
-                        height: if is_form { 0 } else { s.dict.int(b"Height").unwrap_or(0).clamp(0, u32::MAX as i64) as u32 },
-                        stream: si,
-                        op: i,
-                        draw_matrix: ctm.0,
-                    });
+                    let matrix = match s.dict.get(b"Matrix") {
+                        Some(v) => {
+                            let v = doc.resolve(v);
+                            let Some(m) = v.as_array().and_then(|a| Matrix::from_operands(a)) else { continue };
+                            m
+                        }
+                        None => Matrix::IDENTITY,
+                    };
+                    (matrix.then(&ctm), bounds)
+                } else if s.dict.name(b"Subtype") == Some(b"Image") {
+                    (ctm, [0.0, 0.0, 1.0, 1.0])
+                } else {
+                    continue;
+                };
+                let rect = matrix.bbox(bounds);
+                if !bounds.iter().chain(matrix.0.iter()).chain(rect.iter()).all(|v| v.is_finite())
+                    || bounds[2] <= bounds[0]
+                    || bounds[3] <= bounds[1]
+                    || rect[2] <= rect[0]
+                    || rect[3] <= rect[1]
+                {
+                    continue;
                 }
-                _ => {}
+                out.push(PageImage {
+                    rect,
+                    matrix: matrix.0,
+                    name: String::from_utf8_lossy(name).into_owned(),
+                    object: resource.as_ref(),
+                    is_form,
+                    width: if is_form { 0 } else { s.dict.int(b"Width").unwrap_or(0).clamp(0, u32::MAX as i64) as u32 },
+                    height: if is_form { 0 } else { s.dict.int(b"Height").unwrap_or(0).clamp(0, u32::MAX as i64) as u32 },
+                    stream: pieces.piece_of(op.span.start),
+                    op: i,
+                    draw_matrix: ctm.0,
+                });
             }
+            _ => {}
         }
     }
     Ok(out)
@@ -157,10 +161,18 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
         ctm: Matrix,
         stack: Vec<Matrix>,
     }
-    fn walk(doc: &Document, data: &[u8], resources: &Dict, st: &mut State, stream: usize, forms: &mut Forms, out: &mut Vec<PageImage>) {
+    fn walk(
+        doc: &Document,
+        ops: &[Op],
+        resources: &Dict,
+        st: &mut State,
+        stream: &dyn Fn(&Op) -> usize,
+        forms: &mut Forms,
+        out: &mut Vec<PageImage>,
+    ) {
         let xo = resources.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned()).unwrap_or_default();
         let (ctm, stack) = (&mut st.ctm, &mut st.stack);
-        for (i, op) in parse(data).ops.iter().enumerate() {
+        for (i, op) in ops.iter().enumerate() {
             match op.op.as_slice() {
                 b"q" => stack.push(*ctm),
                 b"Q" => *ctm = stack.pop().unwrap_or(*ctm),
@@ -175,8 +187,11 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
                         if let Some(r) = form.obj {
                             forms.path.push(r);
                         }
+                        // Inside a form the stream is the one that called it: the form is not a
+                        // piece of the page's streams.
+                        let piece = stream(op);
                         let mut inner = State { ctm: form.ctm, stack: Vec::new() };
-                        walk(doc, &form.data, &form.resources, &mut inner, stream, forms, out);
+                        walk(doc, &parse(&form.data).ops, &form.resources, &mut inner, &|_| piece, forms, out);
                         if form.obj.is_some() {
                             forms.path.pop();
                         }
@@ -196,7 +211,7 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
                         is_form: false,
                         width: s.dict.int(b"Width").unwrap_or(0).max(0) as u32,
                         height: s.dict.int(b"Height").unwrap_or(0).max(0) as u32,
-                        stream,
+                        stream: stream(op),
                         op: i,
                         draw_matrix: ctm.0,
                     });
@@ -210,9 +225,8 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
     let mut out = Vec::new();
     let mut st = State { ctm: Matrix::IDENTITY, stack: Vec::new() };
     let mut forms = Forms { path: Vec::new(), visits: 0 };
-    for (si, (_, data)) in streams(doc, &p.dict).into_iter().enumerate() {
-        walk(doc, &data, &res, &mut st, si, &mut forms, &mut out);
-    }
+    let pieces = joined(&streams(doc, &p.dict));
+    walk(doc, &pieces.parse().ops, &res, &mut st, &|op| pieces.piece_of(op.span.start), &mut forms, &mut out);
     Ok(out)
 }
 
@@ -254,9 +268,9 @@ pub fn change_image(doc: &mut Document, page: usize, index: usize, change: &Imag
     let img = images.get(index).cloned().ok_or_else(|| EditError::Invalid(format!("page {} has no image {}", page + 1, index + 1)))?;
     let p = page_of(doc, page)?;
     let all = streams(doc, &p.dict);
-    let (obj, data) = all.get(img.stream).cloned().ok_or_else(|| EditError::Invalid("the image stream is missing".into()))?;
-    let mut ops = parse(&data).ops;
-    let original = ops.get(img.op).cloned().ok_or_else(|| EditError::Invalid("the image operation is missing".into()))?;
+    let pieces = joined(&all);
+    let ops = pieces.parse().ops;
+    let original = ops.get(img.op).cloned().filter(|op| op.is("Do")).ok_or_else(|| EditError::Invalid("the image operation is missing".into()))?;
     let mut resources = None;
     let replacement: Vec<Op> = match change {
         ImageChange::Delete => Vec::new(),
@@ -288,16 +302,12 @@ pub fn change_image(doc: &mut Document, page: usize, index: usize, change: &Imag
             vec![Op::new("Do", vec![Object::name(&name)])]
         }
     };
-    ops.splice(img.op..=img.op, replacement);
-    let mut dict = match &*doc.resolve(&obj) {
-        Object::Stream(s) => s.dict.clone(),
-        _ => Dict::new(),
-    };
-    dict.remove(b"Length");
-    let new = doc.add(Object::Stream(Stream::flate(dict, &serialize_ops(&ops))));
-    let contents: Vec<Object> = all.iter().enumerate().map(|(i, (o, _))| if i == img.stream { Object::Ref(new) } else { o.clone() }).collect();
+    // The `Do` and its operands can straddle two streams, so every piece the edit touches is
+    // rewritten and the rest are left byte for byte.
+    let changed = crate::text::splice(&pieces, &ops, |index| if index == img.op { (replacement.clone(), false) } else { (Vec::new(), true) });
+    let contents = crate::text::rewritten_contents(doc, &all, changed);
     doc.update_dict(p.obj, |d| {
-        d.set(b"Contents".to_vec(), if let [one] = contents.as_slice() { one.clone() } else { Object::Array(contents) });
+        d.set(b"Contents".to_vec(), contents);
         if let Some(res) = resources {
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
@@ -339,38 +349,35 @@ pub(crate) fn translate_images(doc: &mut Document, page: usize, indexes: &[usize
         if !movement.0.iter().all(|v| v.is_finite() && v.abs() <= 1e12) {
             return Err(EditError::Invalid("the image move is too large".into()));
         }
-        plans.insert((image.stream, image.op), movement);
+        plans.insert(image.op, movement);
     }
-    let mut data = Vec::with_capacity(all.len());
+    // The page's streams are one stream in pieces: an index is an index into the joined stream.
+    let pieces = joined(&all);
+    let ops = pieces.parse().ops;
     let mut inside_text = false;
-    for (stream, (_, bytes)) in all.iter().enumerate() {
-        let pieces = pdfcraft_content::Pieces::join(&[bytes.as_slice()]);
-        let ops = pieces.parse().ops;
-        for (index, op) in ops.iter().enumerate() {
-            if op.is("BT") {
-                inside_text = true;
-            } else if op.is("ET") {
-                inside_text = false;
-            } else if inside_text && plans.contains_key(&(stream, index)) {
-                return Err(EditError::Invalid("an image inside a text object cannot be moved in a group".into()));
-            }
+    for (index, op) in ops.iter().enumerate() {
+        if op.is("BT") {
+            inside_text = true;
+        } else if op.is("ET") {
+            inside_text = false;
+        } else if inside_text && plans.contains_key(&index) {
+            return Err(EditError::Invalid("an image inside a text object cannot be moved in a group".into()));
         }
-        let changed = crate::text::splice(&pieces, &ops, |index| {
-            let Some(matrix) = plans.remove(&(stream, index)) else { return (Vec::new(), true) };
-            let original = ops.get(index).cloned().into_iter();
-            // Local translations can be tiny under a large CTM. Preserve their precision
-            // rather than rounding them to zero or amplifying an error on the page.
-            let mut out = vec![Op::new("q", vec![]), Op::new("cm", matrix.0.map(Object::Real).to_vec())];
-            out.extend(original);
-            out.push(Op::new("Q", vec![]));
-            (out, false)
-        });
-        data.push(changed.into_iter().next().unwrap_or_default());
     }
-    if !plans.is_empty() {
+    if plans.keys().any(|index| !ops.get(*index).is_some_and(|op| op.is("Do"))) {
         return Err(EditError::Invalid("a selected image operation is missing".into()));
     }
-    let contents = crate::text::rewritten_contents(doc, &all, data);
+    let changed = crate::text::splice(&pieces, &ops, |index| {
+        let Some(matrix) = plans.remove(&index) else { return (Vec::new(), true) };
+        let original = ops.get(index).cloned().into_iter();
+        // Local translations can be tiny under a large CTM. Preserve their precision
+        // rather than rounding them to zero or amplifying an error on the page.
+        let mut out = vec![Op::new("q", vec![]), Op::new("cm", matrix.0.map(Object::Real).to_vec())];
+        out.extend(original);
+        out.push(Op::new("Q", vec![]));
+        (out, false)
+    });
+    let contents = crate::text::rewritten_contents(doc, &all, changed);
     doc.update_dict(p.obj, |d| d.set(b"Contents".to_vec(), contents))?;
     Ok(())
 }

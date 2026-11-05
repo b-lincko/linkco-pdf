@@ -112,8 +112,10 @@ fn view_history_select_all_and_find_options() {
     h.state_mut().views[0].rerun_find();
     // Find runs in the background: wait for it by a deadline, not a frame count, which a loaded
     // machine (the whole workspace testing at once, or the slow FreeBSD VM) can use up before the
-    // last page is searched. The loop ends as soon as the search is done.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // last page is searched. The loop ends as soon as the search is done. The FreeBSD VM, with
+    // every other test binary running beside it, got three quarters of the way through four
+    // pages in the minute this allowed, so the deadline is three minutes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     while std::time::Instant::now() < deadline && h.state().views[0].find.as_ref().unwrap().matches.len() < 15 {
         h.run_steps(2);
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -170,6 +172,36 @@ fn find_shortcuts_advance_and_retreat_matches() {
     h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::G);
     h.run_steps(2);
     assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some((start + n - 1) % n));
+}
+
+/// #2669: ⌘G and ⇧⌘G step through the matches while the find field still has the focus.
+#[test]
+fn find_shortcuts_work_from_the_find_field() {
+    let mut h = harness();
+    h.state_mut().active = Some(0);
+    h.run_steps(2);
+    h.state_mut().views[0].open_find();
+    h.state_mut().views[0].find.as_mut().unwrap().query = "page".into();
+    h.state_mut().views[0].rerun_find();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        if h.state().views[0].find.as_ref().unwrap().matches.len() >= 15 {
+            break;
+        }
+    }
+    let n = h.state().views[0].find.as_ref().unwrap().matches.len();
+    assert_eq!(n, 15);
+    assert!(h.ctx.egui_wants_keyboard_input(), "the find field has the focus");
+    let start = h.state().views[0].find.as_ref().unwrap().current.unwrap();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some((start + 1) % n));
+    h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some(start));
+    assert!(h.ctx.egui_wants_keyboard_input(), "and keeps it");
 }
 
 #[test]
@@ -327,6 +359,15 @@ fn marquee_zoom_and_snapshot() {
     let (w, hgt, px) = h.state().last_snapshot.clone().expect("a snapshot");
     assert!(w > 50 && hgt > 10, "{w} × {hgt}");
     assert!(px.as_chunks::<4>().0.iter().any(|p| p[0] < 100), "the text is in it");
+    // The copy holds exactly the pixels the same area shows on screen: a copy rendered a
+    // little smaller (zoom × pixels per point instead of zoom × 96/72 × pixels per point) was
+    // stretched wherever it was pasted, which is what made snapshots look soft.
+    let ppp = h.ctx.pixels_per_point();
+    let (want_w, want_h) = (r.width() * 165.0 / 200.0 * ppp, r.height() * 35.0 / 300.0 * ppp);
+    assert!(
+        (w as f32 - want_w).abs() <= 1.5 && (hgt as f32 - want_h).abs() <= 1.5,
+        "snapshot is {w} × {hgt} pixels for an area of {want_w} × {want_h} screen pixels"
+    );
     // Marquee zoom on a small area zooms in, centred on it.
     let before = h.state().views[i].zoom;
     h.state_mut().set_option("quick", "marquee-zoom").unwrap();

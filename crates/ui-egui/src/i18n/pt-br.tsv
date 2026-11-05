@@ -1431,12 +1431,10 @@
 	Added {n} comments	{n} comentários adicionados
 	Choose a folder for the results	Escolha uma pasta para os resultados
 	Files for {name}	Arquivos para {name}
-	An action is already running	Uma ação já está em execução
 	Running action… file {d} of {t}	Executando ação… arquivo {d} de {t}
 	No unlinked web addresses were found in the text	Nenhum endereço da Web sem link foi encontrado no texto
 	Created 1 link	1 link criado
 	Created {n} links	{n} links criados
-	Text recognition is already running	O reconhecimento de texto já está em execução
 	Recognizing text… file {d} of {t}	Reconhecendo texto… arquivo {d} de {t}
 	Recognizing text… page {d} of {t}	Reconhecendo texto… página {d} de {t}
 	Recognized 1 word	1 palavra reconhecida
@@ -2085,7 +2083,6 @@ action wizard	Start	Iniciar
 	None of those files can be made into a PDF; use PDFs, images or .txt files	Nenhum desses arquivos pode virar PDF; use PDFs, imagens ou arquivos .txt
 	Opens the printer driver's preferences. They are saved for every print from this computer; the copies, two-sided, grayscale and paper chosen here still apply.	Abre as preferências do driver da impressora. Elas valem para toda impressão deste computador; as cópias, frente e verso, escala de cinza e papel escolhidos aqui continuam valendo.
 	Optimization cancelled	Otimização cancelada
-	Optimization is already running	A otimização já está em execução
 	PRs	PRs
 	Pattern	Padrão
 	Pinned folders need the desktop app	As pastas fixadas precisam do aplicativo para desktop
@@ -2212,4 +2209,52 @@ key	Space	Espaço
 	Driver: {driver}	Driver: {driver}
 	Printer status: {status}. Check the printer's connection before printing.	Status da impressora: {status}. Verifique a conexão da impressora antes de imprimir.
 	No printers were found. Turn the printer on and connect it, then select Check again. You can still save as PDF.	Nenhuma impressora foi encontrada. Ligue a impressora e conecte-a; depois selecione "Verificar novamente". Você ainda pode salvar como PDF.
+	Print both sides	Imprimir frente e verso
+	Print on both sides of the sheet, turning it over on its long edge, if the printer can.	Imprime nos dois lados da folha, virando-a pela borda longa, se a impressora permitir.
+	Printing on both sides of the sheet. Click to print on one side only.	Imprimindo nos dois lados da folha. Clique para imprimir em apenas um lado.
+	Match page at 100%	Ajustar papel à página a 100%
+	Print at 100% on the paper of the same size, leaving the page range alone.	Imprime a 100% em papel do mesmo tamanho, sem alterar o intervalo de páginas.
+	PDF page: {w} × {h} in	Página do PDF: {w} × {h} pol
+	PDF scale: {scale}%	Escala do PDF: {scale}%
+	The scale the page is drawn at; a printer driver can still substitute paper or shrink the job.	A escala em que a página é desenhada; um driver da impressora ainda pode substituir o papel ou reduzir o trabalho.
+	Cut and stack prints single-sided sheets. Choose another page order to print on both sides.	«Cortar e empilhar» imprime folhas de um só lado. Escolha outra ordem de páginas para imprimir frente e verso.
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Recorta cada página na área impressa, deixa-a na vertical e ajusta-a à folha sem distorcer. Uma etiqueta por folha.
+	Turn upside down (180°)	Virar de cabeça para baixo (180°)
+	the name is not a plain file name	o nome não é um nome de arquivo simples
 	Developer: {name}	Desenvolvedor: {name}
+	Overwrite	Substituir
+	Save As…	Salvar como…
+	“{name}” changed on disk while you were working on it.	“{name}” mudou no disco enquanto você trabalhava nele.
+	Saving over it would replace the version another program wrote. Save a copy if you need both.	Salvar por cima substituiria a versão gravada por outro programa. Salve uma cópia se precisar das duas.
+	“{name}” was moved or renamed to “{found}”.	“{name}” foi movido ou renomeado para “{found}”.
+	“{name}” is no longer at “{path}”; it was moved to another folder or deleted.	“{name}” não está mais em “{path}”; foi movido para outra pasta ou excluído.
+	Tried {n} times. Zoom or rotate the page to try again.	Tentado {n} vezes. Amplie ou gire a página para tentar novamente.
+	On disk: {n} pages, written {when}.	No disco: {n} páginas, gravado {when}.
+	On disk: written {when}.	No disco: gravado {when}.
+	The version on disk is too large to compare here.	A versão no disco é grande demais para ser comparada aqui.
+	“{name}” could not be opened to compare it.	Não foi possível abrir “{name}” para comparar.
+	{name} (on disk)	{name} (no disco)
+	Recognize Text in Files	Reconhecer texto em arquivos
+	 (stopped after {done} of {total})	 (interrompido após {done} de {total})
+	file {d} of {t}	Arquivo {d} de {t}
+	Export stopped after {done} of {total} files	Exportação interrompida após {done} de {total} arquivos
+	and {n} more	e mais {n}
+	The job stopped without finishing	A tarefa parou sem terminar
+	The job couldn't start: {e}	Não foi possível iniciar a tarefa: {e}
+	Run {name} on {n} files?	Executar {name} em {n} arquivos?
+	Recognize text in {n} files?	Reconhecer texto em {n} arquivos?
+	Results go to {folder}	Os resultados vão para {folder}
+	Writes {n} file(s).	Grava {n} arquivo(s).
+	Replaces {n} file(s) that are already there. A replaced file cannot be brought back.	Substitui {n} arquivo(s) que já estão lá. Um arquivo substituído não pode ser recuperado.
+	{n} file(s) are written beside one that is already there, which is left as it is.	{n} arquivo(s) são gravados ao lado de um que já está lá, que permanece como está.
+	Nothing that is already in the folder is replaced.	Nada do que já está na pasta é substituído.
+	The folder changed since this was shown; check what this batch would write now	A pasta mudou desde que isto foi mostrado; confira o que este lote gravaria agora
+	Export to {format}	Exportar para {format}
+	Exporting… page {d} of {t}	Exportando… página {d} de {t}
+	Export cancelled	Exportação cancelada
+	Print to {printer}	Imprimir em {printer}
+	Preparing the print job	Preparando o trabalho de impressão
+	Rendering sheet {d} of {t}	Renderizando a folha {d} de {t}
+	Print cancelled: nothing was sent to {printer}	Impressão cancelada: nada foi enviado para {printer}
+	Waiting its turn	Aguardando a sua vez
+	The job was cancelled before it started	O trabalho foi cancelado antes de começar

@@ -117,6 +117,66 @@ fn added_text_parameters_do_not_keep_redacted_text() {
     assert!(!bytes.windows(4).any(|w| w == b"1234"), "redacted text left in the saved file");
 }
 
+/// Two pages; the first carries a thumbnail image and a producing application's private data,
+/// each with a marker string that only appears inside it.
+fn pdf_with_page_copies() -> Document {
+    pdf(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 7 0 R] /Count 2 >>".to_vec(),
+        // The page: content, a thumbnail and /PieceInfo.
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Thumb 9 0 R /PieceInfo << /Cadre << /LastModified (D:20260101) /Private 11 0 R >> >> /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        stream("", b"BT /F1 10 Tf 20 100 Td (AB1234CD) Tj ET"),
+        FONT.replace("95 0 R", "6 0 R").into_bytes(),
+        widths(),
+        // The second page, which no mark touches.
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 8 0 R /Thumb 10 0 R /PieceInfo << /Cadre << /Private 12 0 R >> >> /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        stream("", b"BT /F1 10 Tf 20 100 Td (Keep me) Tj ET"),
+        // Thumbnails: an image stream each, with a marker in its (deliberately uncompressed) data.
+        stream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", b"\x00OLDTHUMB1\xFF"),
+        stream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", b"\x00KEEPTHUMB2\xFF"),
+        // Private data of another application, which can hold its own copy of the page.
+        stream("", b"OLDPRIVATE1"),
+        stream("", b"KEPRIVATE2"),
+    ])
+}
+
+#[test]
+fn a_redacted_page_keeps_no_picture_or_private_copy_of_itself() {
+    let mut doc = pdf_with_page_copies();
+    mark(&mut doc, 0, &[[20.0, 95.0, 40.0, 110.0]], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert_eq!((r.thumbnails, r.private_data), (1, 1), "one page's copies went");
+    let first = pdfcraft_model::pages(&doc).swap_remove(0).dict;
+    assert!(!first.contains(b"Thumb") && !first.contains(b"PieceInfo"));
+    // The page no mark touched keeps both: they still describe it correctly.
+    let second = pdfcraft_model::pages(&doc).swap_remove(1).dict;
+    assert!(second.contains(b"Thumb") && second.contains(b"PieceInfo"));
+    // The removed objects are unreachable, so the saved file has neither marker. The save is
+    // incremental, which only holds because applying a redaction asks for a full rewrite:
+    // an appended revision would keep the original bytes, thumbnail included.
+    let bytes = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    for marker in [b"OLDTHUMB1".as_slice(), b"OLDPRIVATE1".as_slice()] {
+        assert!(!bytes.windows(marker.len()).any(|w| w == marker), "{:?} is still in the file", String::from_utf8_lossy(marker));
+    }
+    for marker in [b"KEEPTHUMB2".as_slice(), b"KEPRIVATE2".as_slice()] {
+        assert!(bytes.windows(marker.len()).any(|w| w == marker), "{:?} was lost", String::from_utf8_lossy(marker));
+    }
+    let reopened = Document::open(Arc::new(bytes)).unwrap();
+    assert!(!content(&reopened, 0).contains("1234"));
+}
+
+#[test]
+fn a_page_without_marks_keeps_its_thumbnail_and_private_data() {
+    // The removal is per redacted page, not a document-wide sweep: marking page 0 must not
+    // touch page 1's own copies, and the counts say so.
+    let mut doc = pdf_with_page_copies();
+    mark(&mut doc, 0, &[[20.0, 95.0, 40.0, 110.0]], "");
+    let r = apply(&mut doc, Some(&[0])).unwrap();
+    assert_eq!((r.pages, r.thumbnails, r.private_data), (1, 1, 1));
+    let second = pdfcraft_model::pages(&doc).swap_remove(1).dict;
+    assert!(second.contains(b"Thumb") && second.contains(b"PieceInfo"), "page 1 is untouched");
+}
+
 #[test]
 fn operators_split_across_content_streams_are_redacted_whole() {
     // One content stream in three pieces, split between tokens: a marked-content dictionary
