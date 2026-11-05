@@ -118,7 +118,7 @@ fn a_plan_made_with_resume_marks_the_finished_files_and_carries_the_flag() {
     // The approval still binds the batch: a token from the resume plan runs the resume call.
     let mut c = auto(&dir);
     let token = plan_token(&mut c);
-    let mut args = json!({ "steps": [{ "step": "set_title", "arg": "Resumed" }], "paths": ["a.pdf", "b.pdf"], "folder": "out", "resume": true, "approve_token": token });
+    let args = json!({ "steps": [{ "step": "set_title", "arg": "Resumed" }], "paths": ["a.pdf", "b.pdf"], "folder": "out", "resume": true, "approve_token": token });
     let run = ok(&mut c, "action_run", args);
     let files = run["files"].as_array().unwrap();
     let a = files.iter().find(|f| f["path"] == "a.pdf").unwrap();
