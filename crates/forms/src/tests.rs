@@ -1716,7 +1716,8 @@ fn a_value_without_an_appearance_becomes_visible_and_then_stays_put() {
 fn a_stale_appearance_is_redrawn_and_a_current_one_is_left_alone() {
     let mut doc = fixture();
     // Give "city" a value and an appearance that draws it...
-    let city = field(&fields(&doc), "city").clone();
+    let all = fields(&doc);
+    let city = field(&all, "city").clone();
     doc.update_dict(city.obj, |d| d.set(b"V".to_vec(), pdfcraft_cos::PdfString::text("Doha"))).unwrap();
     let only_city = ["city".to_string()];
     regenerate(&mut doc, Some(&only_city)).unwrap();
@@ -1724,13 +1725,15 @@ fn a_stale_appearance_is_redrawn_and_a_current_one_is_left_alone() {
     assert!(ap(&shown, &field(&fields(&shown), "city").widgets[0]).contains("Doha"), "the first appearance draws the old value");
     let mut doc = shown;
     // ...then move the value under the appearance's back, as a producer that writes /V only does.
-    let city = field(&fields(&doc), "city").obj;
+    let all = fields(&doc);
+    let city = field(&all, "city").obj;
     doc.update_dict(city, |d| d.set(b"V".to_vec(), pdfcraft_cos::PdfString::text("Kharkiv"))).unwrap();
     let plan = regenerate(&mut doc, None).unwrap();
     let stale: Vec<&str> = plan.widgets.iter().filter(|(_, a)| *a == Appearances::Stale).map(|(n, _)| n.as_str()).collect();
     assert_eq!(stale, ["city"], "the field whose value moved under its appearance is reported stale: {:?}", plan.widgets);
     let doc = reopen(&doc);
-    let city = field(&fields(&doc), "city");
+    let all = fields(&doc);
+    let city = field(&all, "city");
     let redrawn = ap(&doc, &city.widgets[0]);
     assert!(redrawn.contains("Kharkiv"), "the appearance shows the new value: {redrawn}");
     // Nothing else was stale: the rest is either already right or not drawn from a value.
@@ -1747,7 +1750,8 @@ fn buttons_and_signatures_are_reported_as_unsupported_and_left_alone() {
     assert!(unsupported.contains(&"go"), "the push button is unsupported: {unsupported:?}");
     assert!(!unsupported.contains(&"name"), "a text field is not");
     let doc = reopen(&doc);
-    let go = field(&fields(&doc), "go");
+    let all = fields(&doc);
+    let go = field(&all, "go");
     assert!(doc.get(go.widgets[0].obj).as_dict().unwrap().get(b"AP").is_none(), "the button keeps having no appearance");
 }
 
@@ -1760,7 +1764,8 @@ fn regenerate_can_be_limited_to_named_fields_and_refuses_unknown_ones() {
     assert!(plan.widgets.iter().all(|(n, _)| n == "name"), "only the named field was looked at: {:?}", plan.widgets);
     assert_eq!(plan.drawn(), 1);
     // The unnamed fields still have no appearance: the limit was real.
-    let other = field(&fields(&doc), "notes");
+    let all = fields(&doc);
+    let other = field(&all, "notes");
     assert!(doc.get(other.widgets[0].obj).as_dict().unwrap().get(b"AP").is_none());
 
     let unknown = ["nope".to_string()];

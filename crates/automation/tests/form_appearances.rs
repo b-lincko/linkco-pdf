@@ -52,7 +52,7 @@ fn seeded(dir: &std::path::Path) -> String {
     };
     s.apply(id, edit).unwrap();
     let path = dir.join("form.pdf");
-    std::fs::write(&path, s.save_bytes(id).unwrap()).unwrap();
+    std::fs::write(&path, &*s.save_bytes(id).unwrap()).unwrap();
     path.to_string_lossy().into_owned()
 }
 
@@ -114,7 +114,7 @@ fn a_document_without_a_form_says_so() {
     let mut s = Session::new();
     let bytes = s.create_blank(300.0, 400.0, 1).unwrap();
     let path = dir.join("plain.pdf");
-    std::fs::write(&path, &bytes).unwrap();
+    std::fs::write(&path, &*bytes).unwrap();
     let mut a = auto();
     let doc = tool(&mut a, "doc_open", json!({ "path": path.to_string_lossy() }))["doc"].as_u64().unwrap();
     let err = a.call("form_regenerate_appearances", &json!({ "doc": doc })).unwrap_err();
