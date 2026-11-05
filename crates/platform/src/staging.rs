@@ -426,43 +426,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The folder flush is a real operation on Unix and a documented no-op elsewhere; either way
-    /// a save that returned cannot have skipped it silently.
+    /// The folder flush is a real operation on Unix and a documented no-op elsewhere, so this
+    /// asserts the contract of whichever platform it runs on rather than one platform's answer.
     #[test]
-    fn a_folder_is_flushed_after_the_rename_and_a_missing_one_is_an_error() {
+    fn a_folder_is_flushed_or_the_platform_has_no_such_operation() {
         let dir = test_dir("sync-dir");
         sync_dir(&dir).unwrap();
-        // A folder that does not exist is reported, not treated as done: the caller has just
-        // renamed a file into it, so its absence means the save is not durable.
         let missing = dir.join("no-such-folder");
-        let error = sync_dir(&missing).unwrap_err();
+        let answer = sync_dir(&missing);
         #[cfg(unix)]
-        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        // A missing folder is reported, not treated as done: the caller has just renamed a file
+        // into it, so its absence means the save is not durable.
+        assert_eq!(answer.unwrap_err().kind(), std::io::ErrorKind::NotFound);
         #[cfg(not(unix))]
-        {
-            let _ = error;
-        }
+        // Where the platform has no folder flush, the call says so by succeeding at nothing; the
+        // file's own flush before the rename is the strongest flush there (see the doc comment).
+        answer.unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A save whose folder cannot be flushed is reported as failed rather than as a silent
-    /// success, so the caller never tells the user "saved" for a rename that may not survive.
+    /// A folder that cannot be flushed is an error the save path propagates, not a success
+    /// swallowed on the way out. Unix only: elsewhere [`sync_dir`] has nothing to fail at.
+    #[cfg(unix)]
     #[test]
-    fn replace_file_reports_a_folder_that_cannot_be_flushed() {
+    fn a_folder_that_cannot_be_flushed_is_reported_as_an_error() {
         let dir = test_dir("sync-fail");
         replace_file(&dir.join("out.pdf"), b"first").unwrap();
         // Moving the folder away leaves nothing to flush, the same failure a vanished or unmounted
-        // folder gives. The file itself was published by the successful save above.
+        // folder gives; the file itself was published by the save above.
         let moved = dir.with_extension("moved");
         let _ = std::fs::remove_dir_all(&moved);
         std::fs::rename(&dir, &moved).unwrap();
-        #[cfg(unix)]
-        {
-            let error = sync_dir(&dir).unwrap_err();
-            assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
-        }
-        #[cfg(not(unix))]
-        sync_dir(&dir).unwrap();
+        let error = sync_dir(&dir).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
         std::fs::rename(&moved, &dir).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
