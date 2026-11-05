@@ -68,8 +68,7 @@ jobs:
 
       - name: Format
         if: runner.os == 'Linux'
-        shell: bash
-        run: .github/scripts/run-annotated.sh "format Linux" cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Clippy
         shell: bash
