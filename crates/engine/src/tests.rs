@@ -1227,6 +1227,84 @@ fn filling_a_form_shows_saves_and_undoes() {
     assert_eq!(s2.get(id2).unwrap().form[1].value, ["Yes"]);
 }
 
+/// A form with a text field holding a value that is not its default, and a Reset button beside it.
+fn button_fixture() -> Vec<u8> {
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 6 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (Ada) /DV () /Rect [20 250 180 270] /P 3 0 R >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (clear) /Ff 65536 /Rect [20 200 80 215] /P 3 0 R /A << /S /ResetForm >> >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// Completeness is read from the editor's live state, so an unsaved entry counts at once, and
+/// asking changes nothing: no undo step and no dirty flag.
+#[test]
+fn reading_form_completeness_tracks_unsaved_entries_and_changes_nothing() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("btn.pdf", None, Arc::new(button_fixture()), None).unwrap();
+    let c = s.form_completion(id).unwrap();
+    assert_eq!((c.fields, c.required, c.missing.len()), (2, 0, 0), "the fixture asks for nothing: {c:?}");
+    assert!(c.is_complete());
+
+    // Clear `name` (it starts with Ada), make it required, and ask: it is now missing.
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text(String::new()) }).unwrap();
+    let props = pdfcraft_forms::FieldProps { required: Some(true), ..Default::default() };
+    s.apply(id, Edit::SetFieldProps { name: "name".into(), props: Box::new(props) }).unwrap();
+    let c = s.form_completion(id).unwrap();
+    assert_eq!(c.missing.len(), 1, "{c:?}");
+    assert_eq!(c.first().map(|m| m.name.as_str()), Some("name"));
+    assert_eq!(c.first().and_then(|m| m.page), Some(0), "0-based here; the tool adds one");
+    assert_eq!(c.first().map(|m| m.tab), Some(0), "the first widget in tab order");
+    assert_eq!((c.required, c.fields), (1, 2), "one of the two fields is required now");
+
+    // The check made no step: the last one is still the property change, not the read.
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Change field properties"));
+
+    // An unsaved entry counts straight away.
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("Ada".into()) }).unwrap();
+    let c = s.form_completion(id).unwrap();
+    assert!(c.is_complete(), "the unsaved entry counts: {c:?}");
+}
+
+/// Pressing a button runs its action in one undo step — but only when the action changes the
+/// document; a button that only asks the viewer for something makes no step at all.
+#[test]
+fn pressing_a_button_is_one_undo_step_when_it_changes_the_document() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("btn.pdf", None, Arc::new(button_fixture()), None).unwrap();
+    assert_eq!(s.get(id).unwrap().form[0].value, ["Ada"]);
+    assert!(s.get(id).unwrap().can_undo().is_none(), "a fresh open has nothing to undo");
+
+    let run = s.run_button(id, "clear").unwrap();
+    assert!(matches!(&run, pdfcraft_forms::ButtonRun::Reset(n) if n == &["name".to_string()]), "{run:?}");
+    assert!(run.changed_document());
+    let d = s.get(id).unwrap();
+    assert!(d.form[0].value.is_empty(), "the field went back to its default");
+    assert_eq!(d.can_undo(), Some("Press clear"), "the press is one named step");
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().form[0].value, ["Ada"], "one undo puts the value back");
+
+    // A field that is not a push button is refused, and leaves the document alone.
+    let err = s.run_button(id, "name").unwrap_err();
+    assert!(err.to_string().contains("not a push button"), "{err}");
+}
+
 #[test]
 fn comment_edits_refresh_the_list_exactly_as_a_full_inspection_would() {
     let (mut s, id) = session_with(3);

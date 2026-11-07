@@ -132,6 +132,10 @@ pub struct Field {
     pub actions: af::Actions,
     /// Push buttons: what a click does.
     pub button: Option<af::ButtonAction>,
+    /// Push buttons whose `/A` action is of a kind this build does not model (`/Launch`,
+    /// `/ImportData`, …): the action is there, but nothing here can say what it does or run it.
+    /// A button can have this set and [`button`](Self::button) `None` at once.
+    pub button_unhandled: bool,
 }
 
 impl Field {
@@ -253,6 +257,16 @@ fn name_obj(text: &str) -> Object {
 
 /// At most this many `/State` entries of a set-layer-visibility action are read.
 const MAX_LAYER_STATE: usize = 1024;
+
+/// Whether the field (or one of its widgets) carries a `/A` or `/AA /U` action dictionary at all,
+/// recognised or not.
+fn has_action(doc: &Document, d: &Dict, widgets: &[ObjRef]) -> bool {
+    let pick = |dict: &Dict| {
+        let u = dict.get(b"AA").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().and_then(|aa| aa.get(b"U")).cloned());
+        dict.get(b"A").is_some() || u.is_some()
+    };
+    pick(d) || widgets.iter().any(|w| doc.get(*w).as_dict().is_some_and(pick))
+}
 
 /// A push button's mouse-up action (`/A`, or `/AA /U`, on the field or its widget).
 fn button_action(doc: &Document, d: &Dict, widgets: &[ObjRef]) -> Option<af::ButtonAction> {
@@ -746,8 +760,11 @@ fn walk(
     }
     let widget_refs: Vec<ObjRef> = if d.contains(b"Rect") { vec![r] } else { kids };
     let actions = actions_of(doc, d, &widget_refs);
-    let button =
-        (inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0).then(|| button_action(doc, d, &widget_refs)).flatten();
+    let push = inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0;
+    let button = push.then(|| button_action(doc, d, &widget_refs)).flatten();
+    // An action dictionary that `button_action` did not recognise is still an action: say so, so a
+    // button that launches a file is never mistaken for one that does nothing.
+    let button_unhandled = push && button.is_none() && has_action(doc, d, &widget_refs);
     let ff = inh.ff.unwrap_or(0);
     let kind = match inh.ft.as_deref() {
         Some(b"Tx") => FieldKind::Text,
@@ -818,6 +835,7 @@ fn walk(
         widgets,
         actions,
         button,
+        button_unhandled,
     });
 }
 
@@ -1215,6 +1233,216 @@ fn same_normal(doc: &Document, w: &Widget, want: &Stream) -> bool {
     match (stored_normal(doc, w), want.decoded()) {
         (Some(have), Ok(want)) => have == want,
         _ => false,
+    }
+}
+
+/// What clicking a push button did, or what it asks a viewer to do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ButtonRun {
+    /// The button reset these fields to their defaults (the ones whose value actually moved).
+    Reset(Vec<String>),
+    /// The button shows or hides these fields (and their children).
+    ShowHide { fields: Vec<String>, hide: bool },
+    /// The button turns these layers on, off or over, in order.
+    SetLayers(Vec<(af::LayerOp, (u32, u16))>),
+    /// The button asks the viewer to run a menu item. Nothing in the document changes.
+    Menu(String),
+    /// The button asks the viewer to go to this 0-based page. Nothing in the document changes.
+    Page(usize),
+    /// The button opens a web address. PdfCraft never opens it on its own.
+    Url(String),
+    /// The button submits the form to this address. PdfCraft never sends form data.
+    Submit(String),
+    /// The button shows this message.
+    Alert(String),
+    /// The button runs this JavaScript.
+    Script(String),
+    /// The button asks for an image (an image field).
+    ImportIcon,
+    /// The button has no mouse-up action.
+    Nothing,
+    /// The button carries an action this build does not model (`/Launch`, `/ImportData`, …): it
+    /// may well do something in a viewer, and nothing here does it.
+    Unsupported(String),
+}
+
+impl ButtonRun {
+    /// Whether running the action changed the document at all (so an undo step is worth making).
+    /// A reset that moved nothing, and a show/hide that found no field, changed nothing.
+    pub fn changed_document(&self) -> bool {
+        match self {
+            ButtonRun::Reset(fields) => !fields.is_empty(),
+            ButtonRun::ShowHide { fields, .. } => !fields.is_empty(),
+            _ => false,
+        }
+    }
+}
+
+/// Run a push button's mouse-up action, the way clicking it in the app does, but reported rather
+/// than performed by a viewer: the parts that change the document (a reset, showing or hiding
+/// fields) are applied, so a caller that runs an action on the server gets the state a click
+/// would leave; the parts that belong to a viewer (going to a page, opening a URL, printing,
+/// submitting, an alert, a script) are returned for the caller to carry out. `name` must be a
+/// push button; any other field is `Invalid`.
+pub fn run_button(doc: &mut Document, name: &str) -> Result<ButtonRun, FormError> {
+    let all = fields(doc);
+    let f = all.iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?;
+    if f.kind != FieldKind::PushButton {
+        return Err(FormError::Invalid(format!("{name:?} is not a push button")));
+    }
+    let Some(action) = f.button.clone() else {
+        // A button whose action this build does not model is not a button that does nothing.
+        return Ok(if f.button_unhandled { ButtonRun::Unsupported("an action this build does not run".into()) } else { ButtonRun::Nothing });
+    };
+    match action {
+        af::ButtonAction::Reset { fields, exclude } => {
+            // Which fields the action names, and which of them the reset actually moved: a field
+            // already at its default is named by the action but not changed, and the answer says
+            // what was done, not what was asked for.
+            let names = reset_names(&all, &fields, exclude);
+            let mut before: Vec<(String, Vec<String>)> = Vec::new();
+            for f in all.iter().filter(|f| names.contains(&f.name)) {
+                before.push((f.name.clone(), f.value.clone()));
+            }
+            reset(doc, Some(&names))?;
+            // `fields` above is the action's own list, so the function is named by path.
+            let after = crate::fields(doc);
+            let mut moved: Vec<String> = Vec::new();
+            for (n, was) in before {
+                if after.iter().find(|f| f.name == n).is_some_and(|f| f.value != was) {
+                    moved.push(n);
+                }
+            }
+            Ok(ButtonRun::Reset(moved))
+        }
+        af::ButtonAction::ShowHide { fields, hide } => {
+            // A name in the action that is not a field is skipped, as a viewer would find nothing
+            // to hide; a name that is one takes its children with it, as `display` does. Only the
+            // fields this actually moved are reported, so a second press of a Hide button is not
+            // mistaken for work done.
+            let mut targets: Vec<String> = Vec::new();
+            for t in &fields {
+                let prefix = format!("{t}.");
+                for f in all.iter() {
+                    // `field_hidden` is false for a field with no widget: nothing to show or hide.
+                    let named = &f.name == t || f.name.starts_with(&prefix);
+                    if named && field_hidden(f) != hide {
+                        targets.push(f.name.clone());
+                    }
+                }
+            }
+            let changes: Vec<FieldChange> = targets
+                .iter()
+                .map(|n| FieldChange { name: n.clone(), value: None, read_only: None, required: None, display: Some(if hide { 1 } else { 0 }) })
+                .collect();
+            if !changes.is_empty() {
+                apply_script_changes(doc, &changes, &mut NoScripts)?;
+            }
+            Ok(ButtonRun::ShowHide { fields: targets, hide })
+        }
+        af::ButtonAction::SetLayers { changes, .. } => Ok(ButtonRun::SetLayers(changes)),
+        af::ButtonAction::Named(n) => Ok(ButtonRun::Menu(n)),
+        af::ButtonAction::GoTo(p) => Ok(ButtonRun::Page(p)),
+        af::ButtonAction::Uri(u) => Ok(ButtonRun::Url(u)),
+        af::ButtonAction::Submit(u) => Ok(ButtonRun::Submit(u)),
+        af::ButtonAction::Alert(m) => Ok(ButtonRun::Alert(m)),
+        af::ButtonAction::Script(js) => Ok(ButtonRun::Script(js)),
+        af::ButtonAction::ImportIcon => Ok(ButtonRun::ImportIcon),
+    }
+}
+
+/// Whether a field is hidden: every one of its widgets carries the Hidden or NoView flag, which is
+/// what a `display` change sets. A field with no widget is not hidden by anything.
+fn field_hidden(f: &Field) -> bool {
+    !f.widgets.is_empty() && f.widgets.iter().all(|w| w.hidden)
+}
+
+/// The field names a reset action resets: the listed ones (and their children), or all but them
+/// when the action's exclude flag is set, or all of them when it lists none.
+fn reset_names(all: &[Field], fields: &[String], exclude: bool) -> Vec<String> {
+    let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
+    match (fields.is_empty(), exclude) {
+        (true, _) => all.iter().map(|f| f.name.clone()).collect(),
+        (false, false) => all.iter().map(|f| f.name.clone()).filter(listed).collect(),
+        (false, true) => all.iter().map(|f| f.name.clone()).filter(|n| !listed(n)).collect(),
+    }
+}
+
+/// One required field that is still empty, as a completion guide reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Missing {
+    /// The field's fully qualified name.
+    pub name: String,
+    /// 0-based page of its first widget on a page, or `None` when it is not drawn anywhere. The
+    /// tools add one, as they do for every page they report.
+    pub page: Option<usize>,
+    /// Where it sits in the tab order: 0-based, in the order the form is filled in. A field whose
+    /// widgets are all off-page sorts after every field that is on one.
+    pub tab: usize,
+    /// The tooltip (`/TU`) to show the person, when the form author gave one.
+    pub tooltip: Option<String>,
+}
+
+/// What a form still needs before it can be called filled in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Completion {
+    /// Every required field that is empty, in tab order — the order to work through them in.
+    pub missing: Vec<Missing>,
+    /// How many fields the form has in all.
+    pub fields: usize,
+    /// How many of them carry Acrobat's Required flag.
+    pub required: usize,
+}
+
+impl Completion {
+    /// Whether every required field holds a value.
+    pub fn is_complete(&self) -> bool {
+        self.missing.is_empty()
+    }
+
+    /// The first field still to fill in, for a guided prompt.
+    pub fn first(&self) -> Option<&Missing> {
+        self.missing.first()
+    }
+}
+
+/// Which required fields are still empty, in the order they should be filled in.
+///
+/// This is the check behind Acrobat's "you must fill in a required field" prompt, made runnable
+/// without a window so a caller can guide someone through a form — or refuse to hand on an
+/// incomplete one — and say exactly what is left. A field counts as answered when it holds any
+/// value at all: a text field with text, a check box that is on, a radio group with a state, a
+/// choice with a selection. A required *push button* or *signature* is not something a value can
+/// answer, so those are not reported as missing — they cannot be made complete by filling.
+///
+/// Nothing is changed: this only reads. A form with no fields is not an error — it is complete,
+/// because it asks for nothing.
+pub fn completion(doc: &Document) -> Completion {
+    let all = fields(doc);
+    let mut missing = Vec::new();
+    for f in all.iter().filter(|f| f.has(flags::REQUIRED) && !answers(f)) {
+        if matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) {
+            continue;
+        }
+        // A field's place in the guide is its first widget's tab rank; a field drawn nowhere has
+        // no place to point at, so it sorts last rather than pretending to be first.
+        let tab = f.widgets.iter().map(|w| w.tab).min().unwrap_or(usize::MAX);
+        let page = f.widgets.iter().filter_map(|w| w.page).min();
+        missing.push(Missing { name: f.name.clone(), page, tab, tooltip: f.tooltip.clone() });
+    }
+    missing.sort_by(|a, b| a.tab.cmp(&b.tab).then_with(|| a.name.cmp(&b.name)));
+    let required = all.iter().filter(|f| f.has(flags::REQUIRED)).count();
+    Completion { missing, fields: all.len(), required }
+}
+
+/// Whether a field holds an answer. A check box or radio answers with a state other than off, and
+/// a choice with at least one selected export value; everything else with any value at all.
+fn answers(f: &Field) -> bool {
+    match f.kind {
+        // `/Off` never reaches `value` (it is filtered out when reading), so "on" is "non-empty".
+        FieldKind::CheckBox | FieldKind::Radio => !f.value.is_empty(),
+        FieldKind::PushButton | FieldKind::Signature => false,
+        _ => f.value.iter().any(|v| !v.trim().is_empty()),
     }
 }
 

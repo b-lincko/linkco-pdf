@@ -101,7 +101,10 @@ pub use pdfcraft_annot::{
     Shape, StampGroup, StampKind, Style, rect_quad,
 };
 pub use pdfcraft_forms::detect;
-pub use pdfcraft_forms::{Appearances, Regenerated as RegeneratedAppearances, fields as form_fields, regenerate as regenerate_appearances};
+pub use pdfcraft_forms::{
+    Appearances, ButtonRun, Completion as FormCompletion, Regenerated as RegeneratedAppearances, completion as form_completion,
+    fields as form_fields, regenerate as regenerate_appearances,
+};
 pub use pdfcraft_optimize as optimize;
 pub use pdfcraft_preflight as pdfa;
 pub use pdfcraft_print as print;
@@ -191,6 +194,7 @@ fn scope_of(edit: &Edit) -> Scope {
         Edit::SetFieldValue { .. }
         | Edit::ResetForm { .. }
         | Edit::RegenerateFieldAppearances { .. }
+        | Edit::RunButton { .. }
         | Edit::SetFieldImage { .. }
         | Edit::ApplyScriptChanges { .. } => Scope::Form,
         Edit::Batch { edits, .. } => {
@@ -1010,6 +1014,12 @@ pub enum Edit {
     RegenerateFieldAppearances {
         names: Option<Vec<String>>,
     },
+    /// Run a push button's mouse-up action: the parts that change the document are applied (a
+    /// reset of fields, showing or hiding fields); what belongs to a viewer (a page, a URL, a
+    /// menu item, a script) is returned by [`Session::run_button`] for the caller.
+    RunButton {
+        name: String,
+    },
     /// Prepare a form: add a field on a page (`rect` in PDF user space); `name` defaults to
     /// Acrobat's next free name ("Text1", "Check Box2", …).
     AddField {
@@ -1285,6 +1295,7 @@ impl Edit {
             Edit::AddField { .. } => "Add field".into(),
             Edit::SetFieldProps { .. } => "Change field properties".into(),
             Edit::RegenerateFieldAppearances { .. } => "Regenerate field appearances".into(),
+            Edit::RunButton { name } => format!("Press {name}"),
             Edit::DeleteField { .. } => "Delete field".into(),
             Edit::DuplicateField { .. } => "Duplicate field".into(),
             Edit::SetTabOrder { .. } | Edit::MoveInTabOrder { .. } => "Set tab order".into(),
@@ -1429,7 +1440,12 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
                 Err(EditError::NotPermitted("comments"))
             }
         }
-        Edit::SetFieldValue { .. } | Edit::ResetForm { .. } | Edit::SetFieldImage { .. } | Edit::ApplyScriptChanges { .. } | Edit::XfaEvent { .. } => {
+        Edit::SetFieldValue { .. }
+        | Edit::ResetForm { .. }
+        | Edit::SetFieldImage { .. }
+        | Edit::ApplyScriptChanges { .. }
+        | Edit::XfaEvent { .. }
+        | Edit::RunButton { .. } => {
             if p.fill_forms() {
                 Ok(())
             } else {
@@ -1699,6 +1715,10 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::RegenerateFieldAppearances { names } => {
             pdfcraft_forms::regenerate(doc, names.as_deref())?;
+        }
+        Edit::RunButton { name } => {
+            // The part that changes the document; `Session::run_button` reports the rest.
+            pdfcraft_forms::run_button(doc, name)?;
         }
         Edit::AddField { page, rect, kind, name } => {
             pdfcraft_forms::add_field(doc, *page, *rect, kind, name.as_deref())?;
@@ -2784,6 +2804,45 @@ impl Session {
                 guard(|| pdfcraft_forms::regenerate(&mut cos, names)).map_err(EditError::Write)?.map_err(EditError::Form)
             }
         }
+    }
+
+    /// Which required fields are still empty, in the order they should be filled in — read from
+    /// the editor's live state, so unsaved entries count. Changes nothing.
+    pub fn form_completion(&self, id: DocId) -> Result<FormCompletion, EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        match doc.editor.as_ref() {
+            Some(editor) => Ok(pdfcraft_forms::completion(&editor.cos)),
+            None => {
+                let cos = guard(|| pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()))
+                    .map_err(EditError::Write)?
+                    .map_err(|e| EditError::Write(e.to_string()))?;
+                Ok(pdfcraft_forms::completion(&cos))
+            }
+        }
+    }
+
+    /// What pressing push button `name` does, and the document state it leaves: the action is run
+    /// on a copy of the editor's current state to learn what it is, and then applied for real when
+    /// it changes the document, in one undo step. The returned [`ButtonRun`] names what a viewer
+    /// would still have to do (go to a page, open a URL, print, submit, an alert, a script).
+    pub fn run_button(&mut self, id: DocId, name: &str) -> Result<ButtonRun, EditError> {
+        // Asked first on a copy: the answer says what the action is, and whether it is one that
+        // changes the document at all — so an action that only asks the viewer for something
+        // (a page, a URL, a menu item) makes no undo step.
+        let run = {
+            let doc = self.get(id).ok_or(EditError::NoDocument)?;
+            let mut cos = match doc.editor.as_ref() {
+                Some(editor) => editor.cos.clone(),
+                None => guard(|| pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()))
+                    .map_err(EditError::Write)?
+                    .map_err(|e| EditError::Write(e.to_string()))?,
+            };
+            guard(|| pdfcraft_forms::run_button(&mut cos, name)).map_err(EditError::Write)?.map_err(EditError::Form)?
+        };
+        if run.changed_document() {
+            self.apply(id, Edit::RunButton { name: name.into() })?;
+        }
+        Ok(run)
     }
 
     /// The bytes to write for Save: an incremental update of the file as opened/last saved,

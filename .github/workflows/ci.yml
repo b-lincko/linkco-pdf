@@ -68,7 +68,14 @@ jobs:
 
       - name: Format
         if: runner.os == 'Linux'
-        run: cargo fmt --all -- --check
+        shell: bash
+        run: |
+          # A plain step publishes nothing but "exit code 1"; the rustfmt diff is what fixes it.
+          if ! cargo fmt --all -- --check 2>&1 | tee /tmp/fmt.log; then
+            diff_text="$(cat /tmp/fmt.log | head -c 2800 | sed -e 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }')"
+            printf '::error title=Format (rustfmt diff)::%s\n' "$diff_text"
+            exit 1
+          fi
 
       - name: Clippy
         shell: bash
@@ -112,7 +119,8 @@ jobs:
         with:
           key: wasm32
       - name: Check library crates for wasm32
-        run: cargo xtask wasm
+        shell: bash
+        run: .github/scripts/run-annotated.sh "wasm32" cargo xtask wasm
 
   deny:
     name: dependency licences and advisories
