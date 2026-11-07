@@ -625,6 +625,7 @@ impl Automation {
             }
             "form_reset" => self.form_reset(&a)?,
             "form_regenerate_appearances" => self.form_regenerate_appearances(&a)?,
+            "form_run_button" => self.form_run_button(&a)?,
             "form_add_field" => self.form_add_field(&a)?,
             "form_set_props" => self.form_set_props(&a)?,
             "form_delete_field" => self.form_delete_field(&a)?,

@@ -1772,3 +1772,148 @@ fn a_document_without_a_form_is_refused() {
     let mut doc = one_page();
     assert!(matches!(regenerate(&mut doc, None), Err(FormError::NoForm)));
 }
+
+/// One page with a text field the reset has something to do to (a value that differs from its
+/// default), a check box that is on, and a button per action kind. Each button's action is a
+/// hand-written dictionary, so the tests exercise the same parser the app reads with.
+fn buttons() -> Document {
+    document(&buttons_objs())
+}
+
+/// The objects behind `buttons()`, so a test can vary one button's action and rebuild.
+fn buttons_objs() -> Vec<String> {
+    vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                                          // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),                           // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [10 0 R 11 0 R 12 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R 25 0 R 26 0 R] >>".into(), // 3
+        "<< /Fields [10 0 R 11 0 R 12 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R 25 0 R 26 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R /ZaDb 6 0 R >> >> >>".into(), // 4
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),                                      // 5
+        "<< /Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats >>".into(),                                   // 6
+        "null".into(),
+        "null".into(),
+        "null".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (Ada) /DV (Ada) /Rect [50 700 250 720] /P 3 0 R >>".into(), // 10
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (notes) /V (typed) /DV () /Rect [50 600 250 620] /P 3 0 R >>".into(), // 11
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Yes /AS /Yes /DV /Off /Rect [300 700 315 715] /P 3 0 R >>".into(), // 12
+        "null".into(),
+        "null".into(),
+        "null".into(),
+        "null".into(),
+        "null".into(),
+        "null".into(),
+        "null".into(),
+        // 20: a push button that resets only `notes`.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (clear) /Ff 65536 /Rect [300 600 380 620] /P 3 0 R /A << /S /ResetForm /Fields [(notes)] >> >>".into(),
+        // 21: a push button that resets everything but `name`.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (keep) /Ff 65536 /Rect [300 560 380 580] /P 3 0 R /A << /S /ResetForm /Fields [(name)] /Flags 1 >> >>".into(),
+        // 22: a push button that hides `notes`.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (cover) /Ff 65536 /Rect [300 520 380 540] /P 3 0 R /A << /S /Hide /T (notes) /H true >> >>".into(),
+        // 23: a push button that asks for things only a viewer can do.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (send) /Ff 65536 /Rect [300 480 380 500] /P 3 0 R /A << /S /URI /URI (https://example.com/x) >> >>".into(),
+        // 24: a push button that goes to the first page.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (home) /Ff 65536 /Rect [300 440 380 460] /P 3 0 R /A << /S /GoTo /D [3 0 R /Fit] >> >>".into(),
+        // 25: a push button with no action at all.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (idle) /Ff 65536 /Rect [300 400 380 420] /P 3 0 R >>".into(),
+        // 26: a push button that launches a file: an action kind this build does not model.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (launch) /Ff 65536 /Rect [300 360 380 380] /P 3 0 R /A << /S /Launch /F (report.exe) >> >>".into(),
+    ]
+}
+
+/// A reset button returns every field to its default value, and says which fields it touched —
+/// only the ones it names, and only those whose value actually moved.
+#[test]
+fn a_reset_button_clears_the_fields_it_names() {
+    let mut doc = buttons();
+    let run = run_button(&mut doc, "clear").unwrap();
+    assert_eq!(run, ButtonRun::Reset(vec!["notes".into()]), "only the field that had a value different from its default");
+    let all = fields(&doc);
+    assert!(field(&all, "notes").value.is_empty(), "notes is back to its default");
+    assert_eq!(field(&all, "name").value, FieldValue::Text("Ada".into()), "the unnamed field was left alone");
+    assert!(run.changed_document());
+    // A field already at its default is named by the action but not changed, so a second press
+    // reports nothing and does nothing.
+    let again = run_button(&mut doc, "clear").unwrap();
+    assert_eq!(again, ButtonRun::Reset(Vec::new()), "nothing was left to move");
+    assert!(again.changed_document(), "the press still runs a reset");
+}
+
+/// The exclude flag inverts the list: a reset of everything but the named fields.
+#[test]
+fn a_reset_button_with_exclude_clears_the_rest() {
+    let mut doc = buttons();
+    let run = run_button(&mut doc, "keep").unwrap();
+    assert!(matches!(&run, ButtonRun::Reset(n) if n.iter().any(|f| f == "notes") && !n.iter().any(|f| f == "name")), "{run:?}");
+    let all = fields(&doc);
+    assert_eq!(field(&all, "name").value, FieldValue::Text("Ada".into()), "the excluded field kept its value");
+    assert!(field(&all, "notes").value.is_empty());
+    assert!(field(&all, "agree").value.is_empty(), "a check box goes back to its default");
+}
+
+/// A hide action sets the display flag on the fields it names, and says which ones it moved.
+#[test]
+fn a_show_hide_button_hides_its_fields() {
+    let mut doc = buttons();
+    let run = run_button(&mut doc, "cover").unwrap();
+    assert_eq!(run, ButtonRun::ShowHide { fields: vec!["notes".into()], hide: true });
+    assert!(run.changed_document());
+    let all = fields(&doc);
+    assert!(field(&all, "notes").hidden, "the field is hidden");
+    assert!(!field(&all, "name").hidden, "the field the action did not name is not hidden");
+    // Pressing it again finds the field already hidden: nothing moves, so nothing is claimed.
+    let again = run_button(&mut doc, "cover").unwrap();
+    assert_eq!(again, ButtonRun::ShowHide { fields: Vec::new(), hide: true });
+    assert!(!again.changed_document(), "an action that moved nothing made no change");
+}
+
+/// The actions that need a viewer are reported, and change nothing: no undo step, no edit.
+#[test]
+fn viewer_actions_are_reported_not_performed() {
+    let mut doc = buttons();
+    let before = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let run = run_button(&mut doc, "send").unwrap();
+    assert_eq!(run, ButtonRun::Url("https://example.com/x".into()));
+    assert!(!run.changed_document(), "opening a URL changes the document nowhere");
+    let after = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(before, after, "the document is byte-for-byte unchanged");
+
+    // A page destination is where the viewer would go (0-based here; the tool reports it 1-based).
+    let page = run_button(&mut doc, "home").unwrap();
+    assert_eq!(page, ButtonRun::Page(0));
+    assert!(!page.changed_document());
+
+    let idle = run_button(&mut doc, "idle").unwrap();
+    assert_eq!(idle, ButtonRun::Nothing);
+    assert!(!idle.changed_document());
+
+    // A button whose action is a kind this build does not model says so: it is not "nothing",
+    // which would tell a caller the button does nothing when in a viewer it may well do something.
+    let launch = run_button(&mut doc, "launch").unwrap();
+    assert!(matches!(&launch, ButtonRun::Unsupported(_)), "{launch:?}");
+    assert!(!launch.changed_document());
+    let all = fields(&doc);
+    assert!(field(&all, "launch").button.is_none(), "the action was not modelled");
+    assert!(field(&all, "launch").button_unhandled, "but its presence is recorded");
+    assert!(!field(&all, "idle").button_unhandled, "a button with no action is not unhandled");
+}
+
+/// Only a push button runs; a text field's name is refused, as is an unknown one.
+#[test]
+fn only_push_buttons_run() {
+    let mut doc = buttons();
+    assert!(matches!(run_button(&mut doc, "nope"), Err(FormError::NoSuchField(n)) if n == "nope"));
+    assert!(matches!(run_button(&mut doc, "name"), Err(FormError::Invalid(m)) if m.contains("not a push button")));
+}
+
+/// A hide action that also names fields the form does not have still hides the ones it finds, and
+/// reports only those: a viewer looking for a field that is not there simply finds nothing.
+#[test]
+fn a_hide_action_reports_only_the_fields_it_finds() {
+    let mut objs = buttons_objs();
+    // The button hides a field that is there and one that is not.
+    objs[21] = "<< /Type /Annot /Subtype /Widget /FT /Btn /T (cover) /Ff 65536 /Rect [300 520 380 540] /P 3 0 R /A << /S /Hide /T [(notes) (ghost)] /H true >> >>"
+        .into();
+    let mut doc = document(&objs);
+    let run = run_button(&mut doc, "cover").unwrap();
+    assert_eq!(run, ButtonRun::ShowHide { fields: vec!["notes".into()], hide: true }, "only the field that exists is reported");
+    assert!(field(&fields(&doc), "notes").hidden);
+}

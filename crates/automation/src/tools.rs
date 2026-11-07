@@ -988,6 +988,8 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("form.prepare")
             .with(schema(json!({ "doc": doc(), "field": { "type": "string" } }), &["doc", "field"])),
+        t("form_run_button", "Press a push button", "Run a push button's mouse-up action, as clicking it does. The parts that change the document are done, in one undo step: reset (the fields it names, or all of them), and show/hide. The parts that need a viewer are returned for the caller to carry out, and change nothing here: menu (Print, NextPage, …), page (1-based, where it would go), url (never opened), submit (never sent), alert, script, layers (what it would turn on or off). A button with no action answers nothing. An action this build does not run answers unsupported. The field must be a push button.")
+            .with(schema(json!({ "doc": doc(), "field": { "type": "string" } }), &["doc", "field"])),
         t("form_set_actions", "Set field actions", "Field Properties ▸ Actions: replace the field's actions. Each item: trigger (mouse_up, mouse_down, mouse_enter, mouse_exit, on_focus, on_blur) and one of javascript (source), url, reset (field names; [] for all), menu (Print, NextPage, PrevPage, FirstPage, LastPage), page (1-based), show / hide (field names), submit (URL). Triggers not listed lose their action. Undoable.")
             .cmd("form.prepare")
             .with(schema(

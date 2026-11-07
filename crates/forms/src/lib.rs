@@ -132,6 +132,10 @@ pub struct Field {
     pub actions: af::Actions,
     /// Push buttons: what a click does.
     pub button: Option<af::ButtonAction>,
+    /// Push buttons whose `/A` action is of a kind this build does not model (`/Launch`,
+    /// `/ImportData`, …): the action is there, but nothing here can say what it does or run it.
+    /// A button can have this set and [`button`](Self::button) `None` at once.
+    pub button_unhandled: bool,
 }
 
 impl Field {
@@ -253,6 +257,16 @@ fn name_obj(text: &str) -> Object {
 
 /// At most this many `/State` entries of a set-layer-visibility action are read.
 const MAX_LAYER_STATE: usize = 1024;
+
+/// Whether the field (or one of its widgets) carries a `/A` or `/AA /U` action dictionary at all,
+/// recognised or not.
+fn has_action(doc: &Document, d: &Dict, widgets: &[ObjRef]) -> bool {
+    let pick = |dict: &Dict| {
+        let u = dict.get(b"AA").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().and_then(|aa| aa.get(b"U")).cloned());
+        dict.get(b"A").is_some() || u.is_some()
+    };
+    pick(d) || widgets.iter().any(|w| doc.get(*w).as_dict().is_some_and(pick))
+}
 
 /// A push button's mouse-up action (`/A`, or `/AA /U`, on the field or its widget).
 fn button_action(doc: &Document, d: &Dict, widgets: &[ObjRef]) -> Option<af::ButtonAction> {
@@ -746,8 +760,11 @@ fn walk(
     }
     let widget_refs: Vec<ObjRef> = if d.contains(b"Rect") { vec![r] } else { kids };
     let actions = actions_of(doc, d, &widget_refs);
-    let button =
-        (inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0).then(|| button_action(doc, d, &widget_refs)).flatten();
+    let push = inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0;
+    let button = push.then(|| button_action(doc, d, &widget_refs)).flatten();
+    // An action dictionary that `button_action` did not recognise is still an action: say so, so a
+    // button that launches a file is never mistaken for one that does nothing.
+    let button_unhandled = push && button.is_none() && has_action(doc, d, &widget_refs);
     let ff = inh.ff.unwrap_or(0);
     let kind = match inh.ft.as_deref() {
         Some(b"Tx") => FieldKind::Text,
@@ -818,6 +835,7 @@ fn walk(
         widgets,
         actions,
         button,
+        button_unhandled,
     });
 }
 
@@ -1215,6 +1233,124 @@ fn same_normal(doc: &Document, w: &Widget, want: &Stream) -> bool {
     match (stored_normal(doc, w), want.decoded()) {
         (Some(have), Ok(want)) => have == want,
         _ => false,
+    }
+}
+
+/// What clicking a push button did, or what it asks a viewer to do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ButtonRun {
+    /// The button reset these fields to their defaults (the ones whose value actually moved).
+    Reset(Vec<String>),
+    /// The button shows or hides these fields (and their children).
+    ShowHide { fields: Vec<String>, hide: bool },
+    /// The button turns these layers on, off or over, in order.
+    SetLayers(Vec<(af::LayerOp, (u32, u16))>),
+    /// The button asks the viewer to run a menu item. Nothing in the document changes.
+    Menu(String),
+    /// The button asks the viewer to go to this 0-based page. Nothing in the document changes.
+    Page(usize),
+    /// The button opens a web address. PdfCraft never opens it on its own.
+    Url(String),
+    /// The button submits the form to this address. PdfCraft never sends form data.
+    Submit(String),
+    /// The button shows this message.
+    Alert(String),
+    /// The button runs this JavaScript.
+    Script(String),
+    /// The button asks for an image (an image field).
+    ImportIcon,
+    /// The button has no mouse-up action.
+    Nothing,
+    /// The button carries an action this build does not model (`/Launch`, `/ImportData`, …): it
+    /// may well do something in a viewer, and nothing here does it.
+    Unsupported(String),
+}
+
+impl ButtonRun {
+    /// Whether running the action changed the document at all (so an undo step is worth making).
+    /// A reset that moved nothing, and a show/hide that found no field, changed nothing.
+    pub fn changed_document(&self) -> bool {
+        match self {
+            ButtonRun::Reset(fields) => !fields.is_empty(),
+            ButtonRun::ShowHide { fields, .. } => !fields.is_empty(),
+            _ => false,
+        }
+    }
+}
+
+/// Run a push button's mouse-up action, the way clicking it in the app does, but reported rather
+/// than performed by a viewer: the parts that change the document (a reset, showing or hiding
+/// fields) are applied, so a caller that runs an action on the server gets the state a click
+/// would leave; the parts that belong to a viewer (going to a page, opening a URL, printing,
+/// submitting, an alert, a script) are returned for the caller to carry out. `name` must be a
+/// push button; any other field is `Invalid`.
+pub fn run_button(doc: &mut Document, name: &str) -> Result<ButtonRun, FormError> {
+    let all = fields(doc);
+    let f = all.iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?;
+    if f.kind != FieldKind::PushButton {
+        return Err(FormError::Invalid(format!("{name:?} is not a push button")));
+    }
+    let Some(action) = f.button.clone() else {
+        // A button whose action this build does not model is not a button that does nothing.
+        return Ok(if f.button_unhandled { ButtonRun::Unsupported("an action this build does not run".into()) } else { ButtonRun::Nothing });
+    };
+    match action {
+        af::ButtonAction::Reset { fields, exclude } => {
+            // Which fields the action names, and which of them the reset actually moved: a field
+            // already at its default is named by the action but not changed, and the answer says
+            // what was done, not what was asked for.
+            let names = reset_names(&all, &fields, exclude);
+            let before: Vec<(String, Vec<String>)> =
+                all.iter().filter(|f| names.contains(&f.name)).map(|f| (f.name.clone(), f.value.clone())).collect();
+            reset(doc, Some(&names))?;
+            let after = fields(doc);
+            let moved = before
+                .into_iter()
+                .filter(|(n, v)| after.iter().find(|f| &f.name == n).is_some_and(|f| &f.value != v))
+                .map(|(n, _)| n)
+                .collect();
+            Ok(ButtonRun::Reset(moved))
+        }
+        af::ButtonAction::ShowHide { fields, hide } => {
+            // A name in the action that is not a field is skipped, as a viewer would find nothing
+            // to hide; a name that is one takes its children with it, as `display` does. Only the
+            // fields this actually moved are reported, so a second press of a Hide button is not
+            // mistaken for work done.
+            let mut targets = Vec::new();
+            for t in &fields {
+                let prefix = format!("{t}.");
+                for f in all.iter().filter(|f| (&f.name == t || f.name.starts_with(&prefix)) && f.hidden != hide) {
+                    targets.push(f.name.clone());
+                }
+            }
+            let changes: Vec<FieldChange> = targets
+                .iter()
+                .map(|n| FieldChange { name: n.clone(), value: None, read_only: None, required: None, display: Some(if hide { 1 } else { 0 }) })
+                .collect();
+            if !changes.is_empty() {
+                apply_script_changes(doc, &changes, &mut NoScripts)?;
+            }
+            Ok(ButtonRun::ShowHide { fields: targets, hide })
+        }
+        af::ButtonAction::SetLayers { changes, .. } => Ok(ButtonRun::SetLayers(changes)),
+        af::ButtonAction::Named(n) => Ok(ButtonRun::Menu(n)),
+        af::ButtonAction::GoTo(p) => Ok(ButtonRun::Page(p)),
+        af::ButtonAction::Uri(u) => Ok(ButtonRun::Url(u)),
+        af::ButtonAction::Submit(u) => Ok(ButtonRun::Submit(u)),
+        af::ButtonAction::Alert(m) => Ok(ButtonRun::Alert(m)),
+        af::ButtonAction::Script(js) => Ok(ButtonRun::Script(js)),
+        af::ButtonAction::ImportIcon => Ok(ButtonRun::ImportIcon),
+    }
+}
+
+/// The field names a reset action resets: the listed ones (and their children), or all but them
+/// when the action's exclude flag is set, or all of them when it lists none.
+fn reset_names(all: &[Field], fields: &[String], exclude: bool) -> Vec<String> {
+    let listed = |n: &String| fields.iter().any(|f| n == f || n.starts_with(&format!("{f}.")));
+    match (fields.is_empty(), exclude) {
+        (true, _) => all.iter().map(|f| f.name.clone()).collect(),
+        (false, false) => all.iter().map(|f| f.name.clone()).filter(listed).collect(),
+        (false, true) => all.iter().map(|f| f.name.clone()).filter(|n| !listed(n)).collect(),
     }
 }
 

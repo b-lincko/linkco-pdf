@@ -2,7 +2,7 @@
 //! prepare a form (add, change and delete fields).
 
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, Validate};
-use pdfcraft_engine::{Appearances, DocId, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
+use pdfcraft_engine::{Appearances, ButtonRun, DocId, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
 use serde_json::{Value, json};
 
 use crate::{Args, Automation, Result, ToolError, failed};
@@ -324,6 +324,37 @@ impl Automation {
         Ok(out)
     }
 
+    pub(crate) fn form_run_button(&mut self, a: &Args) -> Result<Value> {
+        let name = a.str("field")?.to_owned();
+        let id = DocId(u64::try_from(a.int("doc")?).map_err(|_| ToolError::InvalidArgs("doc must be positive".into()))?);
+        let run = self.session.run_button(id, &name).map_err(failed)?;
+        // Whether the press made a step, asked before the outcome itself is taken apart.
+        let changed = run.changed_document();
+        // One sentence per outcome, so a caller can act on it without parsing the tool's prose.
+        let (what, mut out) = match run {
+            ButtonRun::Reset(fields) => ("reset", json!({ "fields": fields })),
+            ButtonRun::ShowHide { fields, hide } => ("show_hide", json!({ "fields": fields, "hide": hide })),
+            ButtonRun::SetLayers(changes) => ("set_layers", json!({ "changes": layer_changes(&changes) })),
+            ButtonRun::Menu(menu) => ("menu", json!({ "menu": menu })),
+            ButtonRun::Page(p) => ("page", json!({ "page": p + 1 })),
+            ButtonRun::Url(url) => ("url", json!({ "url": url })),
+            ButtonRun::Submit(url) => ("submit", json!({ "url": url, "sent": false })),
+            ButtonRun::Alert(message) => ("alert", json!({ "message": message })),
+            ButtonRun::Script(source) => ("script", json!({ "source": source })),
+            ButtonRun::ImportIcon => ("import_icon", json!({})),
+            ButtonRun::Nothing => ("nothing", json!({})),
+            ButtonRun::Unsupported(what) => ("unsupported", json!({ "action": what })),
+        };
+        // The document's own state rides along, as every editing tool's answer carries it: `undo`
+        // says whether the press made a step, `dirty` whether anything is unsaved.
+        let state = summary(self.doc(a)?);
+        out["field"] = json!(name);
+        out["did"] = json!(what);
+        out["changed"] = json!(changed);
+        out["document"] = state;
+        Ok(out)
+    }
+
     pub(crate) fn form_add_field(&mut self, a: &Args) -> Result<Value> {
         let page = self.page(a)?;
         let doc = self.doc(a)?;
@@ -599,4 +630,19 @@ impl Automation {
         out["filled_fields"] = json!(doc.form.iter().filter(|f| !f.value.is_empty()).count());
         Ok(out)
     }
+}
+
+/// Set-layer changes as JSON: the operation and the layer's object number.
+fn layer_changes(changes: &[(pdfcraft_engine::form_scripts::LayerOp, (u32, u16))]) -> Vec<Value> {
+    changes
+        .iter()
+        .map(|(op, (num, gen))| {
+            let op = match op {
+                pdfcraft_engine::form_scripts::LayerOp::On => "on",
+                pdfcraft_engine::form_scripts::LayerOp::Off => "off",
+                pdfcraft_engine::form_scripts::LayerOp::Toggle => "toggle",
+            };
+            json!({ "op": op, "layer": num, "generation": gen })
+        })
+        .collect()
 }
