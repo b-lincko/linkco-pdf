@@ -1927,6 +1927,15 @@ fn comment_list(doc: &pdfcraft_cos::Document) -> Vec<pdfcraft_render::Annotation
             locked: s.locked,
             intent: s.intent,
             fill_sign: s.fill_sign,
+            redaction: s.redaction.map(|r| pdfcraft_render::RedactionAppearance {
+                fill: r.fill,
+                overlay: r.overlay,
+                font: r.look.font.resource().to_string(),
+                size: r.look.size,
+                color: r.look.color,
+                align: r.look.align,
+                repeat: r.look.repeat,
+            }),
         })
         .collect()
 }
