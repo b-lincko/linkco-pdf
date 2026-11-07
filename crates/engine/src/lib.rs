@@ -102,7 +102,8 @@ pub use pdfcraft_annot::{
 };
 pub use pdfcraft_forms::detect;
 pub use pdfcraft_forms::{
-    Appearances, ButtonRun, Regenerated as RegeneratedAppearances, fields as form_fields, regenerate as regenerate_appearances,
+    Appearances, ButtonRun, Completion as FormCompletion, Regenerated as RegeneratedAppearances, completion as form_completion,
+    fields as form_fields, regenerate as regenerate_appearances,
 };
 pub use pdfcraft_optimize as optimize;
 pub use pdfcraft_preflight as pdfa;
@@ -2801,6 +2802,21 @@ impl Session {
                     .map_err(EditError::Write)?
                     .map_err(|e| EditError::Write(e.to_string()))?;
                 guard(|| pdfcraft_forms::regenerate(&mut cos, names)).map_err(EditError::Write)?.map_err(EditError::Form)
+            }
+        }
+    }
+
+    /// Which required fields are still empty, in the order they should be filled in — read from
+    /// the editor's live state, so unsaved entries count. Changes nothing.
+    pub fn form_completion(&self, id: DocId) -> Result<FormCompletion, EditError> {
+        let doc = self.get(id).ok_or(EditError::NoDocument)?;
+        match doc.editor.as_ref() {
+            Some(editor) => Ok(pdfcraft_forms::completion(&editor.cos)),
+            None => {
+                let cos = guard(|| pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()))
+                    .map_err(EditError::Write)?
+                    .map_err(|e| EditError::Write(e.to_string()))?;
+                Ok(pdfcraft_forms::completion(&cos))
             }
         }
     }

@@ -324,6 +324,35 @@ impl Automation {
         Ok(out)
     }
 
+    pub(crate) fn form_completion(&mut self, a: &Args) -> Result<Value> {
+        let id = DocId(u64::try_from(a.int("doc")?).map_err(|_| ToolError::InvalidArgs("doc must be positive".into()))?);
+        let c = self.session.form_completion(id).map_err(failed)?;
+        // What is left to do, in the order a person would do it: the guide a caller needs to ask
+        // for one field at a time, rather than only being told the form is not finished.
+        let missing: Vec<Value> = c
+            .missing
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                json!({
+                    "step": i + 1,
+                    "name": m.name,
+                    "page": m.page.map(|p| p + 1),
+                    "tab": m.tab,
+                    "tooltip": m.tooltip,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "complete": c.is_complete(),
+            "next": c.first().map(|m| m.name.clone()),
+            "remaining": missing.len(),
+            "fields": c.fields,
+            "required": c.required,
+            "missing": missing,
+        }))
+    }
+
     pub(crate) fn form_run_button(&mut self, a: &Args) -> Result<Value> {
         let name = a.str("field")?.to_owned();
         let id = DocId(u64::try_from(a.int("doc")?).map_err(|_| ToolError::InvalidArgs("doc must be positive".into()))?);

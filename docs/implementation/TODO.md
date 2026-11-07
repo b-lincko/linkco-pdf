@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B048 · **Active stage:** basic
+**Active component:** B049 · **Active stage:** basic
 
-## Basic (379 records)
+## Basic (380 records)
 
-complete: 51, in_progress: 7, pending: 321
+complete: 51, in_progress: 8, pending: 321
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -66,6 +66,7 @@ complete: 51, in_progress: 7, pending: 321
 | B046 | [x] A save survives a power loss: the folder holding the new name is flushed after the rename (REC-R01) | P0 | complete | REC-R01 |
 | B047 | [x] Regenerate field appearances: a value without an appearance becomes visible (REC-F01) | P0 | complete | REC-F01 |
 | B048 | [x] Push buttons run their actions: a button's click can be asked for headlessly (REC-F01) | P0 | complete | REC-F01 |
+| B049 | [ ] Required-field completion guide: a form says what is still missing (REC-F01) | P0 | in_progress | REC-F01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1675,3 +1676,18 @@ pending: 65, scope_review: 23
 - Local evidence: crates/automation/tests/form_buttons.rs: form_run_button reports did=reset with every field named and undo=true on a button that resets the form; did=url with changed=false and undo=false on a URI button (no step was made); did=submit with sent=false; did=nothing on a button without an action; did=import_icon with no step on the image field the app itself creates; a text field and an unknown name are refused; and the whole workflow — a value that is not its default, the button pressed, the value back to its default, and the result surviving doc_save — is proved end to end.
 - Local evidence: python3 docs/implementation/build_backlog.py --check (677 records), build_capabilities.py --check (129 automation tools), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42346349482
+
+### B049: Required-field completion guide: a form says what is still missing (REC-F01)
+
+- Status: **in_progress**; parent(s): REC-F01.
+- Acceptance: The tool `form_completion` (and the engine call under it, `Session::form_completion` over `pdfcraft_forms::completion`) answers which required fields are still empty, in the order a person should fill them in. A field is answered when it holds a value: text that is not blank (whitespace alone is not an answer), a check box or radio button that is on, a choice with a selection. A required push button or signature is never reported, because no value can answer it. The answer names every missing field with its name, its page (1-based, when it is drawn on one), its 0-based tab position and the author's tooltip, plus `complete`, `next` (the first thing to fill in, for a guided prompt), `remaining`, `fields` and `required`. Reading changes nothing — no undo step, no dirty flag, no bytes — and reads the editor's live state, so an unsaved entry counts immediately. A form with no fields is complete rather than an error. The tool is read-only in the catalogue and carries a schema.
+- Audit: REC-F01's remaining open note: the required-field validation and completion guide the recommendation names, and the backlog's own wording for B049. The audit of what already existed found the flag fully plumbed and nothing reading it. Complete: `flags::REQUIRED` (bit 1) is parsed from `/Ff`; `Field::has(REQUIRED)` answers it; `form_fields` reports it as `required`; `form_set_props` sets it (and the bulk field editor has a Required row); and the canvas draws a required field's border in red (`crates/ui-egui/src/canvas.rs:2618`). Missing: anything that asks *which required fields are empty*. `af::validate` runs Acrobat's per-field AF rules on a value being written, which is a different question — it checks whether one value is acceptable, not whether the form is finished. So neither the app nor any headless caller could guide someone through a form or refuse to hand on an incomplete one, and the red border only said 'required', not 'still empty'. Decisions. (1) A read, not an edit: completeness is a question about the document, so it is a plain function (`completion`) reached by a `Session` method that never touches the undo stack — an edit would have made checking a form leave a step behind. (2) The order is the tab order the reader already computes, so the guide matches what Tab does; a field drawn on no page sorts last rather than pretending to be first. (3) A push button or signature carrying Required is left out rather than reported: it cannot be answered by filling, so listing it would make some forms permanently incomplete with no way to finish them. (4) Whitespace is not an answer, because a field holding only spaces looks filled and would defeat the check. (5) The answer carries `next` as well as the list, because the recommendation is about guiding a person one field at a time, not only about returning a verdict. (6) A form with no fields is complete: it asks for nothing. Not claimed: this does not write an incomplete form, block a save, or draw the guide in the interface — the app still shows only the red border, and the wiring of this check into a save prompt or a completion bar is interface work not done here. It also does not evaluate XFA validation rules, only the Acrobat Required flag.
+- Ci: pending
+- Notes: Closes REC-F01's required-field note headlessly: a form can now say exactly which required fields are still empty and in what order to fill them. The recommendation's three parts are now covered by B047 (appearances), B048 (push buttons) and this. What remains outside it is interface work: the app shows a red border for a required field but does not yet run this check in a save prompt or show a completion guide.
+- Local evidence: crates/forms/src/tests.rs::a_required_field_without_an_answer_is_reported_in_tab_order: a form with six required fields reports exactly the four that hold no answer, in tab order, leaves out the answered one, the optional empty one and the required push button, and counts 8 fields and 6 required.
+- Local evidence: crates/forms/src/tests.rs::the_guide_says_where_each_field_is: each entry carries its 1-based page, its tab position and the author's tooltip when there is one, and the topmost field sorts before the one below it.
+- Local evidence: crates/forms/src/tests.rs::a_filled_in_form_is_complete: setting every required field leaves an empty list, `is_complete()` true and no `first()`.
+- Local evidence: crates/forms/src/tests.rs::checking_a_form_changes_nothing and ::a_field_holding_only_spaces_is_not_answered and ::a_document_without_a_form_is_complete: the check writes identical bytes, spaces are not an answer, and a document with no form asks for nothing.
+- Local evidence: crates/engine/src/tests.rs::reading_form_completeness_tracks_unsaved_entries_and_changes_nothing: an unsaved entry counts at once; the check makes no undo step of its own (the last label is still Change field properties); page and tab are reported.
+- Local evidence: crates/automation/tests/form_completion.rs: an empty form reports complete false, remaining 2, required 3, fields 4 and the order [surname, agree] with steps, pages and the tooltip; filling them makes it complete with a null `next`; an unsaved entry counts; a document with no form is complete; the tool is read-only, non-destructive and tied to the form.fields command.
+- Local evidence: python3 docs/implementation/build_backlog.py --check (678 records), build_capabilities.py --check (130 automation tools), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).

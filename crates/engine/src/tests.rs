@@ -1252,6 +1252,36 @@ fn button_fixture() -> Vec<u8> {
     out
 }
 
+/// Completeness is read from the editor's live state, so an unsaved entry counts at once, and
+/// asking changes nothing: no undo step and no dirty flag.
+#[test]
+fn reading_form_completeness_tracks_unsaved_entries_and_changes_nothing() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("btn.pdf", None, Arc::new(button_fixture()), None).unwrap();
+    let c = s.form_completion(id).unwrap();
+    assert_eq!((c.fields, c.required, c.missing.len()), (2, 0, 0), "the fixture asks for nothing: {c:?}");
+    assert!(c.is_complete());
+
+    // Clear `name` (it starts with Ada), make it required, and ask: it is now missing.
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text(String::new()) }).unwrap();
+    let props = pdfcraft_forms::FieldProps { required: Some(true), ..Default::default() };
+    s.apply(id, Edit::SetFieldProps { name: "name".into(), props: Box::new(props) }).unwrap();
+    let c = s.form_completion(id).unwrap();
+    assert_eq!(c.missing.len(), 1, "{c:?}");
+    assert_eq!(c.first().map(|m| m.name.as_str()), Some("name"));
+    assert_eq!(c.first().and_then(|m| m.page), Some(1), "1-based page");
+    assert_eq!(c.first().and_then(|m| m.tab), Some(0), "the first widget in tab order");
+    assert_eq!((c.required, c.fields), (1, 2), "one of the two fields is required now");
+
+    // The check made no step: the last one is still the property change, not the read.
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Change field properties"));
+
+    // An unsaved entry counts straight away.
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("Ada".into()) }).unwrap();
+    let c = s.form_completion(id).unwrap();
+    assert!(c.is_complete(), "the unsaved entry counts: {c:?}");
+}
+
 /// Pressing a button runs its action in one undo step — but only when the action changes the
 /// document; a button that only asks the viewer for something makes no step at all.
 #[test]

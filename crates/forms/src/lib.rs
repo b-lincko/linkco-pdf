@@ -1368,6 +1368,83 @@ fn reset_names(all: &[Field], fields: &[String], exclude: bool) -> Vec<String> {
     }
 }
 
+/// One required field that is still empty, as a completion guide reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Missing {
+    /// The field's fully qualified name.
+    pub name: String,
+    /// 1-based page of its first widget on a page, or `None` when it is not drawn anywhere.
+    pub page: Option<usize>,
+    /// Where it sits in the tab order: 0-based, in the order the form is filled in. A field whose
+    /// widgets are all off-page sorts after every field that is on one.
+    pub tab: usize,
+    /// The tooltip (`/TU`) to show the person, when the form author gave one.
+    pub tooltip: Option<String>,
+}
+
+/// What a form still needs before it can be called filled in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Completion {
+    /// Every required field that is empty, in tab order — the order to work through them in.
+    pub missing: Vec<Missing>,
+    /// How many fields the form has in all.
+    pub fields: usize,
+    /// How many of them carry Acrobat's Required flag.
+    pub required: usize,
+}
+
+impl Completion {
+    /// Whether every required field holds a value.
+    pub fn is_complete(&self) -> bool {
+        self.missing.is_empty()
+    }
+
+    /// The first field still to fill in, for a guided prompt.
+    pub fn first(&self) -> Option<&Missing> {
+        self.missing.first()
+    }
+}
+
+/// Which required fields are still empty, in the order they should be filled in.
+///
+/// This is the check behind Acrobat's "you must fill in a required field" prompt, made runnable
+/// without a window so a caller can guide someone through a form — or refuse to hand on an
+/// incomplete one — and say exactly what is left. A field counts as answered when it holds any
+/// value at all: a text field with text, a check box that is on, a radio group with a state, a
+/// choice with a selection. A required *push button* or *signature* is not something a value can
+/// answer, so those are not reported as missing — they cannot be made complete by filling.
+///
+/// Nothing is changed: this only reads. A form with no fields is not an error — it is complete,
+/// because it asks for nothing.
+pub fn completion(doc: &Document) -> Completion {
+    let all = fields(doc);
+    let mut missing = Vec::new();
+    for f in all.iter().filter(|f| f.has(flags::REQUIRED) && !answers(f)) {
+        if matches!(f.kind, FieldKind::PushButton | FieldKind::Signature) {
+            continue;
+        }
+        // A field's place in the guide is its first widget's tab rank; a field drawn nowhere has
+        // no place to point at, so it sorts last rather than pretending to be first.
+        let tab = f.widgets.iter().map(|w| w.tab).min().unwrap_or(usize::MAX);
+        let page = f.widgets.iter().filter_map(|w| w.page).min();
+        missing.push(Missing { name: f.name.clone(), page, tab, tooltip: f.tooltip.clone() });
+    }
+    missing.sort_by(|a, b| a.tab.cmp(&b.tab).then_with(|| a.name.cmp(&b.name)));
+    let required = all.iter().filter(|f| f.has(flags::REQUIRED)).count();
+    Completion { missing, fields: all.len(), required }
+}
+
+/// Whether a field holds an answer. A check box or radio answers with a state other than off, and
+/// a choice with at least one selected export value; everything else with any value at all.
+fn answers(f: &Field) -> bool {
+    match f.kind {
+        // `/Off` never reaches `value` (it is filtered out when reading), so "on" is "non-empty".
+        FieldKind::CheckBox | FieldKind::Radio => !f.value.is_empty(),
+        FieldKind::PushButton | FieldKind::Signature => false,
+        _ => f.value.iter().any(|v| !v.trim().is_empty()),
+    }
+}
+
 /// Acrobat's Clear form: every field (or the named ones) back to their default value.
 pub fn reset(doc: &mut Document, names: Option<&[String]>) -> Result<usize, FormError> {
     let all = fields(doc);
