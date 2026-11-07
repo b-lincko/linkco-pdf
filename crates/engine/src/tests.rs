@@ -1270,7 +1270,7 @@ fn reading_form_completeness_tracks_unsaved_entries_and_changes_nothing() {
     assert_eq!(c.missing.len(), 1, "{c:?}");
     assert_eq!(c.first().map(|m| m.name.as_str()), Some("name"));
     assert_eq!(c.first().and_then(|m| m.page), Some(1), "1-based page");
-    assert_eq!(c.first().and_then(|m| m.tab), Some(0), "the first widget in tab order");
+    assert_eq!(c.first().map(|m| m.tab), Some(0), "the first widget in tab order");
     assert_eq!((c.required, c.fields), (1, 2), "one of the two fields is required now");
 
     // The check made no step: the last one is still the property change, not the read.
