@@ -1944,7 +1944,8 @@ fn partial_form() -> Document {
         "<< /FT /Btn /T (size) /Ff 32770 /V /Off /Kids [15 0 R] >>".into(),
         "<< /Type /Annot /Subtype /Widget /Parent 14 0 R /AS /Off /Rect [300 560 315 575] /P 3 0 R /AP << /N << /S 6 0 R /Off 7 0 R >> >> >>".into(),
         // 16: required combo with no selection.
-        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (country) /Ff 131074 /Opt [(ca) (Canada) (fr) (France)] /Rect [300 520 450 540] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (country) /Ff 131074 /Opt [(ca) (Canada) (fr) (France)] /Rect [300 520 450 540] /P 3 0 R >>"
+            .into(),
         // 17: required push button: nothing a value can answer.
         "<< /Type /Annot /Subtype /Widget /FT /Btn /T (send) /Ff 65538 /Rect [300 480 380 500] /P 3 0 R >>".into(),
     ];
