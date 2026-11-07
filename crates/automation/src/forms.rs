@@ -5,7 +5,7 @@ use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, Validate};
 use pdfcraft_engine::{Appearances, ButtonRun, DocId, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
 use serde_json::{Value, json};
 
-use crate::{Args, Automation, Result, ToolError, failed};
+use crate::{Args, Automation, Result, ToolError, failed, summary};
 
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
@@ -636,13 +636,13 @@ impl Automation {
 fn layer_changes(changes: &[(pdfcraft_engine::form_scripts::LayerOp, (u32, u16))]) -> Vec<Value> {
     changes
         .iter()
-        .map(|(op, (num, gen))| {
+        .map(|(op, (num, generation))| {
             let op = match op {
                 pdfcraft_engine::form_scripts::LayerOp::On => "on",
                 pdfcraft_engine::form_scripts::LayerOp::Off => "off",
                 pdfcraft_engine::form_scripts::LayerOp::Toggle => "toggle",
             };
-            json!({ "op": op, "layer": num, "generation": gen })
+            json!({ "op": op, "layer": num, "generation": generation })
         })
         .collect()
 }

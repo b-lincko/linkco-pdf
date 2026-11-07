@@ -40,10 +40,7 @@ fn seeded(dir: &std::path::Path, action: Option<FieldAction>) -> String {
             id,
             Edit::SetFieldProps {
                 name: "clear".into(),
-                props: Box::new(pdfcraft_engine::FieldProps {
-                    actions: Some(vec![(FieldTrigger::MouseUp, action)]),
-                    ..Default::default()
-                }),
+                props: Box::new(pdfcraft_engine::FieldProps { actions: Some(vec![(FieldTrigger::MouseUp, action)]), ..Default::default() }),
             },
         )
         .unwrap();
