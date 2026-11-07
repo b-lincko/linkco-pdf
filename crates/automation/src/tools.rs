@@ -438,7 +438,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "redact_mark",
             "Mark for redaction",
-            "Mark content for redaction (nothing is removed until redact_apply). One of: rect [x0, y0, x1, y1] (points from the top-left of the displayed page) with page; find (text, every match); words (a list of words or phrases, every match of each; the result's matched_words says how many marks each made); pattern (phone, email, credit-card, ssn, date: every match, Acrobat's Search & Redact patterns); whole_pages: true. find, words, pattern and whole_pages work on pages (default all). overlay: text shown on the box once applied, or code_set (foia: U.S. FOIA (b)(1)(A)…(b)(9); privacy-act: U.S. Privacy Act (d)(5), (j)(1)…(k)(7)) with codes, shown as \"(b)(6), (b)(7)(C)\"; fill: box colour (default black). Undoable.",
+            "Mark content for redaction (nothing is removed until redact_apply). One of: rect [x0, y0, x1, y1] (points from the top-left of the displayed page) with page; find (text, every match); words (a list of words or phrases, every match of each; the result's matched_words says how many marks each made); pattern (phone, email, credit-card, ssn, date: every match, Acrobat's Search & Redact patterns); whole_pages: true. find, words, pattern and whole_pages work on pages (default all). overlay: text shown on the box once applied, or code_set (foia: U.S. FOIA (b)(1)(A)…(b)(9); privacy-act: U.S. Privacy Act (d)(5), (j)(1)…(k)(7)) with codes, shown as \"(b)(6), (b)(7)(C)\"; fill: box colour (default black) or none for no box at all, so the content simply disappears. The overlay text's look, as in Redaction Tool Properties: overlay_font (helvetica, times, courier), overlay_size (points; 0 = auto-size to fit the area), overlay_color (#RRGGBB or a colour name), overlay_align (left, center, right) and overlay_repeat (repeat the text to fill the area). redact_list reports what a mark will look like. Undoable.",
         )
         .with(schema(
             json!({
@@ -453,11 +453,24 @@ pub fn tools() -> Vec<ToolDef> {
                 "overlay": { "type": "string" },
                 "code_set": { "type": "string", "enum": ["foia", "privacy-act"] },
                 "codes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Redaction codes from code_set, e.g. [\"(b)(6)\"]." },
-                "fill": { "type": "string", "description": "#RRGGBB or a colour name." },
+                "fill": { "type": "string", "description": "#RRGGBB, a colour name, or none for no box." },
+                "overlay_font": { "type": "string", "enum": ["helvetica", "times", "courier"] },
+                "overlay_size": { "type": "number", "minimum": 0, "maximum": 400, "description": "Points; 0 = auto-size to fit the area." },
+                "overlay_color": { "type": "string", "description": "#RRGGBB or a colour name." },
+                "overlay_align": { "type": "string", "enum": ["left", "center", "right"] },
+                "overlay_repeat": { "type": "boolean" },
                 "author": { "type": "string" },
             }),
             &["doc"],
         )),
+        t(
+            "redact_list",
+            "List redaction marks",
+            "Every redaction mark waiting to be applied, with its page (1-based), where it sits in the page's annotations, and how it will look once applied: its box colour (`fill`, null when there is no box and the content simply disappears), its overlay text, and that text's font, size (0 = auto-size), colour, alignment and repetition. Read-only: it reports what `redact_mark` set, which is what `redact_apply` would draw.",
+        )
+        .ro()
+        .cmd("redact.properties")
+        .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1, "description": "Only this page." } }), &["doc"])),
         t(
             "redact_apply",
             "Apply redactions",

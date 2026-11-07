@@ -41,7 +41,10 @@ MANIFEST = "docs/capabilities.toml"
 
 MANIFEST_VERSION = 1
 
-_TOOL = re.compile(r'^        t\("([a-z0-9_]+)"', re.M)
+# A tool entry is `t("name"` on one line, or `t(` with the name on the next line when the
+# description is long enough that the call is wrapped. Matching only the first form silently
+# dropped every wrapped tool from the published count.
+_TOOL = re.compile(r'^        t\(\s*(?:\n\s*)?"([a-z0-9_]+)"', re.M)
 _SCHEMA_VERSION = re.compile(r'pub const TOOL_SCHEMA_VERSION: &str = "([^"]+)"')
 _TOOLS_FN = "pub fn tools() -> Vec<ToolDef>"
 
