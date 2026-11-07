@@ -189,6 +189,8 @@ impl Automation {
                 let look = c.redaction.clone().unwrap_or_default();
                 // `hex` speaks in f32 for the rest of the tool table; a mark's colours are f64.
                 let f = |c: [f64; 3]| hex([c[0] as f32, c[1] as f32, c[2] as f32]);
+                // `json!` takes literals and paths, not an indexed expression, so name the word.
+                let align = ["left", "center", "right"][look.look.align.min(2) as usize];
                 json!({
                     "id": c.name,
                     "page": c.page + 1,
@@ -198,7 +200,7 @@ impl Automation {
                     "font": look.look.font.resource(),
                     "size": look.look.size,
                     "color": f(look.look.color),
-                    "align": ["left", "center", "right"][look.look.align.min(2) as usize],
+                    "align": align,
                     "repeat": look.look.repeat,
                 })
             })
