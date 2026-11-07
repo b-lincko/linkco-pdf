@@ -2,13 +2,48 @@
 //! (removing what they cover for good) or clear them.
 
 use pdfcraft_engine::{
-    Edit, Hidden, NewAnnotation, REDACT_MAX_WORDS, REDACTION_CODE_SETS, RedactPattern, RedactionCodeSet, Shape, Style, find_pattern, rect_quad,
-    redact_word_list,
+    Edit, Hidden, NewAnnotation, OverlayFont, OverlayLook, REDACT_MAX_WORDS, REDACTION_CODE_SETS, RedactPattern, RedactionCodeSet, Shape, Style,
+    find_pattern, rect_quad, redact_word_list,
 };
 use serde_json::{Value, json};
 
-use crate::comments::{DEFAULT_AUTHOR, parse_color};
+use crate::comments::{DEFAULT_AUTHOR, hex, parse_color};
 use crate::{Args, Automation, Result, ToolError, failed};
+
+/// The overlay look a caller asked for, defaulting as Acrobat does (Helvetica, auto-sized, red,
+/// centred, not repeated). `size: 0` means auto-size to fit the area.
+fn overlay_look(a: &Args) -> Result<OverlayLook> {
+    let mut look = OverlayLook::default();
+    if let Some(f) = a.opt_str("overlay_font")? {
+        look.font = match f.to_ascii_lowercase().as_str() {
+            "helvetica" => OverlayFont::Helvetica,
+            "times" | "times-roman" => OverlayFont::Times,
+            "courier" => OverlayFont::Courier,
+            other => return Err(ToolError::InvalidArgs(format!("unknown overlay_font {other:?}; allowed: helvetica, times, courier"))),
+        };
+    }
+    if let Some(size) = a.opt_num("overlay_size")? {
+        if !(0.0..=400.0).contains(&size) {
+            return Err(ToolError::InvalidArgs("overlay_size must be between 0 (auto) and 400".into()));
+        }
+        look.size = size;
+    }
+    if let Some(c) = a.opt_str("overlay_color")? {
+        look.color = parse_color(c)?;
+    }
+    if let Some(q) = a.opt_str("overlay_align")? {
+        look.align = match q.to_ascii_lowercase().as_str() {
+            "left" => 0,
+            "center" | "centre" => 1,
+            "right" => 2,
+            other => return Err(ToolError::InvalidArgs(format!("unknown overlay_align {other:?}; allowed: left, center, right"))),
+        };
+    }
+    if let Some(r) = a.opt_bool("overlay_repeat")? {
+        look.repeat = r;
+    }
+    Ok(look)
+}
 
 impl Automation {
     pub(crate) fn redact_mark(&mut self, a: &Args) -> Result<Value> {
@@ -38,10 +73,16 @@ impl Automation {
             (None, None) => String::new(),
         };
         let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
-        let mut style = Style::default_for(&Shape::Redact { quads: Vec::new(), overlay: String::new(), look: Default::default() });
-        if let Some(c) = a.opt_str("fill")? {
-            style.fill = Some(parse_color(c)?);
-        }
+        // How the box and its overlay text look: the same properties the app's Redaction Tool
+        // Properties dialog sets, so a headless caller can reproduce a mark it was shown.
+        let look = overlay_look(a)?;
+        let mut style = Style::default_for(&Shape::Redact { quads: Vec::new(), overlay: String::new(), look });
+        style.fill = match a.opt_str("fill")? {
+            // "none" is Acrobat's "no colour": the content disappears and no box is drawn.
+            Some("none") => None,
+            Some(c) => Some(parse_color(c)?),
+            None => Some([0.0, 0.0, 0.0]),
+        };
         // (page, quads) per mark.
         let mut marks: Vec<(usize, Vec<[f64; 8]>)> = Vec::new();
         let chosen = [
@@ -115,7 +156,7 @@ impl Automation {
         let edits: Vec<Edit> = marks
             .iter()
             .map(|(page, quads)| {
-                let shape = Shape::Redact { quads: quads.clone(), overlay: overlay.clone(), look: Default::default() };
+                let shape = Shape::Redact { quads: quads.clone(), overlay: overlay.clone(), look };
                 Edit::AddAnnotation(NewAnnotation { page: *page, shape, style: style.clone(), contents: String::new(), author: author.clone() })
             })
             .collect();
@@ -131,6 +172,40 @@ impl Automation {
             out["matched_words"] = json!(matched_words.iter().map(|(w, n)| json!({ "word": w, "marked": n })).collect::<Vec<_>>());
         }
         Ok(out)
+    }
+
+    /// Every redaction mark waiting to be applied, with the appearance it will have. Reads the
+    /// marks the document holds (`Summary::redaction`), so it reports exactly what `redact_mark`
+    /// wrote, not the defaults it might have used.
+    pub(crate) fn redact_list(&self, a: &Args) -> Result<Value> {
+        let doc = self.doc(a)?;
+        let only = a.opt_int("page")?.map(|p| (p.max(1) - 1) as usize);
+        let marks: Vec<Value> = doc
+            .info
+            .annotations
+            .iter()
+            .filter(|c| c.subtype == "Redact" && only.is_none_or(|p| c.page == p))
+            .map(|c| {
+                let look = c.redaction.clone().unwrap_or_default();
+                // `hex` speaks in f32 for the rest of the tool table; a mark's colours are f64.
+                let f = |c: [f64; 3]| hex([c[0] as f32, c[1] as f32, c[2] as f32]);
+                // `json!` takes literals and paths, not an indexed expression, so name the word.
+                let align = ["left", "center", "right"][look.align.min(2) as usize];
+                json!({
+                    "id": c.name,
+                    "page": c.page + 1,
+                    "index": c.index + 1,
+                    "fill": look.fill.map(f),
+                    "overlay": look.overlay,
+                    "font": look.font,
+                    "size": look.size,
+                    "color": f(look.color),
+                    "align": align,
+                    "repeat": look.repeat,
+                })
+            })
+            .collect();
+        Ok(json!({ "count": marks.len(), "marks": marks, "marks_pending": doc.redaction_marks() }))
     }
 
     pub(crate) fn redact_apply(&mut self, a: &Args) -> Result<Value> {

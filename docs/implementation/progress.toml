@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B049"
+active_component = "B050"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -1159,3 +1159,37 @@ local_evidence = [
 ci = "passed"
 ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/42357543005"]
 ci_notes = "Five rounds. ce4152f: lint and wasm32 green, both test jobs failed on Format — the ubuntu test job publishes rustfmt diffs as annotations, so the exact hunk was applied. 5e759f3: one compile error, `Missing::tab` is a plain usize so `and_then` did not typecheck. b5617cd: compiled, then three assertion failures — my fixture had the radio group without REQUIRED and the check box outside the top-to-bottom order, and `page` is 0-based inside the crate where the test and the doc comment both said 1-based. 3890557: windows green, ubuntu Format again on a literal the fixture rewrite had brought back. 4a9013b: all six green."
+
+[components.B050]
+title = "Redaction fill colour and overlay text: a mark keeps and reports its appearance (GAP-protect.redaction-properties)"
+stage = "basic"
+parent_tasks = ["GAP-protect.redaction-properties"]
+status = "complete"
+code = [
+    "crates/annot/src/lib.rs",
+    "crates/annot/src/tests.rs",
+    "crates/render/src/inspect.rs",
+    "crates/render/src/lib.rs",
+    "crates/engine/src/lib.rs",
+    "crates/automation/src/redact.rs",
+    "crates/automation/src/comments.rs",
+    "crates/automation/src/tools.rs",
+    "crates/automation/src/lib.rs",
+    "crates/automation/tests/automation.rs",
+    "docs/implementation/build_capabilities.py",
+]
+acceptance = "A redaction mark's appearance can be set headlessly and read back. `redact_mark` takes the box colour (`fill`, including `none` for no box at all, where the content disappears and nothing is drawn over it) and the overlay text's look exactly as Redaction Tool Properties sets it: `overlay_font` (helvetica, times, courier), `overlay_size` (points, 0 = auto-size, capped at 400), `overlay_color`, `overlay_align` (left, center, right) and `overlay_repeat`. Values outside those sets are refused, not guessed. `redact_list` reports every mark waiting to be applied with its 1-based page, its position in the page's annotations, its box colour (null for no box), its overlay text and that text's font, size (0 = auto-size), colour, alignment and repetition — read from the mark's own `/IC`, `/OverlayText`, `/DA`, `/Q` and `/Repeat`, so it says what was written and what `redact_apply` would draw. A mark carrying no `/IC` reports no fill and is drawn with no box. Both tools are in the catalogue with schemas; `redact_list` is read-only."
+audit = "GAP-protect.redaction-properties, and the backlog's own wording for it: fill colour or none, overlay text with font, size or auto-size, colour, alignment and repeat, or redaction codes. The audit found the document format half complete, the reading half absent and the tool half mostly closed. Complete: `Shape::Redact` wrote `/IC`, `/OverlayText`, `/DA` (colour, font resource and size), `/Q` and `/Repeat`; `redact_mark` took `fill` and `overlay`, and took `code_set` + `codes` for Acrobat's FOIA and Privacy Act code sets; the app's Redaction Tool Properties dialog (`crates/ui-egui/src/redact_ui.rs::RedactPrefs`) set every one of these properties through `OverlayLook`. Missing: (a) nothing read the appearance back — `annot::summarise` had a case for every shape except `Redact`, so `/IC`, `/OverlayText`, `/DA`, `/Q` and `/Repeat` were write-only, and no caller could ask what a mark would look like; (b) `redact_mark` exposed only `fill` and `overlay`, so the font, size, colour, alignment and repeat the app could set were unreachable from the CLI, MCP or an agent; (c) `fill` could not express Acrobat's no-colour mark, where the content disappears and no box is drawn. Decisions. (1) The appearance is read from the mark itself rather than defaulted, so `redact_list` reports what was written — including a mark made by another program — instead of what this build would have written. (2) `redact_list` is a new read tool rather than an argument on an existing one: it answers a different question from `redact_mark` and must be readable without making a mark. (3) `fill: \"none\"` is spelled as a sentinel string rather than a separate flag, so one argument covers both cases and the schema stays a plain string, which is how the agent-facing tools already describe colours. (4) No box now writes no `/IC` at all: writing black as a fallback would have drawn the box the caller asked not to be drawn, which is why that fallback was removed from the writer rather than papered over at the tool. (5) The look is parsed in one place — `overlay_look` in the tool layer reads the arguments, and the document layer reads the mark — rather than being re-derived in each. Not claimed: the app's Redaction Tool Properties dialog already had these properties and is unchanged, so this closes the headless half; style, opacity and border width for the mark itself are still the `Style::default_for` values; there is no test that reads a mark back after a save and reopen — the annot tests build the mark in the document directly, which is the same `/IC`/`/DA`/`/Q`/`/Repeat` round trip; and redaction codes were already covered and are unchanged."
+notes = "Closes GAP-protect.redaction-properties' headless half: a redaction mark's fill colour and overlay text can be set with the full Acrobat property set and read back before it is applied. One pre-existing defect was found and fixed on the way: build_capabilities.py matched only single-line tool entries, so 22 wrapped tools (redact_mark and redact_apply among them) were missing from the published manifest, and the count it reported — 130 — was short; it is 152 now."
+local_evidence = [
+    "crates/annot/src/tests.rs::a_redaction_mark_reports_its_box_and_overlay: a mark carrying /IC [0.2 0.4 0.6], /OverlayText (SEALED), /DA (0.9 0.1 0.1 rg /TiRo 9 Tf), /Q 2 and /Repeat true reads back with exactly that box colour, text, Times font, 9 pt size, red colour, right alignment and repeat",
+    "crates/annot/src/tests.rs::a_redaction_mark_without_a_box_or_overlay_reports_that and ::another_annotation_has_no_redaction_look: a bare mark reports no fill and Acrobat's defaults, and a Square holding its own /IC reports no redaction look",
+    "crates/automation/tests/automation.rs::a_redaction_mark_says_how_it_will_look: every property set through redact_mark is read back through redact_list — fill null for no box, overlay SEALED, font TiRo, size 9, colour #102030, align right, repeat true, page 1-based",
+    "crates/automation/tests/automation.rs::a_redaction_mark_defaults_as_acrobat_does: with nothing asked for, a mark reports a #000000 box, no overlay text, Helv, size 0 (auto), #FF0000, centre, no repeat",
+    "crates/automation/tests/automation.rs::the_redaction_appearance_is_refused_rather_than_guessed: an unknown font, an unknown alignment, a negative size, a size past 400 and an unparseable colour are each refused with InvalidArgs",
+    "crates/automation/tests/automation.rs::the_mark_list_is_read_only_and_says_what_it_is_for: redact_list is in the catalogue, read-only, not destructive, tied to redact.properties and says it is read-only",
+    "python3 docs/implementation/build_capabilities.py --check (152 automation tools), build_backlog.py --check (679 records), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests)",
+]
+ci = "passed"
+ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/42382606257"]
+ci_notes = "Eight rounds, each red on its own thing. 012360c: `json!` cannot take an indexed expression, so the alignment lookup inside the macro did not parse — and because that file is in automation's lib, the one error failed Clippy, both test jobs and wasm32 together; the dispatch arm was also indented a level too deep. 1d29b55 fixed both, then exposed a design mistake: `doc.info.annotations` holds `pdfcraft_render::Annotation` and `render` does not depend on `annot` (they are siblings), so the field could not hold `RedactionLook` — `render` got its own dependency-free `RedactionAppearance` and the engine maps one onto the other where the two meet. 98749e1 defaulted the field in render's own reader; 28955de exported the type from the crate root. c441aa0 compiled everywhere and then two tests failed on values, which is what they are for: `/DA` is `<font> <size> Tf` and I had read the size and font from each other's position, and the writer set `/IC` to black whenever the style had no fill, so `fill: \"none\"` drew the box it was meant to omit. 1b66dda fixed both; all six checks green."

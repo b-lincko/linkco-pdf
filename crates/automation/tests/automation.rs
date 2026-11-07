@@ -4485,3 +4485,90 @@ fn batch_plan_takes_malformed_arguments_without_panicking() {
     let _ = a.call("batch_plan", &json!({}));
     assert!(!dir.join("out").exists(), "a malformed plan created the folder it named");
 }
+
+#[test]
+fn a_redaction_mark_says_how_it_will_look() {
+    // Redaction Tool Properties sets the box and the overlay text's look; a headless caller has to
+    // be able to set the same things and then see what it set.
+    let dir = workdir("redact-look");
+    std::fs::write(dir.join("memo.txt"), "Informant Jane Roe met the agent\nPublic line\n").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "memo.txt" }))["doc"].as_u64().unwrap();
+
+    // Nothing marked yet: an empty list, not an error.
+    let empty = ok(&mut a, "redact_list", json!({ "doc": doc }));
+    assert_eq!((empty["count"].as_u64(), empty["marks_pending"].as_u64()), (Some(0), Some(0)), "{empty}");
+
+    ok(
+        &mut a,
+        "redact_mark",
+        json!({
+            "doc": doc,
+            "find": "Jane Roe",
+            "overlay": "SEALED",
+            "fill": "none",
+            "overlay_font": "times",
+            "overlay_size": 9,
+            "overlay_color": "#102030",
+            "overlay_align": "right",
+            "overlay_repeat": true,
+        }),
+    );
+    let out = ok(&mut a, "redact_list", json!({ "doc": doc }));
+    assert_eq!((out["count"].as_u64(), out["marks_pending"].as_u64()), (Some(1), Some(1)), "{out}");
+    let m = &out["marks"][0];
+    assert_eq!(m["fill"], Value::Null, "no box: the content simply disappears: {out}");
+    assert_eq!(m["overlay"], "SEALED", "{out}");
+    assert_eq!(m["font"], "TiRo", "Times, as /DA names it: {out}");
+    assert_eq!(m["size"], json!(9.0), "{out}");
+    assert_eq!(m["color"], "#102030", "{out}");
+    assert_eq!(m["align"], "right", "{out}");
+    assert_eq!(m["repeat"], json!(true), "{out}");
+    assert_eq!(m["page"], json!(1), "1-based: {out}");
+}
+
+#[test]
+fn a_redaction_mark_defaults_as_acrobat_does() {
+    let dir = workdir("redact-defaults");
+    std::fs::write(dir.join("memo.txt"), "Informant Jane Roe met the agent\n").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "memo.txt" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "redact_mark", json!({ "doc": doc, "find": "Jane Roe" }));
+    let m = ok(&mut a, "redact_list", json!({ "doc": doc }))["marks"][0].clone();
+    assert_eq!(m["fill"], "#000000", "a black box unless told otherwise: {m}");
+    assert_eq!(m["overlay"], "", "no overlay text: {m}");
+    assert_eq!(m["font"], "Helv", "{m}");
+    assert_eq!(m["size"], json!(0.0), "0 means auto-size: {m}");
+    assert_eq!(m["color"], "#FF0000", "Acrobat's red: {m}");
+    assert_eq!(m["align"], "center", "{m}");
+    assert_eq!(m["repeat"], json!(false), "{m}");
+}
+
+#[test]
+fn the_redaction_appearance_is_refused_rather_than_guessed() {
+    let dir = workdir("redact-appearance-bad");
+    std::fs::write(dir.join("memo.txt"), "Informant Jane Roe\n").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "memo.txt" }))["doc"].as_u64().unwrap();
+    let bad = |a: &mut Automation, extra: Value| {
+        let mut args = json!({ "doc": doc, "find": "Jane Roe" });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        matches!(a.call("redact_mark", &args), Err(ToolError::InvalidArgs(_)))
+    };
+    assert!(bad(&mut a, json!({ "overlay_font": "comic-sans" })), "an unknown font");
+    assert!(bad(&mut a, json!({ "overlay_align": "justify" })), "an unknown alignment");
+    assert!(bad(&mut a, json!({ "overlay_size": -1 })), "a negative size");
+    assert!(bad(&mut a, json!({ "overlay_size": 401 })), "a size past what /DA carries");
+    assert!(bad(&mut a, json!({ "fill": "not-a-colour" })), "an unknown colour");
+}
+
+#[test]
+fn the_mark_list_is_read_only_and_says_what_it_is_for() {
+    let def = pdfcraft_automation::tools().into_iter().find(|t| t.name == "redact_list").expect("in the catalogue");
+    assert!(def.read_only, "listing marks changes nothing");
+    assert!(!def.destructive, "and destroys nothing");
+    assert_eq!(def.command, Some("redact.properties"), "it reports the appearance Redaction Tool Properties sets");
+    assert!(def.description.contains("Read-only"), "{}", def.description);
+}

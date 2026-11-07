@@ -279,6 +279,30 @@ pub struct Annotation {
     /// A Fill & Sign mark: typed text, a check, cross, dot or line, or a typed, drawn or picture
     /// signature or initials (the rules of `pdfcraft_annot::is_fill_sign`).
     pub fill_sign: bool,
+    /// A redaction mark's appearance, on a mark that has one. A plain copy rather than
+    /// `pdfcraft_annot::RedactionLook`: `render` and `annot` are siblings, so the type cannot be
+    /// shared with it, but the facts `/IC`, `/OverlayText`, `/DA`, `/Q` and `/Repeat` hold can.
+    pub redaction: Option<RedactionAppearance>,
+}
+
+/// What a redaction mark will look like once applied (`/IC`, `/OverlayText`, `/DA`, `/Q`,
+/// `/Repeat`), as `render` reads it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RedactionAppearance {
+    /// The box colour, or `None` for no box: the content disappears and nothing is drawn.
+    pub fill: Option<[f64; 3]>,
+    /// The text shown on the box.
+    pub overlay: String,
+    /// The `/DA` font resource name (`Helv`, `TiRo`, `Cour`).
+    pub font: String,
+    /// Points; 0 = auto-size to fit the area.
+    pub size: f64,
+    /// The overlay text's colour.
+    pub color: [f64; 3],
+    /// 0 left, 1 centre, 2 right.
+    pub align: u8,
+    /// Repeat the text to fill the area.
+    pub repeat: bool,
 }
 
 impl Annotation {
@@ -955,6 +979,9 @@ impl<'a> Inspector<'a> {
                     locked: d.get(b"F").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 128 != 0,
                     intent: self.name(d, b"IT"),
                     fill_sign,
+                    // Filled in from `pdfcraft_annot` where the two meet (the engine), which is
+                    // the one place that can see both. `render` has no `annot` dependency.
+                    redaction: None,
                 });
             }
         }
