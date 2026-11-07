@@ -979,6 +979,9 @@ impl<'a> Inspector<'a> {
                     locked: d.get(b"F").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 128 != 0,
                     intent: self.name(d, b"IT"),
                     fill_sign,
+                    // Filled in from `pdfcraft_annot` where the two meet (the engine), which is
+                    // the one place that can see both. `render` has no `annot` dependency.
+                    redaction: None,
                 });
             }
         }
