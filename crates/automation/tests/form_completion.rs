@@ -35,11 +35,7 @@ fn seeded(dir: &std::path::Path) -> String {
         let rect = [30.0, 320.0 - 30.0 * i as f64, 210.0, 344.0 - 30.0 * i as f64];
         s.apply(id, Edit::AddField { page: 0, rect, kind: text.clone(), name: Some((*name).into()) }).unwrap();
     }
-    s.apply(
-        id,
-        Edit::AddField { page: 0, rect: [30.0, 230.0, 44.0, 244.0], kind: NewField::CheckBox, name: Some("agree".into()) },
-    )
-    .unwrap();
+    s.apply(id, Edit::AddField { page: 0, rect: [30.0, 230.0, 44.0, 244.0], kind: NewField::CheckBox, name: Some("agree".into()) }).unwrap();
     // Required: two text fields and the check box; `notes` stays optional.
     s.apply(
         id,

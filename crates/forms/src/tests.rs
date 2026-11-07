@@ -1924,11 +1924,11 @@ fn a_hide_action_reports_only_the_fields_it_finds() {
 /// required push button (which no value can answer).
 fn partial_form() -> Document {
     let objs: Vec<String> = vec![
-        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                                          // 1
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),                           // 2
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                 // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(), // 2
         "<< /Type /Page /Parent 2 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R] >>".into(), // 3
         "<< /Fields [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(), // 4
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),                                      // 5
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),            // 5
         "null".into(),
         "null".into(),
         "null".into(),
@@ -1943,7 +1943,8 @@ fn partial_form() -> Document {
         "<< /FT /Btn /T (size) /Ff 32768 /V /Off /Kids [15 0 R] >>".into(),
         "<< /Type /Annot /Subtype /Widget /Parent 14 0 R /AS /Off /Rect [300 660 315 675] /P 3 0 R >>".into(),
         // 16: required combo with no selection.
-        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (country) /Ff 131074 /Opt [(ca) (Canada) (fr) (France)] /Rect [300 620 450 640] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (country) /Ff 131074 /Opt [(ca) (Canada) (fr) (France)] /Rect [300 620 450 640] /P 3 0 R >>"
+            .into(),
         // 17: required push button: nothing a value can answer.
         "<< /Type /Annot /Subtype /Widget /FT /Btn /T (send) /Ff 65538 /Rect [300 580 380 600] /P 3 0 R >>".into(),
     ];
