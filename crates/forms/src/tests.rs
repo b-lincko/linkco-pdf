@@ -1921,32 +1921,32 @@ fn a_hide_action_reports_only_the_fields_it_finds() {
 /// One page with required and optional fields of every kind a completion check has to tell apart:
 /// a required text field filled in, one left empty, a required check box that is off, a required
 /// radio group with no state, a required choice with no selection, an optional empty field, and a
-/// required push button (which no value can answer).
+/// required push button (which no value can answer). The fields are laid out top to bottom in the
+/// order named, so the tab order is the order of this list.
 fn partial_form() -> Document {
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                 // 1
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(), // 2
         "<< /Type /Page /Parent 2 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R] >>".into(), // 3
-        "<< /Fields [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(), // 4
+        "<< /Fields [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 16 0 R 17 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(), // 4
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),            // 5
-        "null".into(),
-        "null".into(),
+        "<< /Length 0 >>\nstream\n\nendstream".into(),                              // 6 radio on-state
+        "<< /Length 0 >>\nstream\n\nendstream".into(),                              // 7 radio off-state
         "null".into(),
         "null".into(),
         // 10: required, filled in. 11: required, empty (with a tooltip).
         "<< /Type /Annot /Subtype /Widget /FT /Tx /T (given) /Ff 2 /V (Ada) /Rect [50 700 250 720] /P 3 0 R >>".into(),
         "<< /Type /Annot /Subtype /Widget /FT /Tx /T (surname) /Ff 2 /TU (Your family name) /Rect [50 660 250 680] /P 3 0 R >>".into(),
         // 12: required check box, off. 13: optional, empty.
-        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /Ff 2 /V /Off /AS /Off /Rect [300 700 315 715] /P 3 0 R >>".into(),
-        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (notes) /Rect [50 620 250 640] /P 3 0 R >>".into(),
-        // 14: required radio group, no state.
-        "<< /FT /Btn /T (size) /Ff 32768 /V /Off /Kids [15 0 R] >>".into(),
-        "<< /Type /Annot /Subtype /Widget /Parent 14 0 R /AS /Off /Rect [300 660 315 675] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /Ff 2 /V /Off /AS /Off /Rect [300 620 315 635] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (notes) /Rect [50 580 250 600] /P 3 0 R >>".into(),
+        // 14: required radio group with one button, its on-state named S.
+        "<< /FT /Btn /T (size) /Ff 32770 /V /Off /Kids [15 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 14 0 R /AS /Off /Rect [300 560 315 575] /P 3 0 R /AP << /N << /S 6 0 R /Off 7 0 R >> >> >>".into(),
         // 16: required combo with no selection.
-        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (country) /Ff 131074 /Opt [(ca) (Canada) (fr) (France)] /Rect [300 620 450 640] /P 3 0 R >>"
-            .into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (country) /Ff 131074 /Opt [(ca) (Canada) (fr) (France)] /Rect [300 520 450 540] /P 3 0 R >>".into(),
         // 17: required push button: nothing a value can answer.
-        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (send) /Ff 65538 /Rect [300 580 380 600] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (send) /Ff 65538 /Rect [300 480 380 500] /P 3 0 R >>".into(),
     ];
     document(&objs)
 }
@@ -1958,8 +1958,8 @@ fn a_required_field_without_an_answer_is_reported_in_tab_order() {
     let doc = partial_form();
     let c = completion(&doc);
     assert!(!c.is_complete());
-    assert_eq!(c.fields, 8, "every field counts");
-    assert_eq!(c.required, 6, "six carry the Required flag");
+    assert_eq!(c.fields, 7, "every field counts, the radio group once");
+    assert_eq!(c.required, 6, "all but `notes` carry the flag, `send` included");
     let names: Vec<&str> = c.missing.iter().map(|m| m.name.as_str()).collect();
     // `given` is answered; `notes` is empty but not required; `send` is a button.
     assert_eq!(names, ["surname", "agree", "size", "country"], "{:?}", c.missing);
@@ -1973,7 +1973,7 @@ fn the_guide_says_where_each_field_is() {
     let doc = partial_form();
     let c = completion(&doc);
     let by = |n: &str| c.missing.iter().find(|m| m.name == n).unwrap();
-    assert_eq!(by("surname").page, Some(1));
+    assert_eq!(by("surname").page, Some(0), "0-based here; the tool reports it 1-based");
     assert_eq!(by("surname").tooltip.as_deref(), Some("Your family name"));
     assert_eq!(by("agree").tooltip, None);
     // Tab order follows the widgets down the page, so `surname` (top) comes before `agree`.

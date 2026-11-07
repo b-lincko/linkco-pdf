@@ -1373,7 +1373,8 @@ fn reset_names(all: &[Field], fields: &[String], exclude: bool) -> Vec<String> {
 pub struct Missing {
     /// The field's fully qualified name.
     pub name: String,
-    /// 1-based page of its first widget on a page, or `None` when it is not drawn anywhere.
+    /// 0-based page of its first widget on a page, or `None` when it is not drawn anywhere. The
+    /// tools add one, as they do for every page they report.
     pub page: Option<usize>,
     /// Where it sits in the tab order: 0-based, in the order the form is filled in. A field whose
     /// widgets are all off-page sorts after every field that is on one.
