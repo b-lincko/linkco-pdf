@@ -1096,3 +1096,54 @@ fn drawings_resize_by_scaling_their_strokes() {
     // Too small to hold the stroke margin.
     assert!(matches!(set_rect(&mut doc, 0, i, [100.0, 400.0, 101.0, 401.0], &meta("")), Err(AnnotError::Invalid(_))));
 }
+
+/// A redaction mark's box colour, overlay text and overlay look are read back from the mark
+/// itself, so a caller can report what a mark will look like rather than guessing it.
+#[test]
+fn a_redaction_mark_reports_its_box_and_overlay() {
+    let objs: Vec<&[u8]> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        b"<< /Type /Annot /Subtype /Redact /Rect [10 10 60 30] /QuadPoints [10 30 60 30 10 10 60 10] /IC [0.2 0.4 0.6] /OverlayText (SEALED) /DA (0.9 0.1 0.1 rg /TiRo 9 Tf) /Q 2 /Repeat true >>",
+    ];
+    let doc = document_of(&objs);
+    let r = summaries(&doc)[0].redaction.clone().expect("a redaction mark carries its look");
+    assert_eq!(r.overlay, "SEALED");
+    let fill = r.fill.expect("a box colour");
+    assert!((fill[0] - 0.2).abs() < 1e-6 && (fill[1] - 0.4).abs() < 1e-6 && (fill[2] - 0.6).abs() < 1e-6, "{fill:?}");
+    assert_eq!(r.look.font, OverlayFont::Times);
+    assert!((r.look.size - 9.0).abs() < 1e-6, "{:?}", r.look);
+    assert!((r.look.color[0] - 0.9).abs() < 1e-6, "{:?}", r.look);
+    assert_eq!(r.look.align, 2, "right");
+    assert!(r.look.repeat);
+}
+
+/// A mark with no box and no overlay text still reports what it is: no fill, nothing drawn.
+#[test]
+fn a_redaction_mark_without_a_box_or_overlay_reports_that() {
+    let objs: Vec<&[u8]> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        b"<< /Type /Annot /Subtype /Redact /Rect [10 10 60 30] >>",
+    ];
+    let doc = document_of(&objs);
+    let r = summaries(&doc)[0].redaction.clone().expect("still a redaction mark");
+    assert_eq!(r.fill, None, "no /IC means no box");
+    assert_eq!(r.overlay, "");
+    assert_eq!(r.look, OverlayLook::default(), "nothing set means Acrobat's defaults");
+}
+
+/// Only a redaction mark carries a redaction look; another annotation does not.
+#[test]
+fn another_annotation_has_no_redaction_look() {
+    let objs: Vec<&[u8]> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        b"<< /Type /Annot /Subtype /Square /Rect [10 10 60 30] /IC [0.2 0.4 0.6] >>",
+    ];
+    let doc = document_of(&objs);
+    assert!(summaries(&doc)[0].redaction.is_none());
+}
