@@ -30,16 +30,10 @@ fn seeded(dir: &std::path::Path, action: Option<FieldAction>) -> String {
     let mut s = Session::new();
     let bytes = s.create_blank(300.0, 400.0, 1).unwrap();
     let id = s.open("form.pdf", None, bytes, None).unwrap();
-    s.apply(
-        id,
-        Edit::AddField { page: 0, rect: [30.0, 300.0, 210.0, 324.0], kind: NewField::Text { multiline: false }, name: Some("alpha".into()) },
-    )
-    .unwrap();
-    s.apply(
-        id,
-        Edit::AddField { page: 0, rect: [30.0, 260.0, 210.0, 284.0], kind: NewField::Button { caption: "Clear".into() }, name: Some("clear".into()) },
-    )
-    .unwrap();
+    let text = NewField::Text { multiline: false };
+    let button = NewField::Button { caption: "Clear".into() };
+    s.apply(id, Edit::AddField { page: 0, rect: [30.0, 300.0, 210.0, 324.0], kind: text, name: Some("alpha".into()) }).unwrap();
+    s.apply(id, Edit::AddField { page: 0, rect: [30.0, 260.0, 210.0, 284.0], kind: button, name: Some("clear".into()) }).unwrap();
     s.apply(id, Edit::SetFieldValue { name: "alpha".into(), value: FieldValue::Text("Ada Lovelace".into()) }).unwrap();
     if let Some(action) = action {
         s.apply(
@@ -164,7 +158,8 @@ fn an_image_field_reports_the_image_request() {
     let mut s = Session::new();
     let bytes = s.create_blank(300.0, 400.0, 1).unwrap();
     let id = s.open("image.pdf", None, bytes, None).unwrap();
-    s.apply(id, Edit::AddField { page: 0, rect: [30.0, 300.0, 210.0, 324.0], kind: NewField::Image, name: Some("photo".into()) }).unwrap();
+    let rect = [30.0, 300.0, 210.0, 324.0];
+    s.apply(id, Edit::AddField { page: 0, rect, kind: NewField::Image, name: Some("photo".into()) }).unwrap();
     let path = dir.join("image.pdf");
     std::fs::write(&path, &*s.save_bytes(id).unwrap()).unwrap();
 

@@ -1300,15 +1300,19 @@ pub fn run_button(doc: &mut Document, name: &str) -> Result<ButtonRun, FormError
             // already at its default is named by the action but not changed, and the answer says
             // what was done, not what was asked for.
             let names = reset_names(&all, &fields, exclude);
-            let before: Vec<(String, Vec<String>)> =
-                all.iter().filter(|f| names.contains(&f.name)).map(|f| (f.name.clone(), f.value.clone())).collect();
+            let mut before: Vec<(String, Vec<String>)> = Vec::new();
+            for f in all.iter().filter(|f| names.contains(&f.name)) {
+                before.push((f.name.clone(), f.value.clone()));
+            }
             reset(doc, Some(&names))?;
-            let after = fields(doc);
-            let moved = before
-                .into_iter()
-                .filter(|(n, v)| after.iter().find(|f| &f.name == n).is_some_and(|f| &f.value != v))
-                .map(|(n, _)| n)
-                .collect();
+            // `fields` above is the action's own list, so the function is named by path.
+            let after = crate::fields(doc);
+            let mut moved: Vec<String> = Vec::new();
+            for (n, was) in before {
+                if after.iter().find(|f| f.name == n).is_some_and(|f| f.value != was) {
+                    moved.push(n);
+                }
+            }
             Ok(ButtonRun::Reset(moved))
         }
         af::ButtonAction::ShowHide { fields, hide } => {
@@ -1316,11 +1320,15 @@ pub fn run_button(doc: &mut Document, name: &str) -> Result<ButtonRun, FormError
             // to hide; a name that is one takes its children with it, as `display` does. Only the
             // fields this actually moved are reported, so a second press of a Hide button is not
             // mistaken for work done.
-            let mut targets = Vec::new();
+            let mut targets: Vec<String> = Vec::new();
             for t in &fields {
                 let prefix = format!("{t}.");
-                for f in all.iter().filter(|f| (&f.name == t || f.name.starts_with(&prefix)) && f.hidden != hide) {
-                    targets.push(f.name.clone());
+                for f in all.iter() {
+                    // `field_hidden` is false for a field with no widget: nothing to show or hide.
+                    let named = &f.name == t || f.name.starts_with(&prefix);
+                    if named && field_hidden(f) != hide {
+                        targets.push(f.name.clone());
+                    }
                 }
             }
             let changes: Vec<FieldChange> = targets
@@ -1341,6 +1349,12 @@ pub fn run_button(doc: &mut Document, name: &str) -> Result<ButtonRun, FormError
         af::ButtonAction::Script(js) => Ok(ButtonRun::Script(js)),
         af::ButtonAction::ImportIcon => Ok(ButtonRun::ImportIcon),
     }
+}
+
+/// Whether a field is hidden: every one of its widgets carries the Hidden or NoView flag, which is
+/// what a `display` change sets. A field with no widget is not hidden by anything.
+fn field_hidden(f: &Field) -> bool {
+    !f.widgets.is_empty() && f.widgets.iter().all(|w| w.hidden)
 }
 
 /// The field names a reset action resets: the listed ones (and their children), or all but them

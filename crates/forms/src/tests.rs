@@ -1828,7 +1828,7 @@ fn a_reset_button_clears_the_fields_it_names() {
     assert_eq!(run, ButtonRun::Reset(vec!["notes".into()]), "only the field that had a value different from its default");
     let all = fields(&doc);
     assert!(field(&all, "notes").value.is_empty(), "notes is back to its default");
-    assert_eq!(field(&all, "name").value, FieldValue::Text("Ada".into()), "the unnamed field was left alone");
+    assert_eq!(field(&all, "name").value, ["Ada"], "the unnamed field was left alone");
     assert!(run.changed_document());
     // A field already at its default is named by the action but not changed, so a second press
     // reports nothing and does nothing.
@@ -1844,7 +1844,7 @@ fn a_reset_button_with_exclude_clears_the_rest() {
     let run = run_button(&mut doc, "keep").unwrap();
     assert!(matches!(&run, ButtonRun::Reset(n) if n.iter().any(|f| f == "notes") && !n.iter().any(|f| f == "name")), "{run:?}");
     let all = fields(&doc);
-    assert_eq!(field(&all, "name").value, FieldValue::Text("Ada".into()), "the excluded field kept its value");
+    assert_eq!(field(&all, "name").value, ["Ada"], "the excluded field kept its value");
     assert!(field(&all, "notes").value.is_empty());
     assert!(field(&all, "agree").value.is_empty(), "a check box goes back to its default");
 }
@@ -1857,8 +1857,8 @@ fn a_show_hide_button_hides_its_fields() {
     assert_eq!(run, ButtonRun::ShowHide { fields: vec!["notes".into()], hide: true });
     assert!(run.changed_document());
     let all = fields(&doc);
-    assert!(field(&all, "notes").hidden, "the field is hidden");
-    assert!(!field(&all, "name").hidden, "the field the action did not name is not hidden");
+    assert!(field_hidden(field(&all, "notes")), "the field is hidden");
+    assert!(!field_hidden(field(&all, "name")), "the field the action did not name is not hidden");
     // Pressing it again finds the field already hidden: nothing moves, so nothing is claimed.
     let again = run_button(&mut doc, "cover").unwrap();
     assert_eq!(again, ButtonRun::ShowHide { fields: Vec::new(), hide: true });
@@ -1915,5 +1915,5 @@ fn a_hide_action_reports_only_the_fields_it_finds() {
     let mut doc = document(&objs);
     let run = run_button(&mut doc, "cover").unwrap();
     assert_eq!(run, ButtonRun::ShowHide { fields: vec!["notes".into()], hide: true }, "only the field that exists is reported");
-    assert!(field(&fields(&doc), "notes").hidden);
+    assert!(field_hidden(field(&fields(&doc), "notes")));
 }
