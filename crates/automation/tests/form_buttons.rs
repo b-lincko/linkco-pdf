@@ -64,10 +64,10 @@ fn a_reset_button_clears_the_form_and_is_one_undo_step() {
     let fields = out["fields"].as_array().unwrap();
     assert_eq!(fields, &[json!("alpha")], "the field that held a value is the one that moved: {out}");
 
-    assert_eq!(out["document"]["undo"], json!(true), "the reset is one undo step: {out}");
+    assert_eq!(out["document"]["undo"], "Press clear", "the reset is one named step: {out}");
     // The value really went back to its default.
     let listed = tool(&mut a, "form_fields", json!({ "doc": doc }));
-    let alpha = listed.as_array().unwrap().iter().find(|f| f["name"] == "alpha").expect("alpha");
+    let alpha = listed["fields"].as_array().unwrap().iter().find(|f| f["name"] == "alpha").expect("alpha");
     assert!(alpha["value"].is_null() || alpha["value"] == "", "the field is back to its default: {alpha}");
 }
 
@@ -83,7 +83,7 @@ fn a_button_whose_action_needs_a_viewer_reports_it_and_changes_nothing() {
     assert_eq!(out["url"], "https://example.com/report", "{out}");
     assert_eq!(out["changed"], json!(false), "opening a URL changes the document nowhere: {out}");
     // No undo step was made for an action that changed nothing.
-    assert_eq!(out["document"]["undo"], json!(false), "nothing was pushed onto the undo stack: {out}");
+    assert!(out["document"]["undo"].is_null(), "nothing was pushed onto the undo stack: {out}");
     assert_eq!(out["document"]["dirty"], json!(false), "nothing is unsaved: {out}");
 }
 
@@ -134,13 +134,13 @@ fn a_filled_form_can_be_cleared_by_its_own_button() {
     let doc = tool(&mut a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
     // The field starts with a value that is not its default.
     let before = tool(&mut a, "form_fields", json!({ "doc": doc }));
-    let alpha = before.as_array().unwrap().iter().find(|f| f["name"] == "alpha").expect("alpha");
+    let alpha = before["fields"].as_array().unwrap().iter().find(|f| f["name"] == "alpha").expect("alpha");
     assert_eq!(alpha["value"], "Ada Lovelace", "{alpha}");
 
     tool(&mut a, "form_run_button", json!({ "doc": doc, "field": "clear" }));
 
     let after = tool(&mut a, "form_fields", json!({ "doc": doc }));
-    let alpha = after.as_array().unwrap().iter().find(|f| f["name"] == "alpha").expect("alpha");
+    let alpha = after["fields"].as_array().unwrap().iter().find(|f| f["name"] == "alpha").expect("alpha");
     assert!(alpha["value"].is_null() || alpha["value"] == "", "the button cleared it: {alpha}");
     // What the button did survives the round trip through bytes.
     let saved = tool(&mut a, "doc_save", json!({ "doc": doc, "path": dir.join("out.pdf").to_string_lossy() }));
@@ -165,7 +165,7 @@ fn an_image_field_reports_the_image_request() {
     let out = tool(&mut a, "form_run_button", json!({ "doc": doc, "field": "photo" }));
     assert_eq!(out["did"], "import_icon", "{out}");
     assert_eq!(out["changed"], json!(false), "{out}");
-    assert_eq!(out["document"]["undo"], json!(false), "no step was made: {out}");
+    assert!(out["document"]["undo"].is_null(), "no step was made: {out}");
 }
 
 #[test]

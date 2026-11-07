@@ -1831,10 +1831,10 @@ fn a_reset_button_clears_the_fields_it_names() {
     assert_eq!(field(&all, "name").value, ["Ada"], "the unnamed field was left alone");
     assert!(run.changed_document());
     // A field already at its default is named by the action but not changed, so a second press
-    // reports nothing and does nothing.
+    // reports nothing and — because it moved nothing — is not a change at all.
     let again = run_button(&mut doc, "clear").unwrap();
     assert_eq!(again, ButtonRun::Reset(Vec::new()), "nothing was left to move");
-    assert!(again.changed_document(), "the press still runs a reset");
+    assert!(!again.changed_document(), "an action that moved nothing changed nothing");
 }
 
 /// The exclude flag inverts the list: a reset of everything but the named fields.
