@@ -1053,7 +1053,14 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
         }
         Shape::Redact { quads, overlay, look } => {
             d.set(b"C".to_vec(), rgb(style.color));
-            d.set(b"IC".to_vec(), rgb(style.fill.unwrap_or([0.0, 0.0, 0.0])));
+            // A mark with no box writes no `/IC`: the content disappears and nothing is drawn over
+            // it, which is Acrobat's "no colour". Writing black here would have drawn a box.
+            match style.fill {
+                Some(f) => d.set(b"IC".to_vec(), rgb(f)),
+                None => {
+                    d.remove(b"IC");
+                }
+            }
             d.set(b"QuadPoints".to_vec(), num_array(&quads.concat()));
             if !overlay.is_empty() {
                 d.set(b"OverlayText".to_vec(), PdfString::text(overlay));
@@ -1955,12 +1962,14 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                         let f = |k: usize| t[k].parse::<f64>().unwrap_or(0.0);
                         look.color = [f(i - 3), f(i - 2), f(i - 1)];
                     }
+                    // `/DA` is `<font resource> <size> Tf`: the resource is the token before the
+                    // size, and the size is the one before `Tf`.
                     if let Some(i) = t.iter().position(|x| *x == "Tf") {
-                        if let Some(name) = i.checked_sub(1).and_then(|k| t.get(k)) {
-                            look.font = OverlayFont::from_resource(name.trim_start_matches('/'));
-                        }
-                        if let Some(size) = i.checked_sub(2).and_then(|k| t.get(k)).and_then(|x| x.parse::<f64>().ok()) {
+                        if let Some(size) = i.checked_sub(1).and_then(|k| t.get(k)).and_then(|x| x.parse::<f64>().ok()) {
                             look.size = size.max(0.0);
+                        }
+                        if let Some(name) = i.checked_sub(2).and_then(|k| t.get(k)) {
+                            look.font = OverlayFont::from_resource(name.trim_start_matches('/'));
                         }
                     }
                 }
