@@ -492,6 +492,17 @@ impl Automation {
                         "rotate" => ImageEdit::Rotate(a.opt_int("quarters")?.unwrap_or(1) as i32),
                         "flip_horizontal" => ImageEdit::Flip { horizontal: true },
                         "flip_vertical" => ImageEdit::Flip { horizontal: false },
+                        "crop" => {
+                            // `trim` is [left, bottom, right, top], in points, taken off each
+                            // side. Acrobat crops a placed image by hiding part of it: nothing is
+                            // re-encoded, the picture keeps its scale and its place, and only the
+                            // kept region shows.
+                            let t: Vec<f64> =
+                                a.get("trim").and_then(Value::as_array).map(|x| x.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+                            let t = <[f64; 4]>::try_from(t)
+                                .map_err(|_| ToolError::InvalidArgs("crop needs trim: [left, bottom, right, top], 4 numbers".into()))?;
+                            ImageEdit::Crop(t)
+                        }
                         "delete" => ImageEdit::Delete,
                         "replace" => {
                             let path = self.resolve(a.str("path")?, false)?;

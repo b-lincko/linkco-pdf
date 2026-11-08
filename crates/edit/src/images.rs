@@ -235,6 +235,10 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
 pub enum ImageChange {
     /// Apply a user-space transform after its placement (move, resize, rotate, flip).
     Transform([f64; 6]),
+    /// Trim [`Crop`] off each side: the image stays where it is and at its size, and what is left
+    /// of the box is all that shows. This is Acrobat's crop for a placed image — a clip, not a
+    /// re-encoding, so nothing is resampled and the hidden parts are still in the file.
+    Crop(Crop),
     /// Draw this image XObject instead, in the same place.
     Replace(ObjRef),
     Delete,
@@ -262,6 +266,36 @@ pub fn turn_about_centre(rect: [f64; 4], quarters: i32, flip_h: bool, flip_v: bo
     [a, b, c, d, cx - a * cx - c * cy, cy - b * cx - d * cy]
 }
 
+/// How much to trim off each side of an image, in points.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Crop {
+    pub left: f64,
+    pub bottom: f64,
+    pub right: f64,
+    pub top: f64,
+}
+
+impl Crop {
+    /// The box left after trimming `self` off `rect`, or `None` when nothing would be left — a crop
+    /// that removes the whole image is refused rather than silently removing it.
+    pub fn keep(&self, rect: [f64; 4]) -> Option<[f64; 4]> {
+        let keep = [rect[0] + self.left, rect[1] + self.bottom, rect[2] - self.right, rect[3] - self.top];
+        // A hair rather than a point: a crop may legitimately leave a sliver, but no area is not
+        // an image.
+        (keep[2] - keep[0] > 1e-6 && keep[3] - keep[1] > 1e-6).then_some(keep)
+    }
+
+    /// Whether `self` trims anything at all.
+    pub fn is_empty(&self) -> bool {
+        [self.left, self.bottom, self.right, self.top].iter().all(|v| v.abs() < 1e-9)
+    }
+
+    /// A side trimmed by a negative amount would add to the box rather than take from it.
+    pub fn is_valid(&self) -> bool {
+        [self.left, self.bottom, self.right, self.top].iter().all(|v| v.is_finite() && *v >= 0.0)
+    }
+}
+
 /// Change image `index` (from [`page_images`]) on `page`.
 pub fn change_image(doc: &mut Document, page: usize, index: usize, change: &ImageChange) -> Result<(), EditError> {
     let images = page_images(doc, page)?;
@@ -286,6 +320,48 @@ pub fn change_image(doc: &mut Document, page: usize, index: usize, change: &Imag
                 return Err(EditError::Invalid("the image transform is too large".into()));
             }
             vec![Op::new("q", vec![]), Op::new("cm", m.0.iter().map(|v| pdfcraft_content::num(*v)).collect()), original, Op::new("Q", vec![])]
+        }
+        ImageChange::Crop(crop) => {
+            if !crop.is_valid() {
+                return Err(EditError::Invalid("a crop trims 0 or more points off each side, and the amounts must be finite".into()));
+            }
+            // Nothing to trim: leave the content stream exactly as it was rather than writing an
+            // edit that edits nothing.
+            if crop.is_empty() {
+                return Ok(());
+            }
+            let keep = crop.keep(img.rect).ok_or_else(|| {
+                EditError::Invalid(format!(
+                    "cropping {:?} by {:?} would leave nothing; the image is {} by {} points",
+                    img.rect,
+                    [crop.left, crop.bottom, crop.right, crop.top],
+                    img.rect[2] - img.rect[0],
+                    img.rect[3] - img.rect[1]
+                ))
+            })?;
+            // A crop keeps the picture's scale: the placement is shifted so the kept region lands
+            // where it already was, and the parts outside it are clipped away. (Scaling the
+            // placement onto `keep` would squeeze the whole picture into the smaller box — a
+            // resize, which is what `move` with a `rect` is for.)
+            let m = Matrix::translate(keep[0] - img.rect[0], keep[1] - img.rect[1]);
+            // Where the whole picture ends up after the shift; its top-left corner is where the
+            // picture's visible part begins and, being clipped to `keep`, where it ends.
+            let moved = m.bbox(img.rect);
+            let (x, y) = (moved[0].min(moved[2]), moved[1].min(moved[3]));
+            let clip = [keep[0] - x, keep[1] - y, keep[2] - x, keep[3] - y];
+            if !clip.iter().all(|v| v.is_finite()) {
+                return Err(EditError::Invalid("the crop is too large".into()));
+            }
+            let nums = [clip[0], clip[1], clip[2] - clip[0], clip[3] - clip[1]].map(pdfcraft_content::num);
+            vec![
+                Op::new("q", vec![]),
+                Op::new("cm", m.0.iter().map(|v| pdfcraft_content::num(*v)).collect()),
+                Op::new("re", nums.to_vec()),
+                Op::new("W", vec![]),
+                Op::new("n", vec![]),
+                original,
+                Op::new("Q", vec![]),
+            ]
         }
         ImageChange::Replace(r) => {
             if img.is_form {

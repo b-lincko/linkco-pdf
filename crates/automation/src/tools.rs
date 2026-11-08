@@ -1151,16 +1151,17 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("edit.edit_text")
             .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 } }), &["doc", "page"])),
-        t("image_edit", "Edit an image", "Change one of a page's images (number from page_images): action move (rect: new box in top-left-origin points), rotate (quarters clockwise, default 1), flip_horizontal, flip_vertical, replace (path: an image file, drawn in the same place) or delete. Undoable. Form artwork supports move/resize/rotate/flip/delete as a group; replace and image_save only support raster images.")
+        t("image_edit", "Edit an image", "Change one of a page's images (number from page_images): action move (rect: new box in top-left-origin points), rotate (quarters clockwise, default 1), flip_horizontal, flip_vertical, crop (trim: [left, bottom, right, top] points taken off each side, so the image stays where it is and at its size and only what remains of the box shows — nothing is re-encoded, and trimming everything is refused), replace (path: an image file, drawn in the same place) or delete. Undoable. Form artwork supports move/resize/rotate/flip/delete as a group; replace and image_save only support raster images.")
             .cmd("edit.edit_text")
             .with(schema(
                 json!({
                     "doc": doc(),
                     "page": { "type": "integer", "minimum": 1 },
                     "image": { "type": "integer", "minimum": 1 },
-                    "action": { "type": "string", "enum": ["move", "rotate", "flip_horizontal", "flip_vertical", "replace", "delete"] },
+                    "action": { "type": "string", "enum": ["move", "rotate", "flip_horizontal", "flip_vertical", "crop", "replace", "delete"] },
                     "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
                     "quarters": { "type": "integer" },
+                    "trim": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 4, "maxItems": 4, "description": "crop: points trimmed off [left, bottom, right, top]." },
                     "path": { "type": "string" },
                 }),
                 &["doc", "page", "image", "action"],
