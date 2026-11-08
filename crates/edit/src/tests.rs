@@ -2097,3 +2097,55 @@ fn group_move_budget_refusals_keep_the_original_page_selectable() {
         assert_eq!(editable_objects(&doc, 0).unwrap(), objects, "refusal retains a usable inventory");
     }
 }
+
+/// A crop trims what shows off each side without moving or rescaling the picture: the kept part
+/// stays exactly where it was on the page, and the rest is clipped away.
+#[test]
+fn cropping_an_image_keeps_the_kept_part_where_it_was() {
+    let mut doc = image_page();
+    // The image is 200 × 100 at [100, 100, 300, 200]. Trim 10 off the left and 20 off the top.
+    let crop = images::Crop { left: 10.0, bottom: 0.0, right: 0.0, top: 20.0 };
+    let keep = crop.keep(images::page_images(&doc, 0).unwrap()[0].rect).unwrap();
+    assert!(close(keep, [110.0, 100.0, 300.0, 180.0]), "{keep:?}");
+
+    images::change_image(&mut doc, 0, 0, &images::ImageChange::Crop(crop)).unwrap();
+    let doc = reopen(&doc);
+    // The picture is still there, and the page's other content is untouched.
+    let after = images::page_images(&doc, 0).unwrap();
+    assert_eq!(after.len(), 1, "the image is still on the page");
+    assert_eq!((after[0].width, after[0].height), (4, 2), "the image itself is unchanged");
+
+    // The clip covers the kept box, and it is inside its own q … Q so it cannot leak.
+    let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+    assert!(content.contains("re") && content.contains("W"), "a clip was written: {content}");
+    assert!(content.contains("Q"), "the clip is scoped: {content}");
+    // Nothing is transformed: the kept region is already where it belongs, so the clip is the kept
+    // box in page coordinates — [110, 100, 300, 180], so 190 wide and 80 tall from (110, 100) —
+    // and the picture keeps both its scale and its place.
+    assert!(content.contains("110 100 190 80 re"), "the clip is the kept box: {content}");
+    // The picture keeps the placement it already had: the crop adds no `cm` of its own.
+    assert_eq!(content.matches(" cm").count(), 1, "only the original placement: {content}");
+}
+
+/// Cropping nothing is not an edit: the content stream is left byte for byte as it was.
+#[test]
+fn cropping_nothing_writes_no_edit() {
+    let mut doc = image_page();
+    let before = page_content_bytes(&doc, 0);
+    let none = images::Crop { left: 0.0, bottom: 0.0, right: 0.0, top: 0.0 };
+    images::change_image(&mut doc, 0, 0, &images::ImageChange::Crop(none)).unwrap();
+    assert_eq!(page_content_bytes(&doc, 0), before, "nothing was trimmed, so nothing was written");
+}
+
+/// Trimming away the whole image (or more) is refused rather than silently removing it.
+#[test]
+fn cropping_everything_away_is_refused() {
+    let mut doc = image_page();
+    let all = images::Crop { left: 100.0, bottom: 0.0, right: 100.0, top: 0.0 };
+    assert!(all.keep([100.0, 100.0, 300.0, 200.0]).is_none(), "nothing would be left");
+    let err = images::change_image(&mut doc, 0, 0, &images::ImageChange::Crop(all)).unwrap_err();
+    assert!(format!("{err}").contains("would leave nothing"), "{err}");
+    // A negative side would add to the picture rather than take from it.
+    let negative = images::Crop { left: -5.0, bottom: 0.0, right: 0.0, top: 0.0 };
+    assert!(images::change_image(&mut doc, 0, 0, &images::ImageChange::Crop(negative)).is_err());
+}

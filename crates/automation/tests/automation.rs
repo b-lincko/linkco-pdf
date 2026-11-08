@@ -4572,3 +4572,57 @@ fn the_mark_list_is_read_only_and_says_what_it_is_for() {
     assert_eq!(def.command, Some("redact.properties"), "it reports the appearance Redaction Tool Properties sets");
     assert!(def.description.contains("Read-only"), "{}", def.description);
 }
+
+#[test]
+fn an_image_can_be_cropped_by_trimming_each_side() {
+    // The box an image reports is its placement, which a crop does not change: the picture stays
+    // where it is and at its size, and only part of it shows. So this checks what a crop is for —
+    // the picture is still whole and still in place, the edit is one undo step, and the content
+    // stream gained a clip over the kept region.
+    let dir = workdir("image-crop");
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, 40, 20);
+        enc.set_color(png::ColorType::Rgb);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&[200u8; 2400]).unwrap();
+    }
+    std::fs::write(dir.join("logo.png"), png).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let added = ok(&mut a, "page_add_image", json!({ "doc": doc, "page": 1, "path": "logo.png", "rect": [100, 200, 180, 240] }));
+    assert_eq!(added["rect"], json!([100.0, 200.0, 180.0, 240.0]));
+
+    // Trim 8 points off each side: 80 × 40 becomes 64 × 24, in the same place.
+    let r = ok(&mut a, "image_edit", json!({ "doc": doc, "page": 1, "image": 1, "action": "crop", "trim": [8, 8, 8, 8] }));
+    assert_eq!(r["undo"], "Crop image", "the crop is its own undo step: {r}");
+    let list = ok(&mut a, "page_images", json!({ "doc": doc, "page": 1 }));
+    assert_eq!(list["count"], json!(1), "the picture is still on the page: {list}");
+    assert_eq!(list["images"][0]["rect"], json!([100.0, 200.0, 180.0, 240.0]), "the picture keeps its place: {list}");
+    assert_eq!(list["images"][0]["pixels"], json!([40, 20]), "and the image itself is untouched: {list}");
+}
+
+#[test]
+fn cropping_is_refused_when_it_would_remove_the_picture() {
+    let dir = workdir("image-crop-bad");
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, 40, 20);
+        enc.set_color(png::ColorType::Rgb);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&[200u8; 2400]).unwrap();
+    }
+    std::fs::write(dir.join("logo.png"), png).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_add_image", json!({ "doc": doc, "page": 1, "path": "logo.png", "rect": [100, 200, 180, 240] }));
+    // Half from each side removes it.
+    assert!(a.call("image_edit", &json!({ "doc": doc, "page": 1, "image": 1, "action": "crop", "trim": [40, 20, 40, 20] })).is_err());
+    // A negative trim would grow the picture, not crop it.
+    assert!(a.call("image_edit", &json!({ "doc": doc, "page": 1, "image": 1, "action": "crop", "trim": [-1, 0, 0, 0] })).is_err());
+    // No trim at all cannot be a crop: there are no amounts to take off.
+    assert!(matches!(a.call("image_edit", &json!({ "doc": doc, "page": 1, "image": 1, "action": "crop" })), Err(ToolError::InvalidArgs(_))));
+    // The picture is still whole after every refusal.
+    let list = ok(&mut a, "page_images", json!({ "doc": doc, "page": 1 }));
+    assert_eq!(list["count"], json!(1), "{list}");
+}

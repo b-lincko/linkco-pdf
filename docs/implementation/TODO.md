@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B050 · **Active stage:** basic
+**Active component:** B051 · **Active stage:** basic
 
-## Basic (381 records)
+## Basic (382 records)
 
-complete: 53, in_progress: 7, pending: 321
+complete: 54, in_progress: 7, pending: 321
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -68,6 +68,7 @@ complete: 53, in_progress: 7, pending: 321
 | B048 | [x] Push buttons run their actions: a button's click can be asked for headlessly (REC-F01) | P0 | complete | REC-F01 |
 | B049 | [x] Required-field completion guide: a form says what is still missing (REC-F01) | P0 | complete | REC-F01 |
 | B050 | [x] Redaction fill colour and overlay text: a mark keeps and reports its appearance (GAP-protect.redaction-properties) | P0 | complete | GAP-protect.redaction-properties |
+| B051 | [x] Crop an image: trim each side and only the kept region shows (GAP-edit.image-crop) | P0 | complete | GAP-edit.image-crop |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1709,3 +1710,18 @@ pending: 65, scope_review: 23
 - Local evidence: crates/automation/tests/automation.rs::the_mark_list_is_read_only_and_says_what_it_is_for: redact_list is in the catalogue, read-only, not destructive, tied to redact.properties and says it is read-only.
 - Local evidence: python3 docs/implementation/build_capabilities.py --check (152 automation tools), build_backlog.py --check (679 records), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42382606257
+
+### B051: Crop an image: trim each side and only the kept region shows (GAP-edit.image-crop)
+
+- Status: **complete**; parent(s): GAP-edit.image-crop.
+- Acceptance: A placed image can be cropped headlessly. `image_edit` takes `action: "crop"` with `trim: [left, bottom, right, top]` in points, taken off each side. It is a crop and not a resize: the picture keeps its scale and its place on the page, and only the kept region shows — the content stream is wrapped in `q … Q` with an `re W n` clip over the kept box, so nothing is re-encoded, no pixel is resampled, and the parts outside the clip are simply not drawn. Cropping nothing writes no edit at all: the content stream is left byte for byte as it was rather than gaining a clip that clips nothing. A crop that would leave no area is refused, naming the picture's real size, rather than silently deleting the image; a negative amount is refused because it would add to the picture rather than take from it. The change is one undo step labelled `Crop image`. Under it: `pdfcraft_edit::Crop` with `keep`, `is_empty` and `is_valid`, `ImageChange::Crop`, and `ImageEdit::Crop([f64; 4])`.
+- Audit: GAP-edit.image-crop, and the backlog's own wording for it: crop an image, for added images, trimming each side. The audit found the image model rich and the crop missing. Complete: `page_images` lists a page's raster images and grouped Form artwork with its box; `ImageChange` could transform (move, resize, rotate, flip), replace and delete an image; `image_edit` exposed move, rotate, flip_horizontal, flip_vertical, replace and delete to the tools; `change_image` already wraps its replacement in `q … Q`, so a clip would be scoped correctly. Missing: any way to crop — to hide part of a picture while keeping the rest at its own scale in its own place — from the command line, MCP or an agent, and no `Crop` type in the edit crate at all. Decisions. (1) A crop is a clip, not a re-encode: the pixels outside the kept region are not resampled or thrown away, they are simply not drawn, which is what Acrobat does for a placed image and keeps the operation cheap and lossless. (2) The clip is the kept box in page coordinates and no transform is applied at all — a first attempt also shifted the placement, which moved the picture; the kept region is already where it belongs, so the only thing a crop has to do is stop the rest from showing. (3) Scaling the placement onto the kept box was rejected as a definition: that is a resize, which `action: "move"` with a `rect` already does, and it would squeeze the picture rather than hide part of it. (4) Cropping nothing returns before writing, because an edit that edits nothing should not add a clip that clips nothing — the same rule the engine's other no-op paths follow. (5) A crop that would leave no area is refused with the picture's size rather than silently deleting it, and a negative amount is refused rather than growing the picture. (6) `trim` in the tool is required for `crop` and read the same way `move` reads its `rect`, so the two geometry arguments behave alike. Not claimed: the app's own image-editing UI is unchanged, so this closes the headless half; `page_images` still reports the image's placement, which a crop deliberately does not change, so after a crop the reported box is the picture's full extent rather than the visible region; and the crop trims from the picture's edges, not an arbitrary sub-rectangle of it.
+- Ci: passed
+- Notes: Closes GAP-edit.image-crop for the headless surface: a placed image can be cropped by trimming points off each side, keeping its scale and its place, with nothing re-encoded. The one place this deliberately differs from a naive reading of the gap: the reported box does not shrink, because the picture is hidden rather than scaled, and that is stated in the audit and the PR.
+- Local evidence: crates/edit/src/tests.rs::cropping_an_image_keeps_the_kept_part_where_it_was: a 200 × 100 image at [100, 100, 300, 200] trimmed by left 10 and top 20 keeps [110, 100, 300, 180]; the content stream gains `110 100 190 80 re` inside a `q … Q`, the picture is still one 4 × 2 image, and it carries exactly one `cm` — the original placement, because the crop adds no transform.
+- Local evidence: crates/edit/src/tests.rs::cropping_nothing_writes_no_edit: a crop of zero on every side leaves the page content byte for byte as it was.
+- Local evidence: crates/edit/src/tests.rs::cropping_everything_away_is_refused: a crop that leaves no area is refused naming the size, and a negative side is refused.
+- Local evidence: crates/automation/tests/automation.rs::an_image_can_be_cropped_by_trimming_each_side: through the tools, a crop is one undo step named `Crop image`, the picture is still on the page keeping its place at [100, 200, 180, 240] and its pixel size [40, 20].
+- Local evidence: crates/automation/tests/automation.rs::cropping_is_refused_when_it_would_remove_the_picture: half from each side, a negative amount and a missing trim are each refused, and the picture is still whole afterwards.
+- Local evidence: python3 docs/implementation/build_backlog.py --check (680 records), build_capabilities.py --check (152 automation tools, unchanged — `image_edit` gained an action rather than a new tool), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42479095418

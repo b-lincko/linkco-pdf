@@ -61,6 +61,9 @@ pub enum ImageEdit {
     Flip {
         horizontal: bool,
     },
+    /// Trim points off each side ([left, bottom, right, top]): the image stays where it is and at
+    /// its size, and what remains of the box is all that shows.
+    Crop([f64; 4]),
     /// Draw this image file (PNG, JPEG, TIFF, GIF, BMP, JPEG 2000) in its place.
     Replace {
         name: String,
@@ -1316,6 +1319,7 @@ impl Edit {
                 ImageEdit::Rotate(_) => "Rotate image".into(),
                 ImageEdit::Flip { .. } => "Flip image".into(),
                 ImageEdit::Replace { .. } => "Replace image".into(),
+                ImageEdit::Crop(_) => "Crop image".into(),
                 ImageEdit::Delete => "Delete image".into(),
             },
             Edit::AddHeaderFooter { replace: false, .. } => "Add header & footer".into(),
@@ -1774,6 +1778,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
                         )));
                     }
                     pdfcraft_edit::ImageChange::Replace(embed_image(doc, name, bytes)?.0)
+                }
+                ImageEdit::Crop([left, bottom, right, top]) => {
+                    pdfcraft_edit::ImageChange::Crop(pdfcraft_edit::Crop { left: *left, bottom: *bottom, right: *right, top: *top })
                 }
                 ImageEdit::Delete => pdfcraft_edit::ImageChange::Delete,
             };
