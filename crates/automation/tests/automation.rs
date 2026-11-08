@@ -4621,10 +4621,7 @@ fn cropping_is_refused_when_it_would_remove_the_picture() {
     // A negative trim would grow the picture, not crop it.
     assert!(a.call("image_edit", &json!({ "doc": doc, "page": 1, "image": 1, "action": "crop", "trim": [-1, 0, 0, 0] })).is_err());
     // No trim at all cannot be a crop: there are no amounts to take off.
-    assert!(matches!(
-        a.call("image_edit", &json!({ "doc": doc, "page": 1, "image": 1, "action": "crop" })),
-        Err(ToolError::InvalidArgs(_))
-    ));
+    assert!(matches!(a.call("image_edit", &json!({ "doc": doc, "page": 1, "image": 1, "action": "crop" })), Err(ToolError::InvalidArgs(_))));
     // The picture is still whole after every refusal.
     let list = ok(&mut a, "page_images", json!({ "doc": doc, "page": 1 }));
     assert_eq!(list["count"], json!(1), "{list}");

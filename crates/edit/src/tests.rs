@@ -2119,12 +2119,11 @@ fn cropping_an_image_keeps_the_kept_part_where_it_was() {
     let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
     assert!(content.contains("re") && content.contains("W"), "a clip was written: {content}");
     assert!(content.contains("Q"), "the clip is scoped: {content}");
-    // The picture is shifted right by 10 so its kept left edge lands where it was, and its scale is
-    // untouched — a crop, not a resize. The clip is the kept region in the shifted picture's
-    // coordinates: 190 wide and 80 tall, its corner at the picture's own.
-    assert!(content.contains("1 0 0 1 10 0 cm"), "the placement is shifted, not scaled: {content}");
-    assert!(content.contains("0 0 190 80 re"), "the clip is the kept box: {content}");
-    assert!(!content.contains("0.95"), "the picture keeps its scale: {content}");
+    // Nothing is transformed: the kept region is already where it belongs, so the clip is the kept
+    // box in page coordinates — [110, 100, 300, 180], so 190 wide and 80 tall from (110, 100) —
+    // and the picture keeps both its scale and its place.
+    assert!(content.contains("110 100 190 80 re"), "the clip is the kept box: {content}");
+    assert!(!content.contains("cm"), "the picture is neither shifted nor scaled: {content}");
 }
 
 /// Cropping nothing is not an edit: the content stream is left byte for byte as it was.

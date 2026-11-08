@@ -339,29 +339,15 @@ pub fn change_image(doc: &mut Document, page: usize, index: usize, change: &Imag
                     img.rect[3] - img.rect[1]
                 ))
             })?;
-            // A crop keeps the picture's scale: the placement is shifted so the kept region lands
-            // where it already was, and the parts outside it are clipped away. (Scaling the
-            // placement onto `keep` would squeeze the whole picture into the smaller box — a
-            // resize, which is what `move` with a `rect` is for.)
-            let m = Matrix::translate(keep[0] - img.rect[0], keep[1] - img.rect[1]);
-            // Where the whole picture ends up after the shift; its top-left corner is where the
-            // picture's visible part begins and, being clipped to `keep`, where it ends.
-            let moved = m.bbox(img.rect);
-            let (x, y) = (moved[0].min(moved[2]), moved[1].min(moved[3]));
-            let clip = [keep[0] - x, keep[1] - y, keep[2] - x, keep[3] - y];
-            if !clip.iter().all(|v| v.is_finite()) {
+            // A crop keeps the picture's scale and its place: the kept region is already where it
+            // belongs on the page, so nothing is transformed — only what lies outside it is
+            // clipped away. (Scaling the placement onto `keep` would squeeze the whole picture into
+            // the smaller box, which is a resize; shifting it would move the picture.)
+            if !keep.iter().all(|v| v.is_finite()) {
                 return Err(EditError::Invalid("the crop is too large".into()));
             }
-            let nums = [clip[0], clip[1], clip[2] - clip[0], clip[3] - clip[1]].map(pdfcraft_content::num);
-            vec![
-                Op::new("q", vec![]),
-                Op::new("cm", m.0.iter().map(|v| pdfcraft_content::num(*v)).collect()),
-                Op::new("re", nums.to_vec()),
-                Op::new("W", vec![]),
-                Op::new("n", vec![]),
-                original,
-                Op::new("Q", vec![]),
-            ]
+            let nums = [keep[0], keep[1], keep[2] - keep[0], keep[3] - keep[1]].map(pdfcraft_content::num);
+            vec![Op::new("q", vec![]), Op::new("re", nums.to_vec()), Op::new("W", vec![]), Op::new("n", vec![]), original, Op::new("Q", vec![])]
         }
         ImageChange::Replace(r) => {
             if img.is_form {
