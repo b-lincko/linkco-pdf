@@ -2123,7 +2123,8 @@ fn cropping_an_image_keeps_the_kept_part_where_it_was() {
     // box in page coordinates — [110, 100, 300, 180], so 190 wide and 80 tall from (110, 100) —
     // and the picture keeps both its scale and its place.
     assert!(content.contains("110 100 190 80 re"), "the clip is the kept box: {content}");
-    assert!(!content.contains("cm"), "the picture is neither shifted nor scaled: {content}");
+    // The picture keeps the placement it already had: the crop adds no `cm` of its own.
+    assert_eq!(content.matches(" cm").count(), 1, "only the original placement: {content}");
 }
 
 /// Cropping nothing is not an edit: the content stream is left byte for byte as it was.
