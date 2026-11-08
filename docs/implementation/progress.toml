@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B050"
+active_component = "B051"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -1193,3 +1193,32 @@ local_evidence = [
 ci = "passed"
 ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/42382606257"]
 ci_notes = "Eight rounds, each red on its own thing. 012360c: `json!` cannot take an indexed expression, so the alignment lookup inside the macro did not parse — and because that file is in automation's lib, the one error failed Clippy, both test jobs and wasm32 together; the dispatch arm was also indented a level too deep. 1d29b55 fixed both, then exposed a design mistake: `doc.info.annotations` holds `pdfcraft_render::Annotation` and `render` does not depend on `annot` (they are siblings), so the field could not hold `RedactionLook` — `render` got its own dependency-free `RedactionAppearance` and the engine maps one onto the other where the two meet. 98749e1 defaulted the field in render's own reader; 28955de exported the type from the crate root. c441aa0 compiled everywhere and then two tests failed on values, which is what they are for: `/DA` is `<font> <size> Tf` and I had read the size and font from each other's position, and the writer set `/IC` to black whenever the style had no fill, so `fill: \"none\"` drew the box it was meant to omit. 1b66dda fixed both; all six checks green."
+
+[components.B051]
+title = "Crop an image: trim each side and only the kept region shows (GAP-edit.image-crop)"
+stage = "basic"
+parent_tasks = ["GAP-edit.image-crop"]
+status = "complete"
+code = [
+    "crates/edit/src/images.rs",
+    "crates/edit/src/lib.rs",
+    "crates/edit/src/tests.rs",
+    "crates/engine/src/lib.rs",
+    "crates/automation/src/lib.rs",
+    "crates/automation/src/tools.rs",
+    "crates/automation/tests/automation.rs",
+]
+acceptance = "A placed image can be cropped headlessly. `image_edit` takes `action: \"crop\"` with `trim: [left, bottom, right, top]` in points, taken off each side. It is a crop and not a resize: the picture keeps its scale and its place on the page, and only the kept region shows — the content stream is wrapped in `q … Q` with an `re W n` clip over the kept box, so nothing is re-encoded, no pixel is resampled, and the parts outside the clip are simply not drawn. Cropping nothing writes no edit at all: the content stream is left byte for byte as it was rather than gaining a clip that clips nothing. A crop that would leave no area is refused, naming the picture's real size, rather than silently deleting the image; a negative amount is refused because it would add to the picture rather than take from it. The change is one undo step labelled `Crop image`. Under it: `pdfcraft_edit::Crop` with `keep`, `is_empty` and `is_valid`, `ImageChange::Crop`, and `ImageEdit::Crop([f64; 4])`."
+audit = "GAP-edit.image-crop, and the backlog's own wording for it: crop an image, for added images, trimming each side. The audit found the image model rich and the crop missing. Complete: `page_images` lists a page's raster images and grouped Form artwork with its box; `ImageChange` could transform (move, resize, rotate, flip), replace and delete an image; `image_edit` exposed move, rotate, flip_horizontal, flip_vertical, replace and delete to the tools; `change_image` already wraps its replacement in `q … Q`, so a clip would be scoped correctly. Missing: any way to crop — to hide part of a picture while keeping the rest at its own scale in its own place — from the command line, MCP or an agent, and no `Crop` type in the edit crate at all. Decisions. (1) A crop is a clip, not a re-encode: the pixels outside the kept region are not resampled or thrown away, they are simply not drawn, which is what Acrobat does for a placed image and keeps the operation cheap and lossless. (2) The clip is the kept box in page coordinates and no transform is applied at all — a first attempt also shifted the placement, which moved the picture; the kept region is already where it belongs, so the only thing a crop has to do is stop the rest from showing. (3) Scaling the placement onto the kept box was rejected as a definition: that is a resize, which `action: \"move\"` with a `rect` already does, and it would squeeze the picture rather than hide part of it. (4) Cropping nothing returns before writing, because an edit that edits nothing should not add a clip that clips nothing — the same rule the engine's other no-op paths follow. (5) A crop that would leave no area is refused with the picture's size rather than silently deleting it, and a negative amount is refused rather than growing the picture. (6) `trim` in the tool is required for `crop` and read the same way `move` reads its `rect`, so the two geometry arguments behave alike. Not claimed: the app's own image-editing UI is unchanged, so this closes the headless half; `page_images` still reports the image's placement, which a crop deliberately does not change, so after a crop the reported box is the picture's full extent rather than the visible region; and the crop trims from the picture's edges, not an arbitrary sub-rectangle of it."
+notes = "Closes GAP-edit.image-crop for the headless surface: a placed image can be cropped by trimming points off each side, keeping its scale and its place, with nothing re-encoded. The one place this deliberately differs from a naive reading of the gap: the reported box does not shrink, because the picture is hidden rather than scaled, and that is stated in the audit and the PR."
+local_evidence = [
+    "crates/edit/src/tests.rs::cropping_an_image_keeps_the_kept_part_where_it_was: a 200 × 100 image at [100, 100, 300, 200] trimmed by left 10 and top 20 keeps [110, 100, 300, 180]; the content stream gains `110 100 190 80 re` inside a `q … Q`, the picture is still one 4 × 2 image, and it carries exactly one `cm` — the original placement, because the crop adds no transform",
+    "crates/edit/src/tests.rs::cropping_nothing_writes_no_edit: a crop of zero on every side leaves the page content byte for byte as it was",
+    "crates/edit/src/tests.rs::cropping_everything_away_is_refused: a crop that leaves no area is refused naming the size, and a negative side is refused",
+    "crates/automation/tests/automation.rs::an_image_can_be_cropped_by_trimming_each_side: through the tools, a crop is one undo step named `Crop image`, the picture is still on the page keeping its place at [100, 200, 180, 240] and its pixel size [40, 20]",
+    "crates/automation/tests/automation.rs::cropping_is_refused_when_it_would_remove_the_picture: half from each side, a negative amount and a missing trim are each refused, and the picture is still whole afterwards",
+    "python3 docs/implementation/build_backlog.py --check (680 records), build_capabilities.py --check (152 automation tools, unchanged — `image_edit` gained an action rather than a new tool), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests)",
+]
+ci = "passed"
+ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/42479095418"]
+ci_notes = "Four rounds. d523e43 compiled everywhere (wasm32 green) and then two things named: Format wanted one `matches!` joined onto a line, and a test failed because my first implementation also shifted the placement — a crop should not move the picture, since the kept region is already where it belongs; the clip alone is the crop. 73c2b7d simplified it to a clip and fixed the format. Then the edit-crate test failed on its own assertion `!content.contains(\"cm\")`: the fixture's original placement is itself a `cm`, so the test now counts them (exactly one, the original). 9bc7b05: all six green."
