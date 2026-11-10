@@ -307,3 +307,38 @@ fn every_example_survives_a_save_and_a_reopen() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// ---- every tool names the command it serves -----------------------------------------------------
+
+/// A tool's `command` says which interface command does the same thing, and the manifest publishes
+/// it. A tool with no command is a claim that nothing in the interface does it — true of the
+/// session tools (which documents are open, what may be run) and false of everything else. This
+/// holds that line: a new tool must decide, and a command it names must be one the registry has.
+#[test]
+fn every_tool_names_a_command_a_person_can_click() {
+    // Session-level tools: a document or a capability, not an action in the interface.
+    const SESSION: [&str; 6] = ["doc_list", "policy_status", "limits_status", "command_list", "command_run", "command_batch"];
+    let mut wrong = Vec::new();
+    for def in table() {
+        match def.command {
+            None if SESSION.contains(&def.name) => {}
+            None => wrong.push(format!("{}: names no command, and is not one of the session tools", def.name)),
+            Some(c) if pdfcraft_engine::commands::command(c).is_none() => {
+                wrong.push(format!("{}: names {c}, which the registry does not hold", def.name))
+            }
+            Some(_) => {}
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A session tool that later gains a command should be taken out of the list above rather than left
+/// there quietly: this fails if one of them names a command, so the two cannot drift apart.
+#[test]
+fn the_session_tools_are_the_only_ones_without_a_command() {
+    let gained: Vec<&str> = ["doc_list", "policy_status", "limits_status", "command_list", "command_run", "command_batch"]
+        .into_iter()
+        .filter(|n| table().iter().find(|d| d.name == *n).is_some_and(|d| d.command.is_some()))
+        .collect();
+    assert!(gained.is_empty(), "these now name a command, so take them out of that list: {gained:?}");
+}

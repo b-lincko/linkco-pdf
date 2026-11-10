@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B051 · **Active stage:** basic
+**Active component:** B052 · **Active stage:** basic
 
-## Basic (382 records)
+## Basic (383 records)
 
-complete: 54, in_progress: 7, pending: 321
+complete: 55, in_progress: 7, pending: 321
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -69,6 +69,7 @@ complete: 54, in_progress: 7, pending: 321
 | B049 | [x] Required-field completion guide: a form says what is still missing (REC-F01) | P0 | complete | REC-F01 |
 | B050 | [x] Redaction fill colour and overlay text: a mark keeps and reports its appearance (GAP-protect.redaction-properties) | P0 | complete | GAP-protect.redaction-properties |
 | B051 | [x] Crop an image: trim each side and only the kept region shows (GAP-edit.image-crop) | P0 | complete | GAP-edit.image-crop |
+| B052 | [x] Every automation tool names the command it serves (GAP-misc.cli-completeness) | P0 | complete | GAP-misc.cli-completeness |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1725,3 +1726,35 @@ pending: 65, scope_review: 23
 - Local evidence: crates/automation/tests/automation.rs::cropping_is_refused_when_it_would_remove_the_picture: half from each side, a negative amount and a missing trim are each refused, and the picture is still whole afterwards.
 - Local evidence: python3 docs/implementation/build_backlog.py --check (680 records), build_capabilities.py --check (152 automation tools, unchanged — `image_edit` gained an action rather than a new tool), check_disclosure.py --check and check_egress.py --check pass; the docs/implementation unittest suite passes (60 tests).
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42479095418
+
+### B052: Every automation tool names the command it serves (GAP-misc.cli-completeness)
+
+- Status: **complete**; parent(s): GAP-misc.cli-completeness.
+- Acceptance: Every automation tool declares the catalogue item a person would click to do the same thing, and the
+only tools without one are the session-level ones (which documents are open, what may be run). A
+command a tool names is one the registry holds, so the manifest cannot publish a claim nothing
+answers to.
+
+- Audit: GAP-misc.cli-completeness, "CLI covers every shipped command". Reachability was never broken: `pdfcraft-cli
+run` executes any tool and `tools`/`schema` publish the table. What was broken was the declaration —
+`ToolDef.command` was set on 62 of 152 tools, so 80 of the 120 catalogue items appeared unreachable even
+where a shipped tool performs them. The audit also checked the verb list (info render preview text edit
+combine extract split check check-one tools schema run ui mcp) against the interface and found no
+behaviour reachable only through the GUI.
+
+- Ci: passed
+- Notes: The 70 tools that named nothing while serving a menu item now name it; commands served rises 42 to 59.
+The six that serve none are session-level — doc_list, policy_status, limits_status, command_list,
+command_run, command_batch — and stay unset, because naming a command there would be the same error in
+the opposite direction. js_enabled was first pointed at js.document, which is a catalogue item but is
+Planned("M6") and unregistered; it now names app.preferences, which is where the interface switches
+JavaScript on and off and which the registry holds. Two tests hold the line: a tool without a command
+must be one of the six, and a named command must be registered.
+
+- Local evidence: crates/automation/tests/roundtrip.rs::every_tool_names_a_command_a_person_can_click: walks the tool table; fails if a non-session tool names no command or names one the registry does not hold (146 of 152 name one).
+- Local evidence: crates/automation/tests/roundtrip.rs::the_session_tools_are_the_only_ones_without_a_command: fails if one of the six gains a command, so the list cannot go stale.
+- Local evidence: crates/automation/tests/automation.rs::tool_table_is_well_formed: the pre-existing guard that every named command is registered — unchanged and passing.
+- Local evidence: docs/capabilities.toml: regenerated, 23 interface groups, 152 automation tools, 5 network places; catalogue commands with a serving tool 42 -> 59.
+- Local evidence: docs/implementation/build_backlog.py: 681 records (basic 383 / advanced 210 / future 88) after this record.
+- Local evidence: docs/implementation/test_*.py: 60 unittests pass; check_disclosure.py and check_egress.py pass.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42813297896
