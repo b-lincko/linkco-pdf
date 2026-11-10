@@ -1755,6 +1755,6 @@ must be one of the six, and a named command must be registered.
 - Local evidence: crates/automation/tests/roundtrip.rs::the_session_tools_are_the_only_ones_without_a_command: fails if one of the six gains a command, so the list cannot go stale.
 - Local evidence: crates/automation/tests/automation.rs::tool_table_is_well_formed: the pre-existing guard that every named command is registered — unchanged and passing.
 - Local evidence: docs/capabilities.toml: regenerated, 23 interface groups, 152 automation tools, 5 network places; catalogue commands with a serving tool 42 -> 59.
-- Local evidence: docs/implementation/build_backlog.py: 680 records (basic 382 / advanced 210 / future 88), unchanged.
+- Local evidence: docs/implementation/build_backlog.py: 681 records (basic 383 / advanced 210 / future 88) after this record.
 - Local evidence: docs/implementation/test_*.py: 60 unittests pass; check_disclosure.py and check_egress.py pass.
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42813297896
