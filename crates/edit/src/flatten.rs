@@ -8,9 +8,14 @@
 //! comments take their pop-ups and replies with them; flattened widgets are removed from the
 //! form's field tree.
 //!
-//! An annotation that has no appearance and none this build can draw keeps its place: flattening
-//! bakes markup in, it does not delete markup it could not bake. Replies are the exception —
-//! they carry an empty box by design, are never drawn, and go with the comment they answer.
+//! A comment that has no appearance and none this build can draw keeps its place: flattening
+//! bakes markup in, it does not delete markup it could not bake, because a comment's text, author,
+//! state and replies are stored nowhere else. Replies are the exception within that — they carry
+//! an empty box by design, are never drawn, and go with the comment they answer.
+//!
+//! Widgets are removed whether or not their appearance could be placed: a field's value lives in
+//! the form, flattening fields is the explicit request to take them out of it, and the caller that
+//! wants their look kept regenerates appearances first (`pdfcraft_forms::redraw_field`).
 
 use std::collections::HashSet;
 
@@ -163,13 +168,20 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                 xobjects.set(name.into_bytes(), Object::Ref(ap));
                 drawn += 1;
             }
-            // An annotation this build cannot draw (its appearance is missing and cannot be
+            // A comment this build cannot draw (its appearance is missing and cannot be
             // regenerated, or its `/Rect` is unusable) keeps its place in the file: flattening
-            // bakes markup into the page, it does not delete markup it could not bake. Replies
-            // land here too — they have an empty box by design and never draw — and the pass below
-            // takes each one away exactly when the comment it answers was flattened, so a reply
-            // is never left without its parent nor lost while the parent stays.
-            if placed.is_none() {
+            // bakes markup into the page, it does not delete markup it could not bake, and a
+            // comment's text, author, state and replies exist nowhere else. Replies land here too
+            // — they have an empty box by design and never draw — and the pass below takes each
+            // one away exactly when the comment it answers was flattened, so a reply is never
+            // left without its parent nor lost while the parent stays.
+            //
+            // Widgets are not comments: a field's value lives in the form, not in its appearance,
+            // and flattening fields is the explicit request to take them out of the form. An
+            // unchecked box whose `/Off` state has nothing to place is drawn as nothing and
+            // removed like any other; `pdfcraft_forms::redraw_field` is how a caller keeps the
+            // look (sanitize does that before flattening).
+            if placed.is_none() && !widget {
                 continue;
             }
             match entry.as_ref() {
