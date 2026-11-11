@@ -7,6 +7,10 @@
 //! annotations are left alone; links are kept (they have no ink and stay clickable). Flattened
 //! comments take their pop-ups and replies with them; flattened widgets are removed from the
 //! form's field tree.
+//!
+//! An annotation that has no appearance and none this build can draw keeps its place: flattening
+//! bakes markup in, it does not delete markup it could not bake. Replies are the exception —
+//! they carry an empty box by design, are never drawn, and go with the comment they answer.
 
 use std::collections::HashSet;
 
@@ -132,7 +136,7 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             if flags & (HIDDEN | NO_VIEW) != 0 || appearance(doc, &d).is_some() {
                 continue;
             }
-            // A subtype this build cannot draw only fails here; it is still removed below.
+            // A subtype this build cannot draw fails here and stays in the file (see below).
             let _ = pdfcraft_annot::set_appearance(doc, r);
         }
         for (k, entry) in list.iter().enumerate() {
@@ -148,6 +152,7 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                 continue;
             }
             let rect = nums(doc, d.get(b"Rect")).filter(|r| r.len() == 4).map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
+            let mut drew = false;
             if let (Some(ap), Some(rect)) = (appearance(doc, d), rect) {
                 let form = doc.get(ap).as_dict().cloned().unwrap_or_default();
                 if let Some(m) = placement(doc, &form, rect) {
@@ -155,7 +160,17 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                     content.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(m[0]), n(m[1]), n(m[2]), n(m[3]), n(m[4]), n(m[5])));
                     xobjects.set(name.into_bytes(), Object::Ref(ap));
                     drawn += 1;
+                    drew = true;
                 }
+            }
+            // An annotation this build cannot draw (its appearance is missing and cannot be
+            // regenerated, or its `/Rect` is unusable) keeps its place in the file: flattening
+            // bakes markup into the page, it does not delete markup it could not bake. Replies
+            // land here too — they have an empty box by design and never draw — and the pass below
+            // takes each one away exactly when the comment it answers was flattened, so a reply
+            // is never left without its parent nor lost while the parent stays.
+            if !drew {
+                continue;
             }
             match entry.as_ref() {
                 Some(r) => {
