@@ -7,6 +7,15 @@
 //! annotations are left alone; links are kept (they have no ink and stay clickable). Flattened
 //! comments take their pop-ups and replies with them; flattened widgets are removed from the
 //! form's field tree.
+//!
+//! A comment that has no appearance and none this build can draw keeps its place: flattening
+//! bakes markup in, it does not delete markup it could not bake, because a comment's text, author,
+//! state and replies are stored nowhere else. Replies are the exception within that — they carry
+//! an empty box by design, are never drawn, and go with the comment they answer.
+//!
+//! Widgets are removed whether or not their appearance could be placed: a field's value lives in
+//! the form, flattening fields is the explicit request to take them out of it, and the caller that
+//! wants their look kept regenerates appearances first (`pdfcraft_forms::redraw_field`).
 
 use std::collections::HashSet;
 
@@ -132,7 +141,7 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             if flags & (HIDDEN | NO_VIEW) != 0 || appearance(doc, &d).is_some() {
                 continue;
             }
-            // A subtype this build cannot draw only fails here; it is still removed below.
+            // A subtype this build cannot draw fails here and stays in the file (see below).
             let _ = pdfcraft_annot::set_appearance(doc, r);
         }
         for (k, entry) in list.iter().enumerate() {
@@ -148,14 +157,32 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                 continue;
             }
             let rect = nums(doc, d.get(b"Rect")).filter(|r| r.len() == 4).map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
-            if let (Some(ap), Some(rect)) = (appearance(doc, d), rect) {
+            // How to place the appearance, when there is one that can be placed at all.
+            let placed = appearance(doc, d).zip(rect).and_then(|(ap, rect)| {
                 let form = doc.get(ap).as_dict().cloned().unwrap_or_default();
-                if let Some(m) = placement(doc, &form, rect) {
-                    let name = xobject_name(&existing_xo, &xobjects, &mut name_n);
-                    content.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(m[0]), n(m[1]), n(m[2]), n(m[3]), n(m[4]), n(m[5])));
-                    xobjects.set(name.into_bytes(), Object::Ref(ap));
-                    drawn += 1;
-                }
+                placement(doc, &form, rect).map(|m| (ap, m))
+            });
+            if let Some((ap, m)) = placed {
+                let name = xobject_name(&existing_xo, &xobjects, &mut name_n);
+                content.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(m[0]), n(m[1]), n(m[2]), n(m[3]), n(m[4]), n(m[5])));
+                xobjects.set(name.into_bytes(), Object::Ref(ap));
+                drawn += 1;
+            }
+            // A comment this build cannot draw (its appearance is missing and cannot be
+            // regenerated, or its `/Rect` is unusable) keeps its place in the file: flattening
+            // bakes markup into the page, it does not delete markup it could not bake, and a
+            // comment's text, author, state and replies exist nowhere else. Replies land here too
+            // — they have an empty box by design and never draw — and the pass below takes each
+            // one away exactly when the comment it answers was flattened, so a reply is never
+            // left without its parent nor lost while the parent stays.
+            //
+            // Widgets are not comments: a field's value lives in the form, not in its appearance,
+            // and flattening fields is the explicit request to take them out of the form. An
+            // unchecked box whose `/Off` state has nothing to place is drawn as nothing and
+            // removed like any other; `pdfcraft_forms::redraw_field` is how a caller keeps the
+            // look (sanitize does that before flattening).
+            if placed.is_none() && !widget {
+                continue;
             }
             match entry.as_ref() {
                 Some(r) => {

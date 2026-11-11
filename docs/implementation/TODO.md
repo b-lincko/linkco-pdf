@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B052 · **Active stage:** basic
+**Active component:** B053 · **Active stage:** basic
 
-## Basic (383 records)
+## Basic (384 records)
 
-complete: 55, in_progress: 7, pending: 321
+complete: 56, in_progress: 7, pending: 321
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -70,6 +70,7 @@ complete: 55, in_progress: 7, pending: 321
 | B050 | [x] Redaction fill colour and overlay text: a mark keeps and reports its appearance (GAP-protect.redaction-properties) | P0 | complete | GAP-protect.redaction-properties |
 | B051 | [x] Crop an image: trim each side and only the kept region shows (GAP-edit.image-crop) | P0 | complete | GAP-edit.image-crop |
 | B052 | [x] Every automation tool names the command it serves (GAP-misc.cli-completeness) | P0 | complete | GAP-misc.cli-completeness |
+| B053 | [x] Flattening keeps a comment it cannot draw (REC-C01) | P0 | complete | REC-C01 |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1758,3 +1759,48 @@ must be one of the six, and a named command must be registered.
 - Local evidence: docs/implementation/build_backlog.py: 681 records (basic 383 / advanced 210 / future 88) after this record.
 - Local evidence: docs/implementation/test_*.py: 60 unittests pass; check_disclosure.py and check_egress.py pass.
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/42813297896
+
+### B053: Flattening keeps a comment it cannot draw (REC-C01)
+
+- Status: **complete**; parent(s): REC-C01.
+- Acceptance: Flattening bakes an annotation's appearance into the page. A comment whose appearance cannot be drawn
+is left in the file instead of being deleted, because a comment's text, author, review state and
+replies are stored nowhere else. A reply still goes with the comment it answers. Widgets are
+unaffected: flattening fields is the explicit request to take them out of the form.
+
+- Audit: REC-C01, the interoperable annotation appearance suite, approached from the side that fails quietly.
+`flatten_which` ran two loops that never talked to each other: the first generated an appearance for a
+comment that lacked one and deliberately ignored failure, because some subtypes have no `build` arm;
+the second drew what it could and then removed every selected annotation regardless. The return value
+counted only what was drawn, so a deletion left no trace in it either.
+
+Reached by: a comment subtype no arm covers (`Sound`), a comment with no stored appearance whose
+`/Rect` is not four numbers, or an appearance whose bounding box cannot be placed. The audit also
+confirmed the positive claim of GAP-comment.appearance-generation: every type PdfCraft creates has an
+appearance — highlight multiplies (`/BM /Multiply`), Caret, cloud borders, callouts with a leader line
+and `/RD`, stamps, ink, polygons, ink signatures — so that gap's note is about rich text, which is
+GAP-comment.text-box.
+
+- Ci: passed
+- Notes: Only a comment that was not drawn keeps its place. My first version held back every annotation that
+drew nothing, and two existing tests caught it: `flattening_keeps_the_look_and_drops_the_objects` and
+the sanitize test flatten a form whose check box has an `/Off` state with no bounding box to place,
+and both assert the field tree ends up empty. They are right — a field's value is in the form object,
+not in its appearance, so a widget that draws nothing loses nothing. The rule is now that difference,
+written where it is applied and in the module header.
+
+The same CI round surfaced audit drift unrelated to the change: RUSTSEC-2025-0007 (ring) and
+RUSTSEC-2022-0048 (xml-rs) no longer match anything and failed the job, and RUSTSEC-2026-0486
+(rustix, issued 11 November) appeared against a lockfile this branch does not touch. The two stale
+ignores are recorded as notes with their facts kept, and rustix is accounted for with the limits of
+what was checked written down. rustix is not bumped: no toolchain in this container, and a hand-edited
+checksum breaks the build.
+
+- Local evidence: crates/edit/src/tests.rs::flattening_keeps_a_comment_it_cannot_draw: a sound comment with no stored appearance survives flattening with its text and subtype, while the square beside it is baked in and removed.
+- Local evidence: crates/edit/src/tests.rs::flattening_removes_a_reply_though_it_draws_nothing: the note's icon is drawn and the reply goes with it.
+- Local evidence: crates/edit/src/tests.rs::flattening_draws_appearances_into_the_page_and_removes_the_comments: unchanged, still 2 drawn and no annotations left.
+- Local evidence: crates/edit/src/tests.rs::flattening_keeps_a_note_whose_appearance_is_missing: unchanged, the generated icon is baked in.
+- Local evidence: crates/engine/src/tests.rs::flattening_keeps_the_look_and_drops_the_objects: unchanged, fields still leave the form.
+- Local evidence: crates/ui-egui/tests/redact.rs::removing_hidden_information_and_sanitizing: unchanged, the field tree is empty after sanitize.
+- Local evidence: docs/implementation/build_backlog.py and build_capabilities.py --check: pass; 60 implementation unittests pass.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/43001282305

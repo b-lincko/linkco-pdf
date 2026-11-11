@@ -214,6 +214,48 @@ fn flattening_keeps_a_note_whose_appearance_is_missing() {
     assert!(flat.contains("q 1 0 0 1 10 10 cm /PCFl0 Do Q"), "{flat}");
 }
 
+/// A reply is never drawn (it has an empty appearance box) and must still go with its parent, or
+/// flattening would leave a reply whose comment is no longer there.
+#[test]
+fn flattening_removes_a_reply_though_it_draws_nothing() {
+    use pdfcraft_annot::{Meta, NewAnnotation, NoteIcon, Shape, Style, add_annotation, add_reply};
+    let mut doc = fixture();
+    let meta = Meta { date: None, id: "x".into() };
+    let shape = Shape::Note { at: [200.0, 700.0], icon: NoteIcon::Comment };
+    let style = Style::default_for(&shape);
+    let note = add_annotation(&mut doc, &NewAnnotation { page: 0, shape, style, contents: "c".into(), author: "a".into() }, &meta).unwrap();
+    add_reply(&mut doc, 0, note, "reply", "b", &meta).unwrap();
+    assert_eq!(flatten(&mut doc, &[0], true, false).unwrap(), 1, "the note icon is drawn; the reply is not");
+    let doc = reopen(&doc);
+    assert!(pdfcraft_annot::summaries(&doc).is_empty(), "the note and its reply are both gone");
+}
+
+/// Flattening bakes markup into the page; it is not a way to delete markup that could not be
+/// baked. A comment whose appearance this build cannot draw — a sound comment, whose `/Sound`
+/// stream no `appearance::build` arm covers, with no stored appearance to fall back on — has no
+/// ink to lose, so removing it would delete data the person never asked to remove.
+#[test]
+fn flattening_keeps_a_comment_it_cannot_draw() {
+    let page = stream("", " ");
+    let sound = "<< /Type /Sound /R 8000 /C 1 /B 8 /Length 0 >>\nstream\n\nendstream";
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R 7 0 R] >>",
+        &page,
+        "<< /Type /Annot /Subtype /Sound /Rect [10 10 30 30] /Contents (a recorded note) /T (Ada) /Sound 6 0 R >>",
+        sound,
+        "<< /Type /Annot /Subtype /Square /Rect [50 50 90 90] /C [1 0 0] /Contents (a box) >>",
+    ]);
+    let n = flatten(&mut doc, &[0], true, false).unwrap();
+    assert_eq!(n, 1, "only the square has an appearance to draw");
+    let doc = reopen(&doc);
+    let left = pdfcraft_annot::summaries(&doc);
+    let kept: Vec<&str> = left.iter().filter_map(|s| s.contents.as_deref()).collect();
+    assert_eq!(kept, ["a recorded note"], "the comment that could not be drawn is still there, word for word");
+    assert_eq!(left[0].subtype, "Sound", "and is still a sound comment, not something rewritten");
+}
+
 /// Display space is in points, so on a `/UserUnit 2` page an item's box maps to half as many
 /// user-space units. Items record the `/UserUnit` they were written for; one without it was
 /// written when display space was in user-space units, and reads back scaled to points.

@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B052"
+active_component = "B053"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -1269,4 +1269,68 @@ ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/42813297896"
 ci_notes = """
 Green on the first run: wasm32 check, test on ubuntu-latest and windows-latest, dependency licences and
 advisories. The fuzz job is skipped outside the nightly schedule.
+"""
+
+[components.B053]
+title = "Flattening keeps a comment it cannot draw (REC-C01)"
+stage = "basic"
+parent_tasks = ["REC-C01"]
+status = "complete"
+code = [
+  "crates/edit/src/flatten.rs",
+  "crates/edit/src/tests.rs",
+  "deny.toml",
+]
+acceptance = """
+Flattening bakes an annotation's appearance into the page. A comment whose appearance cannot be drawn
+is left in the file instead of being deleted, because a comment's text, author, review state and
+replies are stored nowhere else. A reply still goes with the comment it answers. Widgets are
+unaffected: flattening fields is the explicit request to take them out of the form.
+"""
+audit = """
+REC-C01, the interoperable annotation appearance suite, approached from the side that fails quietly.
+`flatten_which` ran two loops that never talked to each other: the first generated an appearance for a
+comment that lacked one and deliberately ignored failure, because some subtypes have no `build` arm;
+the second drew what it could and then removed every selected annotation regardless. The return value
+counted only what was drawn, so a deletion left no trace in it either.
+
+Reached by: a comment subtype no arm covers (`Sound`), a comment with no stored appearance whose
+`/Rect` is not four numbers, or an appearance whose bounding box cannot be placed. The audit also
+confirmed the positive claim of GAP-comment.appearance-generation: every type PdfCraft creates has an
+appearance — highlight multiplies (`/BM /Multiply`), Caret, cloud borders, callouts with a leader line
+and `/RD`, stamps, ink, polygons, ink signatures — so that gap's note is about rich text, which is
+GAP-comment.text-box.
+"""
+notes = """
+Only a comment that was not drawn keeps its place. My first version held back every annotation that
+drew nothing, and two existing tests caught it: `flattening_keeps_the_look_and_drops_the_objects` and
+the sanitize test flatten a form whose check box has an `/Off` state with no bounding box to place,
+and both assert the field tree ends up empty. They are right — a field's value is in the form object,
+not in its appearance, so a widget that draws nothing loses nothing. The rule is now that difference,
+written where it is applied and in the module header.
+
+The same CI round surfaced audit drift unrelated to the change: RUSTSEC-2025-0007 (ring) and
+RUSTSEC-2022-0048 (xml-rs) no longer match anything and failed the job, and RUSTSEC-2026-0486
+(rustix, issued 11 November) appeared against a lockfile this branch does not touch. The two stale
+ignores are recorded as notes with their facts kept, and rustix is accounted for with the limits of
+what was checked written down. rustix is not bumped: no toolchain in this container, and a hand-edited
+checksum breaks the build.
+"""
+local_evidence = [
+  "crates/edit/src/tests.rs::flattening_keeps_a_comment_it_cannot_draw: a sound comment with no stored appearance survives flattening with its text and subtype, while the square beside it is baked in and removed",
+  "crates/edit/src/tests.rs::flattening_removes_a_reply_though_it_draws_nothing: the note's icon is drawn and the reply goes with it",
+  "crates/edit/src/tests.rs::flattening_draws_appearances_into_the_page_and_removes_the_comments: unchanged, still 2 drawn and no annotations left",
+  "crates/edit/src/tests.rs::flattening_keeps_a_note_whose_appearance_is_missing: unchanged, the generated icon is baked in",
+  "crates/engine/src/tests.rs::flattening_keeps_the_look_and_drops_the_objects: unchanged, fields still leave the form",
+  "crates/ui-egui/tests/redact.rs::removing_hidden_information_and_sanitizing: unchanged, the field tree is empty after sanitize",
+  "docs/implementation/build_backlog.py and build_capabilities.py --check: pass; 60 implementation unittests pass",
+]
+ci = "passed"
+ci_run_urls = ["https://github.com/b-lincko/linkco-pdf/actions/runs/43001282305"]
+ci_notes = """
+Five rounds. 3da384f failed clippy on an assignment the first version did not need, and the audit job
+on the stale ring ignore. 5329e8b fixed the shape but failed clippy on `&sound` where `sound` was
+already `&str`, and the same audit job. 77237ab fixed both, and the tests then failed: my rule was too
+broad and caught widgets. 839e9ec narrowed it to comments; tests passed everywhere and the audit job
+went red on newly filed advisories. 427dcee accounted for those, and the run is green.
 """
