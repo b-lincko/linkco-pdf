@@ -152,16 +152,16 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                 continue;
             }
             let rect = nums(doc, d.get(b"Rect")).filter(|r| r.len() == 4).map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
-            let mut drew = false;
-            if let (Some(ap), Some(rect)) = (appearance(doc, d), rect) {
+            // How to place the appearance, when there is one that can be placed at all.
+            let placed = appearance(doc, d).zip(rect).and_then(|(ap, rect)| {
                 let form = doc.get(ap).as_dict().cloned().unwrap_or_default();
-                if let Some(m) = placement(doc, &form, rect) {
-                    let name = xobject_name(&existing_xo, &xobjects, &mut name_n);
-                    content.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(m[0]), n(m[1]), n(m[2]), n(m[3]), n(m[4]), n(m[5])));
-                    xobjects.set(name.into_bytes(), Object::Ref(ap));
-                    drawn += 1;
-                    drew = true;
-                }
+                placement(doc, &form, rect).map(|m| (ap, m))
+            });
+            if let Some((ap, m)) = placed {
+                let name = xobject_name(&existing_xo, &xobjects, &mut name_n);
+                content.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(m[0]), n(m[1]), n(m[2]), n(m[3]), n(m[4]), n(m[5])));
+                xobjects.set(name.into_bytes(), Object::Ref(ap));
+                drawn += 1;
             }
             // An annotation this build cannot draw (its appearance is missing and cannot be
             // regenerated, or its `/Rect` is unusable) keeps its place in the file: flattening
@@ -169,7 +169,7 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             // land here too — they have an empty box by design and never draw — and the pass below
             // takes each one away exactly when the comment it answers was flattened, so a reply
             // is never left without its parent nor lost while the parent stays.
-            if !drew {
+            if placed.is_none() {
                 continue;
             }
             match entry.as_ref() {
