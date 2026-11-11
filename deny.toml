@@ -54,10 +54,18 @@ ignore = [
     # `rustls-webpki`, but RUSTSEC no longer files it against RUSTSEC-2025-0007, so the ignore that
     # recorded it matched nothing and failed the job. If a ring advisory is filed again, the job
     # turns red: that is the point — read it then rather than trusting an entry that aged out.
-    # xml-rs is unmaintained, with no vulnerability. It reaches the tree only as a build dependency
-    # of gl_generator (the OpenGL bindings generator), so it runs at compile time and ships in no
-    # binary.
-    { id = "RUSTSEC-2022-0048", reason = "xml-rs unmaintained; build-time only, via gl_generator" },
+    # rustix 1.1.5 (RUSTSEC-2026-0486, issued 11 November 2026, patched in 1.1.6): the six xattr
+    # buffer functions could mark unwritten bytes initialized when handed a zero-length buffer.
+    # No PdfCraft crate calls any of them — this tree uses rustix only for `fs::fsync`, `io::Errno`
+    # and `process::geteuid`. rustix also arrives transitively (wayland, calloop, polling, zbus), and
+    # those paths are not audited here. The lockfile is left alone rather than bumped by hand: a
+    # checksum edited without cargo is a build break waiting to happen, and this container has no
+    # toolchain. Move to 1.1.6 with `cargo update -p rustix` at the next lockfile touch.
+    { id = "RUSTSEC-2026-0486", reason = "rustix xattr buffer, none of the six functions is called here" },
+    # xml-rs 0.8.29 is still in the tree, only as a build dependency of gl_generator (the OpenGL
+    # bindings generator), so it runs at compile time and ships in no binary. Its unmaintained
+    # advisory (RUSTSEC-2022-0048) also no longer matches, so like `ring` above it is recorded
+    # here rather than kept as an ignore that suppresses nothing.
 ]
 
 # egui's default UI fonts (Ubuntu-Light, Hack, emoji-icon-font): font licences on the AGENTS.md
