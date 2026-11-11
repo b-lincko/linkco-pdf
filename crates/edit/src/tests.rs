@@ -244,7 +244,7 @@ fn flattening_keeps_a_comment_it_cannot_draw() {
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R 7 0 R] >>",
         &page,
         "<< /Type /Annot /Subtype /Sound /Rect [10 10 30 30] /Contents (a recorded note) /T (Ada) /Sound 6 0 R >>",
-        &sound,
+        sound,
         "<< /Type /Annot /Subtype /Square /Rect [50 50 90 90] /C [1 0 0] /Contents (a box) >>",
     ]);
     let n = flatten(&mut doc, &[0], true, false).unwrap();
