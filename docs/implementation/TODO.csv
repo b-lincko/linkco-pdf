@@ -691,3 +691,21 @@ Planned(""M6"") and unregistered; it now names app.preferences, which is where t
 JavaScript on and off and which the registry holds. Two tests hold the line: a tool without a command
 must be one of the six, and a named command must be registered.
 "
+B053,component,basic,P0,Flattening keeps a comment it cannot draw (REC-C01),complete,bounded implementation component,REC-C01,"Flattening bakes an annotation's appearance into the page. A comment whose appearance cannot be drawn
+is left in the file instead of being deleted, because a comment's text, author, review state and
+replies are stored nowhere else. A reply still goes with the comment it answers. Widgets are
+unaffected: flattening fields is the explicit request to take them out of the form.
+","Only a comment that was not drawn keeps its place. My first version held back every annotation that
+drew nothing, and two existing tests caught it: `flattening_keeps_the_look_and_drops_the_objects` and
+the sanitize test flatten a form whose check box has an `/Off` state with no bounding box to place,
+and both assert the field tree ends up empty. They are right — a field's value is in the form object,
+not in its appearance, so a widget that draws nothing loses nothing. The rule is now that difference,
+written where it is applied and in the module header.
+
+The same CI round surfaced audit drift unrelated to the change: RUSTSEC-2025-0007 (ring) and
+RUSTSEC-2022-0048 (xml-rs) no longer match anything and failed the job, and RUSTSEC-2026-0486
+(rustix, issued 11 November) appeared against a lockfile this branch does not touch. The two stale
+ignores are recorded as notes with their facts kept, and rustix is accounted for with the limits of
+what was checked written down. rustix is not bumped: no toolchain in this container, and a hand-edited
+checksum breaks the build.
+"
