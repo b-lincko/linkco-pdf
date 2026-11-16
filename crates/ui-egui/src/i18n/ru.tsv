@@ -2182,3 +2182,10 @@ key	Space	Пробел
 	Print cancelled: nothing was sent to {printer}	Печать отменена: на {printer} ничего не отправлено
 	Waiting its turn	Ожидает своей очереди
 	The job was cancelled before it started	Задание отменено до начала
+	Font size	Размер шрифта
+	Font size presets	Готовые размеры шрифта
+	Increase font size	Увеличить размер шрифта
+	Decrease font size	Уменьшить размер шрифта
+	Increase interface size	Увеличить размер интерфейса
+	Decrease interface size	Уменьшить размер интерфейса
+	New Fill & Sign text will use this font size	Новый текст в «Заполнить и подписать» будет использовать этот размер шрифта

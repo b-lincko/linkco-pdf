@@ -2264,3 +2264,10 @@ key	Space	Spazio
 	Print cancelled: nothing was sent to {printer}	Stampa annullata: non è stato inviato nulla a {printer}
 	Waiting its turn	In attesa del proprio turno
 	The job was cancelled before it started	Il processo è stato annullato prima di iniziare
+	Font size	Dimensione carattere
+	Font size presets	Dimensioni carattere predefinite
+	Increase font size	Aumenta dimensione carattere
+	Decrease font size	Riduci dimensione carattere
+	Increase interface size	Aumenta dimensione dell'interfaccia
+	Decrease interface size	Riduci dimensione dell'interfaccia
+	New Fill & Sign text will use this font size	Il nuovo testo di Compila e firma userà questa dimensione carattere

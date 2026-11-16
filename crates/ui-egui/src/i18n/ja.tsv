@@ -2257,3 +2257,10 @@ key	Space	スペース
 	Print cancelled: nothing was sent to {printer}	印刷を取り消しました: {printer} には何も送信されていません
 	Waiting its turn	順番待ちです
 	The job was cancelled before it started	ジョブは開始前に取り消されました
+	Font size	フォントサイズ
+	Font size presets	フォントサイズ一覧
+	Increase font size	フォントサイズを大きくする
+	Decrease font size	フォントサイズを小さくする
+	Increase interface size	表示サイズを大きくする
+	Decrease interface size	表示サイズを小さくする
+	New Fill & Sign text will use this font size	新しい入力と署名のテキストはこのフォントサイズになります

@@ -2143,3 +2143,10 @@ key	Space	空格
 	Print cancelled: nothing was sent to {printer}	列印已取消：未向 {printer} 傳送任何內容
 	Waiting its turn	正在等待輪次
 	The job was cancelled before it started	工作在開始前已取消
+	Font size	字號
+	Font size presets	預設字號
+	Increase font size	放大字號
+	Decrease font size	縮小字號
+	Increase interface size	放大介面大小
+	Decrease interface size	縮小介面大小
+	New Fill & Sign text will use this font size	新的填寫與簽署文字將使用此字號

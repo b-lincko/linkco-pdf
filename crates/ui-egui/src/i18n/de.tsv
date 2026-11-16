@@ -2257,3 +2257,10 @@ key	Space	Leertaste
 	Print cancelled: nothing was sent to {printer}	Druck abgebrochen: an {printer} wurde nichts gesendet
 	Waiting its turn	Wartet auf seinen Durchlauf
 	The job was cancelled before it started	Der Vorgang wurde abgebrochen, bevor er begann
+	Font size	Schriftgröße
+	Font size presets	Vorgaben für Schriftgröße
+	Increase font size	Schriftgröße vergrößern
+	Decrease font size	Schriftgröße verkleinern
+	Increase interface size	Größe der Oberfläche vergrößern
+	Decrease interface size	Größe der Oberfläche verkleinern
+	New Fill & Sign text will use this font size	Neuer Text unter „Ausfüllen und unterschreiben“ verwendet diese Schriftgröße

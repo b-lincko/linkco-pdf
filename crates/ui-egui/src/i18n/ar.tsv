@@ -2277,3 +2277,10 @@ key	Space	مسافة
 	Print cancelled: nothing was sent to {printer}	أُلغيت الطباعة: لم يُرسل شيء إلى {printer}
 	Waiting its turn	في انتظار دورها
 	The job was cancelled before it started	أُلغي العمل قبل أن يبدأ
+	Font size	حجم الخط
+	Font size presets	أحجام الخط المسبقة
+	Increase font size	تكبير حجم الخط
+	Decrease font size	تصغير حجم الخط
+	Increase interface size	تكبير حجم الواجهة
+	Decrease interface size	تصغير حجم الواجهة
+	New Fill & Sign text will use this font size	سيستخدم نص التعبئة والتوقيع الجديد حجم الخط هذا

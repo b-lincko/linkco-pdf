@@ -2257,3 +2257,10 @@ key	Space	Espace
 	Print cancelled: nothing was sent to {printer}	Impression annulée : rien n'a été envoyé à {printer}
 	Waiting its turn	En attente de son tour
 	The job was cancelled before it started	Le travail a été annulé avant de commencer
+	Font size	Taille de police
+	Font size presets	Tailles de police prédéfinies
+	Increase font size	Augmenter la taille de police
+	Decrease font size	Réduire la taille de police
+	Increase interface size	Augmenter la taille de l'interface
+	Decrease interface size	Réduire la taille de l'interface
+	New Fill & Sign text will use this font size	Le nouveau texte de Remplir et signer utilisera cette taille de police
