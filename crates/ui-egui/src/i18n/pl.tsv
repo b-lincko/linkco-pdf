@@ -2239,3 +2239,10 @@ key	Space	Spacja
 	Print cancelled: nothing was sent to {printer}	Drukowanie anulowane: nic nie zostało wysłane do {printer}
 	Waiting its turn	Czeka na swoją kolej
 	The job was cancelled before it started	Zadanie anulowano przed rozpoczęciem
+	Font size	Rozmiar czcionki
+	Font size presets	Gotowe rozmiary czcionki
+	Increase font size	Zwiększ rozmiar czcionki
+	Decrease font size	Zmniejsz rozmiar czcionki
+	Increase interface size	Zwiększ rozmiar interfejsu
+	Decrease interface size	Zmniejsz rozmiar interfejsu
+	New Fill & Sign text will use this font size	Nowy tekst w Wypełnij i podpisz użyje tego rozmiaru czcionki

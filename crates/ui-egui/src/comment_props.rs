@@ -90,6 +90,15 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
         let Some(a) = doc.info.annotations.iter().find(|a| a.page == page && a.index == index && a.in_reply_to.is_none()) else { return };
+        if a.fill_sign && a.subtype == "FreeText" {
+            if let Some(p) = doc.comment_props(page, index)
+                && let Some(size) = p.font_size.and_then(crate::fill_sign::valid_text_size)
+            {
+                self.fill_text_size = size;
+                self.notify_tr("New Fill & Sign text will use this font size");
+            }
+            return;
+        }
         let Some(tool) = crate::comments::tool_for(a) else { return };
         let Some(p) = doc.comment_props(page, index) else { return };
         let mut style = self.comment_prefs.style(tool);
@@ -104,6 +113,9 @@ impl PdfCraftApp {
             style.fill = p.fill;
         }
         self.comment_prefs.set_style(tool, style);
+        if let Some(size) = p.font_size {
+            self.comment_prefs.set_font_size(tool, size);
+        }
         self.notify_fmt("New {tool} comments will look like this one", &[("tool", &crate::i18n::in_sentence(tl!(tool.label())))]);
     }
 
@@ -133,6 +145,12 @@ pub fn edits(d: &PropsDraft) -> Vec<Edit> {
     }
     if e.restylable && e.fillable && e.fill != o.fill {
         out.push(Edit::FillAnnotation { page: d.page, index: d.index, fill: e.fill });
+    }
+    if e.restylable
+        && let Some(size) = e.font_size
+        && o.font_size.is_none_or(|prev| (size - prev).abs() > 1e-3)
+    {
+        out.push(Edit::FontSizeAnnotation { page: d.page, index: d.index, size });
     }
     let author = (e.author != o.author).then(|| e.author.clone());
     let subject = (e.subject != o.subject).then(|| e.subject.clone());
@@ -216,6 +234,27 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
                     if let Some(w) = e.width.as_mut() {
                         ui.label(tl!("Thickness"));
                         ui.add(egui::Slider::new(w, 0.5..=12.0).step_by(0.5).suffix(" pt"));
+                        ui.end_row();
+                    }
+                    if let Some(size) = e.font_size.as_mut() {
+                        let l = ui.label(tl!("Font size"));
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled_ui(*size > 1.0 + 1e-3, |ui| crate::icons::button(ui, "minus", 24.0, false, tl!("Decrease font size")))
+                                .inner
+                                .clicked()
+                            {
+                                *size = crate::content_ui::step_font_size(*size, false, 1.0, 400.0);
+                            }
+                            ui.add(egui::DragValue::new(size).range(1.0..=400.0).speed(0.5).suffix(" pt")).labelled_by(l.id);
+                            if ui
+                                .add_enabled_ui(*size < 400.0 - 1e-3, |ui| crate::icons::button(ui, "plus", 24.0, false, tl!("Increase font size")))
+                                .inner
+                                .clicked()
+                            {
+                                *size = crate::content_ui::step_font_size(*size, true, 1.0, 400.0);
+                            }
+                        });
                         ui.end_row();
                     }
                     if let Some(ends) = e.endings.as_mut() {

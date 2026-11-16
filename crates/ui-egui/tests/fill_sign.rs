@@ -930,7 +930,7 @@ fn flatten_on_save_is_off_by_default_and_round_trips() {
 fn saving_flattens_fill_and_sign_only_when_the_preference_is_on() {
     use pdfcraft_engine::{Edit, FillMark, NewAnnotation, Shape, Style};
     use pdfcraft_ui_egui::SaveTarget;
-    use pdfcraft_ui_egui::fill_sign::TypeBox;
+    use pdfcraft_ui_egui::fill_sign::{TEXT_SIZE, TypeBox};
 
     let dir = std::env::temp_dir().join(format!("pdfcraft-fill-flatten-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -947,7 +947,7 @@ fn saving_flattens_fill_and_sign_only_when_the_preference_is_on() {
     app.open_bytes("form.pdf", None, FIXTURE.to_vec()).unwrap();
     let id = app.views[0].id;
     app.session.apply(id, mark).unwrap();
-    app.views[0].fill_text = Some(TypeBox { page: 0, at: [40.0, 200.0], text: "Typed".into(), focus: false });
+    app.views[0].fill_text = Some(TypeBox { page: 0, at: [40.0, 200.0], text: "Typed".into(), focus: false, size: TEXT_SIZE });
     let kept = dir.join("kept.pdf");
     app.save_override = Some(kept.to_string_lossy().into_owned());
     assert!(app.save_active(SaveTarget::InPlace));
@@ -958,7 +958,7 @@ fn saving_flattens_fill_and_sign_only_when_the_preference_is_on() {
     assert!(texts.iter().any(|t| t == "Typed"), "an open type box is saved: {texts:?}");
     assert_eq!(reopened.session.get(reopened.views[0].id).unwrap().info.annotations.len(), 2, "the check mark stays too");
 
-    app.views[0].fill_text = Some(TypeBox { page: 0, at: [40.0, 160.0], text: "More".into(), focus: false });
+    app.views[0].fill_text = Some(TypeBox { page: 0, at: [40.0, 160.0], text: "More".into(), focus: false, size: TEXT_SIZE });
     app.flatten_fill_sign_on_save = true;
     let flat = dir.join("flat.pdf");
     app.save_override = Some(flat.to_string_lossy().into_owned());
@@ -1234,4 +1234,35 @@ fn select_tool_picks_up_a_signature_over_a_form_field() {
     // Clear of the signature, the field still takes the click.
     click(&mut h, 270.0, 190.0);
     assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("city"));
+}
+
+#[test]
+fn fill_and_sign_text_size_can_be_changed_and_persisted() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("sign.fill.text"));
+    h.run_steps(2);
+    assert_eq!(h.state().fill_text_size, 10.0);
+
+    h.get_by_label("Increase font size").click();
+    h.run_steps(2);
+    assert_eq!(h.state().fill_text_size, 11.0);
+
+    h.get_by_label("Font size").click();
+    h.run_steps(2);
+    h.get_by_label("24 pt").click();
+    h.run_steps(2);
+    assert_eq!(h.state().fill_text_size, 24.0);
+
+    click(&mut h, 50.0, 250.0);
+    h.event(egui::Event::Text("Signed Boldly".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(24.0));
+
+    let mut fresh = PdfCraftApp::new();
+    fresh.restore(&h.state().persist());
+    assert_eq!(fresh.fill_text_size, 24.0);
 }

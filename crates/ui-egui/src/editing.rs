@@ -315,7 +315,7 @@ impl PdfCraftApp {
             return true;
         }
         let author = self.comment_prefs.author.clone();
-        let edit = crate::fill_sign::typed(tb.page, tb.at, &text, &author);
+        let edit = crate::fill_sign::typed_with_size(tb.page, tb.at, &text, &author, tb.size);
         if self.apply_edit(edit) {
             if let Some(view) = self.views.get_mut(i) {
                 view.fill_text = None;
@@ -759,6 +759,7 @@ fn comment_page(edit: &Edit) -> Option<usize> {
         | Edit::MoveAnnotation { page, .. }
         | Edit::ResizeAnnotation { page, .. }
         | Edit::StyleAnnotation { page, .. }
+        | Edit::FontSizeAnnotation { page, .. }
         | Edit::FillAnnotation { page, .. }
         | Edit::SetAnnotationInfo { page, .. } => Some(*page),
         _ => None,

@@ -2278,3 +2278,10 @@ key	Space	Пробіл
 	Print cancelled: nothing was sent to {printer}	Друк скасовано: на {printer} нічого не надіслано
 	Waiting its turn	Очікує своєї черги
 	The job was cancelled before it started	Завдання скасовано до початку
+	Font size	Розмір шрифту
+	Font size presets	Готові розміри шрифту
+	Increase font size	Збільшити розмір шрифту
+	Decrease font size	Зменшити розмір шрифту
+	Increase interface size	Збільшити розмір інтерфейсу
+	Decrease interface size	Зменшити розмір інтерфейсу
+	New Fill & Sign text will use this font size	Новий текст у «Заповнення й підпис» використовуватиме цей розмір шрифту

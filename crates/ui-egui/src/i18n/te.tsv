@@ -2187,3 +2187,10 @@ key	Space	స్పేస్
 	Print cancelled: nothing was sent to {printer}	ముద్రణ రద్దు చేయబడింది: {printer}కు ఏమీ పంపలేదు
 	Waiting its turn	తన వంతు కోసం వేచి ఉంది
 	The job was cancelled before it started	పని ప్రారంభం కాకముందే రద్దు చేయబడింది
+	Font size	ఫాంట్ పరిమాణం
+	Font size presets	సిద్ధమైన ఫాంట్ పరిమాణాలు
+	Increase font size	ఫాంట్ పరిమాణాన్ని పెంచు
+	Decrease font size	ఫాంట్ పరిమాణాన్ని తగ్గించు
+	Increase interface size	ఇంటర్‌ఫేస్ పరిమాణాన్ని పెంచు
+	Decrease interface size	ఇంటర్‌ఫేస్ పరిమాణాన్ని తగ్గించు
+	New Fill & Sign text will use this font size	కొత్త నింపడం & సంతకం టెక్స్ట్ ఈ ఫాంట్ పరిమాణాన్ని ఉపయోగిస్తుంది

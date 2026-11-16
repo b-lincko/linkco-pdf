@@ -213,3 +213,43 @@ fn a_kept_draft_goes_with_its_deleted_page() {
     h.run_steps(2);
     assert!(h.state().views[0].content.draft.is_none());
 }
+
+#[test]
+fn font_size_can_exceed_72_pt_via_step_presets_and_direct_entry() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(3);
+    assert_eq!(h.state().text_style.size, 12.0);
+
+    h.get_by_label("Increase font size").click();
+    h.run_steps(2);
+    assert_eq!(h.state().text_style.size, 14.0);
+
+    h.get_by_label("Font size presets").click();
+    h.run_steps(2);
+    h.get_by_label("96 pt").click();
+    h.run_steps(2);
+    assert_eq!(h.state().text_style.size, 96.0);
+
+    h.get_by_label("Font size").click();
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text("144".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().text_style.size, 144.0);
+
+    let p = at(&h, 50.0, 120.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Huge".into()));
+    h.run_steps(2);
+    h.get_by_label("Done adding text").click();
+    h.run_steps(3);
+
+    let items = added(&h);
+    assert_eq!(items.len(), 1);
+    let pdfcraft_engine::AddedContent::Text(t) = &items[0].content else { panic!("expected text: {items:?}") };
+    assert_eq!(t.text, "Huge");
+    assert_eq!(t.size, 144.0);
+}

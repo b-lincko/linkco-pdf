@@ -11,7 +11,19 @@ pub const MIN: f32 = 0.5;
 pub const MAX: f32 = 3.0;
 
 /// The sizes the Preferences menu offers, in percent.
-pub const PRESETS: [u16; 10] = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250];
+pub const PRESETS: [u16; 11] = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
+
+/// Step the interface size one preset larger or smaller within [`MIN`]..=[`MAX`].
+pub fn step(current: f32, larger: bool) -> f32 {
+    let cur = if current.is_finite() { current.clamp(MIN, MAX) } else { 1.0 };
+    let cur_pct = percent(cur);
+    let next_pct = if larger {
+        PRESETS.iter().copied().find(|&p| u32::from(p) > cur_pct).unwrap_or(300)
+    } else {
+        PRESETS.iter().rev().copied().find(|&p| u32::from(p) < cur_pct).unwrap_or(50)
+    };
+    f32::from(next_pct) / 100.0
+}
 
 /// A factor from settings, the control channel or the system: finite and within [`MIN`]..=[`MAX`],
 /// or `None`.
@@ -117,5 +129,14 @@ mod tests {
         h.state_mut().set_option("ui-scale", "auto").expect("auto");
         h.run_steps(3);
         assert_eq!(h.ctx.pixels_per_point(), 1.25);
+    }
+
+    #[test]
+    fn step_moves_between_presets_and_reaches_300() {
+        assert_eq!(step(1.0, true), 1.1);
+        assert_eq!(step(1.0, false), 0.9);
+        assert_eq!(step(2.5, true), 3.0);
+        assert_eq!(step(3.0, true), 3.0);
+        assert_eq!(step(0.5, false), 0.5);
     }
 }

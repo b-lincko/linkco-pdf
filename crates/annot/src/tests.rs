@@ -1147,3 +1147,46 @@ fn another_annotation_has_no_redaction_look() {
     let doc = document_of(&objs);
     assert!(summaries(&doc)[0].redaction.is_none());
 }
+
+#[test]
+fn text_box_and_typewriter_font_size_can_be_increased_and_validated() {
+    let mut doc = fixture();
+    assert_eq!(props(&doc, 0, 0).unwrap().font_size, None);
+    let tb = add_annotation(&mut doc, &new(0, Shape::TextBox { rect: [100.0, 680.0, 220.0, 700.0], font_size: 12.0 }), &meta("tb")).unwrap();
+    let tw = add_annotation(&mut doc, &new(0, Shape::Typewriter { rect: [100.0, 500.0, 150.0, 516.0], font_size: 10.0 }), &meta("tw")).unwrap();
+    set_contents(&mut doc, 0, tb, "Larger text wraps and grows down", &meta("")).unwrap();
+    set_contents(&mut doc, 0, tw, "Resize me", &meta("")).unwrap();
+
+    assert_eq!(props(&doc, 0, tb).unwrap().font_size, Some(12.0));
+    let tb_before = rect(&list(&doc, 0)[tb]);
+    let tw_before = rect(&list(&doc, 0)[tw]);
+
+    set_font_size(&mut doc, 0, tb, 36.0, &meta("tb-size")).unwrap();
+    set_font_size(&mut doc, 0, tw, 48.0, &meta("tw-size")).unwrap();
+    let doc = reopen(&doc);
+
+    assert_eq!(props(&doc, 0, tb).unwrap().font_size, Some(36.0));
+    assert_eq!(props(&doc, 0, tw).unwrap().font_size, Some(48.0));
+    let tb_d = &list(&doc, 0)[tb];
+    let tw_d = &list(&doc, 0)[tw];
+    assert_eq!(text(tb_d, b"DA"), "0 0.4 1 rg /Helv 36 Tf");
+    assert_eq!(text(tw_d, b"DA"), "0 0.4 1 rg /Helv 48 Tf");
+    assert!(text(tb_d, b"RC").contains("font-size:36pt"));
+    assert!(ap_content(&doc, tb_d).contains("/Helv 36 Tf"));
+    assert!(ap_content(&doc, tw_d).contains("/Helv 48 Tf"));
+
+    let tb_after = rect(tb_d);
+    assert_eq!((tb_after[0], tb_after[2], tb_after[3]), (tb_before[0], tb_before[2], tb_before[3]));
+    assert!(tb_after[1] < tb_before[1], "text box grew downward: {tb_before:?} -> {tb_after:?}");
+    let tw_after = rect(tw_d);
+    assert!(tw_after[2] - tw_after[0] > tw_before[2] - tw_before[0], "typewriter grew wider: {tw_before:?} -> {tw_after:?}");
+    assert!(tw_after[3] - tw_after[1] > tw_before[3] - tw_before[1], "typewriter grew taller: {tw_before:?} -> {tw_after:?}");
+
+    let mut doc = doc;
+    for bad in [0.0, 0.5, 401.0, -5.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(set_font_size(&mut doc, 0, tb, bad, &meta("")), Err(AnnotError::Invalid(_))), "{bad}");
+    }
+    assert!(matches!(set_font_size(&mut doc, 0, 0, 20.0, &meta("")), Err(AnnotError::Invalid(_))), "square has no font size");
+    set_locked(&mut doc, 0, tb, true).unwrap();
+    assert!(matches!(set_font_size(&mut doc, 0, tb, 18.0, &meta("")), Err(AnnotError::Invalid(_))), "locked");
+}

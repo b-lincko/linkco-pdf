@@ -2219,3 +2219,10 @@ key	Space	Интервал
 	Print cancelled: nothing was sent to {printer}	Печатът е отменен: нищо не беше изпратено към {printer}
 	Waiting its turn	Чака своя ред
 	The job was cancelled before it started	Задачата беше отменена, преди да започне
+	Font size	Размер на шрифта
+	Font size presets	Готови размери на шрифта
+	Increase font size	Увеличи размера на шрифта
+	Decrease font size	Намали размера на шрифта
+	Increase interface size	Увеличи размера на интерфейса
+	Decrease interface size	Намали размера на интерфейса
+	New Fill & Sign text will use this font size	Новият текст в „Попълни и подпиши“ ще използва този размер на шрифта

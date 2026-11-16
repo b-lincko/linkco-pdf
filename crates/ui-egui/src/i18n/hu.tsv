@@ -2255,3 +2255,10 @@ key	Space	Szóköz
 	Print cancelled: nothing was sent to {printer}	A nyomtatás megszakítva: semmi nem került a(z) {printer} nyomtatóra
 	Waiting its turn	Vár a sorára
 	The job was cancelled before it started	A feladat a kezdés előtt megszakítva
+	Font size	Betűméret
+	Font size presets	Előre beállított betűméretek
+	Increase font size	Betűméret növelése
+	Decrease font size	Betűméret csökkentése
+	Increase interface size	Felület méretének növelése
+	Decrease interface size	Felület méretének csökkentése
+	New Fill & Sign text will use this font size	Az új Kitöltés és aláírás szöveg ezt a betűméretet fogja használni

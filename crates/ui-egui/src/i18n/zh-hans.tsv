@@ -2221,3 +2221,10 @@ key	Space	空格
 	Print cancelled: nothing was sent to {printer}	打印已取消：未向 {printer} 发送任何内容
 	Waiting its turn	正在等待轮次
 	The job was cancelled before it started	任务在开始前已取消
+	Font size	字号
+	Font size presets	预设字号
+	Increase font size	增大字号
+	Decrease font size	减小字号
+	Increase interface size	增大界面大小
+	Decrease interface size	减小界面大小
+	New Fill & Sign text will use this font size	新的填写与签名文字将使用此字号
