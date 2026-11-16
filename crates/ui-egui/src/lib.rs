@@ -684,6 +684,8 @@ pub struct PdfCraftApp {
     pub link_draft: Option<LinkDraft>,
     /// The style new text gets (Edit a PDF ▸ Format text).
     pub text_style: pdfcraft_engine::AddedText,
+    /// Font size (pt) used by Fill & Sign Type text and Date stamps.
+    pub fill_text_size: f64,
     /// The Replace Pages dialog's state.
     pub replace_draft: Option<files::ReplaceDraft>,
     /// The last web link the app asked the system to open (tests and automation).
@@ -936,6 +938,7 @@ impl PdfCraftApp {
             print_draft: PrintDraft::default(),
             link_draft: None,
             text_style: content_ui::default_style(),
+            fill_text_size: fill_sign::TEXT_SIZE,
             replace_draft: None,
             number_draft: NumberDraft { from: 1, to: 1, style: pdfcraft_engine::LabelStyle::Decimal, prefix: String::new(), start: 1 },
         }
@@ -1571,6 +1574,10 @@ impl PdfCraftApp {
         });
         // Set outside json! above, which is at serde_json's macro recursion limit.
         persisted["organize_zoom"] = serde_json::json!(self.organize_zoom);
+        persisted["fill_text_size"] = serde_json::json!(self.fill_text_size);
+        let font_sizes: Vec<_> =
+            self.comment_prefs.font_sizes().map(|(t, size)| serde_json::json!({ "tool": t.command(), "size": size })).collect();
+        persisted["comment_font_sizes"] = serde_json::Value::Array(font_sizes);
         persisted.to_string()
     }
 
@@ -1634,6 +1641,9 @@ impl PdfCraftApp {
         }
         // Settings are untrusted: a size out of range follows the system instead.
         self.ui_scale = v["ui_scale"].as_f64().and_then(ui_scale::valid);
+        if let Some(size) = v["fill_text_size"].as_f64().and_then(fill_sign::valid_text_size) {
+            self.fill_text_size = size;
+        }
         // Settings are untrusted: an unusable pattern keeps the default.
         if let Some(f) = v["date_format"].as_str() {
             let _ = self.session.set_date_format(f);
@@ -1671,6 +1681,14 @@ impl PdfCraftApp {
                     let mut s = self.comment_prefs.style(tool);
                     s.fill = fill;
                     self.comment_prefs.set_style(tool, s);
+                }
+            }
+        }
+        if let Some(sizes) = v["comment_font_sizes"].as_array() {
+            for e in sizes {
+                let Some(tool) = e["tool"].as_str().and_then(crate::comments::CommentTool::from_command) else { continue };
+                if let Some(size) = e["size"].as_f64() {
+                    self.comment_prefs.set_font_size(tool, size);
                 }
             }
         }
@@ -1828,6 +1846,14 @@ impl PdfCraftApp {
             ("default-zoom", _) => {
                 self.view_defaults =
                     self.view_defaults.with_zoom(value).ok_or("default-zoom must be fit-width, fit-page or a percentage from 8 to 6400")?;
+            }
+            ("fill-text-size", _) => {
+                let size = value
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(fill_sign::valid_text_size)
+                    .ok_or("fill-text-size must be between 4 and 300")?;
+                self.fill_text_size = size;
             }
             ("organize", Some(v)) => v.organize = value != "off",
             // `--grid-zoom 150`: the size of the pages in the organize grid, in percent.

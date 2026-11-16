@@ -3514,3 +3514,31 @@ fn a_phone_photo_used_as_a_custom_stamp_is_embedded_upright() {
     let rect = pdfcraft_annot::summaries(cos)[0].rect;
     assert!(((rect[2] - rect[0]) - 20.0).abs() < 0.01 && ((rect[3] - rect[1]) - 30.0).abs() < 0.01, "{rect:?}");
 }
+
+#[test]
+fn font_size_annotation_edit_updates_and_undoes() {
+    let mut session = Session::new();
+    let blank = session.create_blank(400.0, 500.0, 1).unwrap();
+    let id = session.open_new("form.pdf", blank).unwrap();
+    let shape = Shape::TextBox { rect: [40.0, 300.0, 220.0, 340.0], font_size: 12.0 };
+    session
+        .apply(
+            id,
+            Edit::AddAnnotation(NewAnnotation {
+                page: 0,
+                style: Style::default_for(&shape),
+                shape,
+                contents: "Resize me".into(),
+                author: "Ada".into(),
+            }),
+        )
+        .unwrap();
+    assert_eq!(session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(12.0));
+    session.apply(id, Edit::FontSizeAnnotation { page: 0, index: 0, size: 42.0 }).unwrap();
+    assert_eq!(session.get(id).unwrap().can_undo(), Some("Change comment properties"));
+    assert_eq!(session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(42.0));
+    session.undo(id).unwrap();
+    assert_eq!(session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(12.0));
+    session.redo(id).unwrap();
+    assert_eq!(session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(42.0));
+}

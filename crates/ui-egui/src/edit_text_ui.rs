@@ -511,7 +511,7 @@ pub(crate) fn page_input(
             source_rect: l.rect.map(|v| v as f32),
             multiline: l.lines.len() > 1,
             max_width,
-            size: (l.size as f32 * scale).clamp(8.0, 72.0),
+            size: (l.size as f32 * scale).clamp(8.0, 600.0),
             focus: true,
             look: look_of(l),
             look0: look_of(l),
@@ -540,7 +540,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     let right = xf.rect.right().min(viewport_right) - 6.0;
     ed.max_width = if ed.multiline { ed.rect.width() } else { (right - ed.rect.left()).max(ed.rect.width()) };
     let scale = (ed.rect.width() / (ed.source_rect[2] - ed.source_rect[0]).abs().max(1.0)).max(0.01);
-    ed.size = (ed.look.size as f32 * scale).clamp(8.0, 72.0);
+    ed.size = (ed.look.size as f32 * scale).clamp(8.0, 600.0);
     let font = editor_font(&ed.look, ed.size);
     let text_color = color32(ed.look.color);
     let mut done = None;

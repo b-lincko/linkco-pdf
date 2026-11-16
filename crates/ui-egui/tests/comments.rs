@@ -993,3 +993,47 @@ fn a_closed_comments_panel_stays_closed_when_picking_comment_tools() {
     h.run_steps(2);
     assert_eq!(h.state().right, Some(RightPanel::Comments));
 }
+
+#[test]
+fn text_box_font_size_can_be_changed_before_and_after_placing() {
+    let mut h = harness(|app| app.set_option("quick", "freetext").unwrap());
+    assert_eq!(h.state().comment_prefs.font_size(pdfcraft_ui_egui::comments::CommentTool::TextBox), Some(12.0));
+
+    h.get_by_label("Increase font size").click();
+    h.run_steps(2);
+    assert_eq!(h.state().comment_prefs.font_size(pdfcraft_ui_egui::comments::CommentTool::TextBox), Some(14.0));
+
+    h.get_by_label("Font size").click();
+    h.run_steps(2);
+    h.get_by_label("36 pt").click();
+    h.run_steps(2);
+    assert_eq!(h.state().comment_prefs.font_size(pdfcraft_ui_egui::comments::CommentTool::TextBox), Some(36.0));
+
+    click_pt(&mut h, (40.0, 140.0));
+    field(&h, "Type text").type_text("Heading");
+    h.run_steps(2);
+    h.get_by_label("Post").click();
+    h.run_steps(3);
+
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(36.0));
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 0)));
+
+    h.get_by_label("Increase font size").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(48.0));
+
+    h.state_mut().open_comment_props(0, 0);
+    h.run_steps(2);
+    h.get_all_by_label("Increase font size").last().unwrap().click();
+    h.run_steps(1);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.get(id).unwrap().comment_props(0, 0).unwrap().font_size, Some(72.0));
+
+    h.state_mut().make_comment_default(0, 0);
+    let mut fresh = PdfCraftApp::new();
+    fresh.restore(&h.state().persist());
+    assert_eq!(fresh.comment_prefs.font_size(pdfcraft_ui_egui::comments::CommentTool::TextBox), Some(72.0));
+}

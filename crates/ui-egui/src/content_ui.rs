@@ -410,32 +410,122 @@ fn finish(cv: &mut ContentView, d: TextDraft, added: &[Added]) -> Option<Edit> {
     }
 }
 
+/// Minimum and maximum font sizes (pt) accepted by Format text.
+pub const MIN_FONT_SIZE: f64 = 1.0;
+pub const MAX_FONT_SIZE: f64 = 500.0;
+
+const FONT_SIZE_PRESETS: [f64; 18] =
+    [6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0, 96.0, 120.0, 144.0];
+const FONT_SIZE_STEPS: [f64; 23] =
+    [4.0, 6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0, 96.0, 120.0, 144.0, 200.0, 300.0, 400.0, 500.0];
+
+/// Step `current` one notch larger or smaller within `min..=max`.
+pub fn step_font_size(current: f64, larger: bool, min: f64, max: f64) -> f64 {
+    let cur = if current.is_finite() { current.clamp(min, max) } else { 12.0_f64.clamp(min, max) };
+    if larger {
+        FONT_SIZE_STEPS.iter().copied().find(|&v| v <= max && v > cur + 1e-3).unwrap_or(max)
+    } else {
+        FONT_SIZE_STEPS.iter().rev().copied().find(|&v| v >= min && v < cur - 1e-3).unwrap_or(min)
+    }
+}
+
+/// Parse a typed font size such as `"24"` or `"24 pt"` and clamp to `min..=max`.
+pub fn parse_font_size(raw: &str, min: f64, max: f64) -> Option<f64> {
+    let trimmed = raw.trim();
+    let num = trimmed.strip_suffix("pt").or_else(|| trimmed.strip_suffix("PT")).unwrap_or(trimmed).trim();
+    let v: f64 = num.parse().ok()?;
+    (v.is_finite() && v > 0.0).then(|| (v.clamp(min, max) * 100.0).round() / 100.0)
+}
+
+fn format_pt_num(size: f64) -> String {
+    let rounded = (size * 100.0).round() / 100.0;
+    format!("{rounded}")
+}
+
+#[derive(Clone, Debug, Default)]
+struct SizeDraft {
+    source_bits: u64,
+    text: String,
+}
+
 /// Format text (shown in the Edit panel while a text item is selected, or for new text).
 /// Returns the changed style; for a selected item the caller turns it into an update.
 pub(crate) fn format_panel(ui: &mut egui::Ui, t: &Tokens, style: &AddedText) -> Option<AddedText> {
     let mut s = style.clone();
     widgets::section_title(ui, tl!("Format text"));
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("font-family").selected_text(s.family.label()).width(110.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("font-family").selected_text(s.family.label()).width(132.0).show_ui(ui, |ui| {
             for f in [FontFamily::Helvetica, FontFamily::Times, FontFamily::Courier] {
                 ui.selectable_value(&mut s.family, f, f.label());
             }
         });
-        // A list rather than a drag value: every change is an undo step.
-        egui::ComboBox::from_id_salt("font-size").selected_text(format!("{} pt", s.size)).width(70.0).show_ui(ui, |ui| {
-            for size in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0] {
-                ui.selectable_value(&mut s.size, size, format!("{size} pt"));
-            }
-        });
-    });
-    ui.horizontal(|ui| {
         if ui.selectable_label(s.bold, egui::RichText::new("B").strong()).on_hover_text(tl!("Bold")).clicked() {
             s.bold = !s.bold;
         }
         if ui.selectable_label(s.italic, egui::RichText::new("I").italics()).on_hover_text(tl!("Italic")).clicked() {
             s.italic = !s.italic;
         }
-        ui.separator();
+    });
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let draft_id = ui.make_persistent_id("format-font-size-draft");
+        let te_id = ui.make_persistent_id("format-font-size-input");
+        let focused_before = ui.memory(|m| m.has_focus(te_id));
+        let mut draft = ui.data_mut(|d| d.get_temp::<SizeDraft>(draft_id).unwrap_or_default());
+        if !focused_before && draft.source_bits != s.size.to_bits() {
+            draft.text = format_pt_num(s.size);
+            draft.source_bits = s.size.to_bits();
+        }
+        if ui
+            .add_enabled_ui(s.size > MIN_FONT_SIZE + 1e-3, |ui| crate::icons::button(ui, "minus", 24.0, false, tl!("Decrease font size")))
+            .inner
+            .clicked()
+        {
+            s.size = step_font_size(s.size, false, MIN_FONT_SIZE, MAX_FONT_SIZE);
+            draft.text = format_pt_num(s.size);
+            draft.source_bits = s.size.to_bits();
+        }
+        let previous = draft.text.clone();
+        let te = ui.add(egui::TextEdit::singleline(&mut draft.text).id(te_id).desired_width(48.0).horizontal_align(egui::Align::Center));
+        te.widget_info(|| {
+            let mut info = egui::WidgetInfo::text_edit(ui.is_enabled(), &previous, &draft.text, "");
+            info.label = Some(tl!("Font size").to_string());
+            info
+        });
+        if te.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            draft.text = format_pt_num(s.size);
+            ui.ctx().memory_mut(|m| m.surrender_focus(te_id));
+        } else if te.lost_focus() {
+            if let Some(parsed) = parse_font_size(&draft.text, MIN_FONT_SIZE, MAX_FONT_SIZE) {
+                s.size = parsed;
+            }
+            draft.text = format_pt_num(s.size);
+            draft.source_bits = s.size.to_bits();
+        }
+        ui.label(egui::RichText::new("pt").color(t.text_muted));
+        let presets = crate::icons::button(ui, "chevron-down", 22.0, false, tl!("Font size presets"));
+        egui::Popup::menu(&presets).show(|ui| {
+            for size in FONT_SIZE_PRESETS {
+                if ui.selectable_label((s.size - size).abs() < 0.05, format!("{size} pt")).clicked() {
+                    s.size = size;
+                    draft.text = format_pt_num(size);
+                    draft.source_bits = size.to_bits();
+                    ui.close();
+                }
+            }
+        });
+        if ui
+            .add_enabled_ui(s.size < MAX_FONT_SIZE - 1e-3, |ui| crate::icons::button(ui, "plus", 24.0, false, tl!("Increase font size")))
+            .inner
+            .clicked()
+        {
+            s.size = step_font_size(s.size, true, MIN_FONT_SIZE, MAX_FONT_SIZE);
+            draft.text = format_pt_num(s.size);
+            draft.source_bits = s.size.to_bits();
+        }
+        ui.data_mut(|d| d.insert_temp(draft_id, draft));
+    });
+    ui.horizontal(|ui| {
         for (a, icon, tip) in [
             (TextAlign::Left, "align-left", tl!("Align left")),
             (TextAlign::Center, "align-center", tl!("Centre")),
@@ -628,4 +718,28 @@ pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_size_steps_and_parses_past_72_pt() {
+        assert_eq!(step_font_size(12.0, true, MIN_FONT_SIZE, MAX_FONT_SIZE), 14.0);
+        assert_eq!(step_font_size(12.0, false, MIN_FONT_SIZE, MAX_FONT_SIZE), 11.0);
+        assert_eq!(step_font_size(72.0, true, MIN_FONT_SIZE, MAX_FONT_SIZE), 96.0);
+        assert_eq!(step_font_size(144.0, true, MIN_FONT_SIZE, MAX_FONT_SIZE), 200.0);
+        assert_eq!(step_font_size(500.0, true, MIN_FONT_SIZE, MAX_FONT_SIZE), 500.0);
+        assert_eq!(step_font_size(4.0, false, MIN_FONT_SIZE, MAX_FONT_SIZE), 1.0);
+        assert_eq!(step_font_size(24.0, true, 4.0, 300.0), 28.0);
+        assert_eq!(step_font_size(200.0, true, 4.0, 300.0), 300.0);
+
+        assert_eq!(parse_font_size("96", 1.0, 500.0), Some(96.0));
+        assert_eq!(parse_font_size(" 120.5 pt ", 1.0, 500.0), Some(120.5));
+        assert_eq!(parse_font_size("999", 1.0, 500.0), Some(500.0));
+        assert_eq!(parse_font_size("0", 1.0, 500.0), None);
+        assert_eq!(parse_font_size("-4", 1.0, 500.0), None);
+        assert_eq!(parse_font_size("abc", 1.0, 500.0), None);
+    }
 }

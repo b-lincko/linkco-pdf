@@ -160,17 +160,30 @@ impl FillTool {
     }
 }
 
-/// Text being typed onto a page: (page, top-left in user space, text, focus requested).
+/// Text being typed onto a page: (page, top-left in user space, text, focus requested, font size).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeBox {
     pub page: usize,
     pub at: [f64; 2],
     pub text: String,
     pub focus: bool,
+    pub size: f64,
 }
 
-/// The size Fill & Sign uses for typed text (Acrobat's default is 10 pt).
+/// The size Fill & Sign uses for typed text by default (Acrobat's default is 10 pt).
 pub const TEXT_SIZE: f64 = 10.0;
+/// Bounds (pt) for user-adjustable Fill & Sign typed text and date stamps.
+pub const MIN_TEXT_SIZE: f64 = 4.0;
+pub const MAX_TEXT_SIZE: f64 = 300.0;
+
+/// Validate a Fill & Sign text size from persistence or options (`4.0..=300.0`).
+pub fn valid_text_size(v: f64) -> Option<f64> {
+    (v.is_finite() && (MIN_TEXT_SIZE..=MAX_TEXT_SIZE).contains(&v)).then_some((v * 100.0).round() / 100.0)
+}
+
+fn clamp_text_size(v: f64) -> f64 {
+    if v.is_finite() { v.clamp(MIN_TEXT_SIZE, MAX_TEXT_SIZE) } else { TEXT_SIZE }
+}
 
 fn to_user(xf: &PageXform, info: &DocInfo, page: usize, p: Pos2) -> [f64; 2] {
     let (vx, vy) = xf.screen_to_view(p);
@@ -183,10 +196,16 @@ fn new(page: usize, shape: Shape, contents: String, author: &str) -> Edit {
     Edit::AddAnnotation(NewAnnotation { page, shape, style, contents, author: author.to_string() })
 }
 
-/// A typewriter annotation sized to its text.
+/// A typewriter annotation sized to its text at `TEXT_SIZE`.
 pub fn typed(page: usize, at: [f64; 2], text: &str, author: &str) -> Edit {
-    let rect = crate::comments::text_box_rect(at, text, TEXT_SIZE);
-    new(page, Shape::Typewriter { rect, font_size: TEXT_SIZE }, text.to_string(), author)
+    typed_with_size(page, at, text, author, TEXT_SIZE)
+}
+
+/// A typewriter annotation sized to its text at `size` points (`MIN_TEXT_SIZE..=MAX_TEXT_SIZE`).
+pub fn typed_with_size(page: usize, at: [f64; 2], text: &str, author: &str, size: f64) -> Edit {
+    let size = clamp_text_size(size);
+    let rect = crate::comments::text_box_rect(at, text, size);
+    new(page, Shape::Typewriter { rect, font_size: size }, text.to_string(), author)
 }
 
 /// Place a saved signature (strokes normalised to a 0–1 box, y up) with its left edge at `at`,
@@ -380,6 +399,7 @@ pub(crate) fn page_input(
     preview: &mut Option<(SavedSig, egui::TextureHandle)>,
     author: &str,
     date_text: &Result<String, String>,
+    text_size: f64,
 ) -> Option<FillAction> {
     let pointer = ui.input(|i| i.pointer.hover_pos())?;
     if !resp.contains_pointer() || !xf.rect.contains(pointer) {
@@ -387,6 +407,7 @@ pub(crate) fn page_input(
     }
     let p = info.pages.get(page)?;
     let at = to_user(xf, info, page, pointer);
+    let text_size = clamp_text_size(text_size);
     let saved = match tool {
         FillTool::Signature => signature,
         FillTool::Initials => initials,
@@ -408,11 +429,18 @@ pub(crate) fn page_input(
         FillTool::Text => {
             // Clicking away from an open box commits it: the page sees this click before the box
             // sees its lost focus, so replacing the box first would drop what was typed.
-            let open = view.fill_text.replace(TypeBox { page, at: [at[0], at[1] + TEXT_SIZE * 0.6], text: String::new(), focus: true });
-            open.filter(|tb| !tb.text.trim().is_empty()).map(|tb| FillAction::Edit(Box::new(typed(tb.page, tb.at, tb.text.trim(), author))))
+            let open = view.fill_text.replace(TypeBox {
+                page,
+                at: [at[0], at[1] + text_size * 0.6],
+                text: String::new(),
+                focus: true,
+                size: text_size,
+            });
+            open.filter(|tb| !tb.text.trim().is_empty())
+                .map(|tb| FillAction::Edit(Box::new(typed_with_size(tb.page, tb.at, tb.text.trim(), author, tb.size))))
         }
         FillTool::Date => Some(match date_text {
-            Ok(text) => FillAction::Edit(Box::new(typed(page, [at[0], at[1] + TEXT_SIZE * 0.6], text, author))),
+            Ok(text) => FillAction::Edit(Box::new(typed_with_size(page, [at[0], at[1] + text_size * 0.6], text, author, text_size))),
             Err(why) => FillAction::Refused(why.clone()),
         }),
         FillTool::Signature => match signature {
@@ -457,26 +485,29 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     let mut cancel = false;
     egui::Area::new(egui::Id::new(("fill-text", view.id.0))).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let Some(t) = view.fill_text.as_mut() else { return };
-        let width = ((t.text.chars().count().max(8) as f32) * TEXT_SIZE as f32 * 0.6 * zoom).clamp(60.0, 600.0);
+        let size = clamp_text_size(t.size) as f32;
+        let max_w = 600.0_f32.max(size * 2.0 * zoom);
+        let width = ((t.text.chars().count().max(8) as f32) * size * 0.6 * zoom).clamp(60.0, max_w);
         // The area's max rect is last frame's size, which caps the edit's width; widen it so the
         // box grows as text is typed.
         ui.set_min_width(width);
         let r = ui.add(
             egui::TextEdit::singleline(&mut t.text)
-                .font(egui::FontId::proportional((TEXT_SIZE as f32 * zoom).max(8.0)))
+                .font(egui::FontId::proportional((size * zoom).max(8.0)))
                 .desired_width(width)
                 .background_color(Color32::from_rgba_unmultiplied(255, 255, 255, 230))
                 .text_color(Color32::BLACK)
                 .hint_text(tl!("Type text"))
                 .id_salt("fill-text-edit"),
         );
+        let refocused = t.focus;
         if t.focus {
             r.request_focus();
             t.focus = false;
         }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             cancel = true;
-        } else if r.lost_focus() {
+        } else if !refocused && r.lost_focus() {
             commit = true;
         }
     });
@@ -487,7 +518,7 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     if commit {
         let tb = view.fill_text.take()?;
         if !tb.text.trim().is_empty() {
-            return Some(typed(tb.page, tb.at, tb.text.trim(), author));
+            return Some(typed_with_size(tb.page, tb.at, tb.text.trim(), author, tb.size));
         }
     }
     None

@@ -2104,6 +2104,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let initials = app.initials.clone();
     let mut open_initials = false;
     let author = app.comment_prefs.author.clone();
+    let fill_text_size = app.fill_text_size;
     let today = app.session.today();
     // In Preferences ▸ Date format, or why it can't be stamped into the PDF.
     let date_text = crate::date_text_for_pdf(&app.session);
@@ -2393,6 +2394,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     &mut app.signature_preview,
                     &author,
                     &date_text,
+                    fill_text_size,
                 ) {
                     Some(crate::fill_sign::FillAction::Edit(e)) => view.pending_edit = Some(*e),
                     Some(crate::fill_sign::FillAction::Signature(e)) => {
@@ -3312,9 +3314,25 @@ fn notice_bar(ui: &mut egui::Ui, t: &Tokens, icon: &str, icon_color: Color32, te
 }
 
 /// The floating quick-action bar at the left edge of the document area.
+fn quick_bar_divider(ui: &mut egui::Ui, t: &Tokens) {
+    let (r, _) = ui.allocate_exact_size(vec2(32.0, 9.0), Sense::hover());
+    ui.painter().hline(r.x_range().shrink(6.0), r.center().y, Stroke::new(1.0, t.divider));
+}
+
 fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let pos = area.left_top() + vec2(14.0, 14.0);
+    let selected_freetext = if app.quick_tool == QuickTool::Select
+        && let Some((vi, id)) = app.active_ids()
+        && let Some((page, index)) = app.views[vi].comments.selected
+        && let Some(doc) = app.session.get(id)
+        && doc.allows_annotation()
+        && doc.info.annotations.iter().any(|a| a.page == page && a.index == index && !a.locked && a.subtype == "FreeText")
+    {
+        doc.comment_props(page, index).and_then(|p| p.font_size).map(|size| (vi, page, index, size))
+    } else {
+        None
+    };
     egui::Area::new(egui::Id::new("quick-bar")).order(egui::Order::Middle).fixed_pos(pos).show(ui.ctx(), |ui| {
         egui::Frame::NONE
             .fill(t.card)
@@ -3452,9 +3470,96 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                             }
                         });
                     if let QuickTool::Comment(tool) = app.quick_tool {
-                        let (r, _) = ui.allocate_exact_size(vec2(32.0, 9.0), Sense::hover());
-                        ui.painter().hline(r.x_range().shrink(6.0), r.center().y, Stroke::new(1.0, t.divider));
+                        quick_bar_divider(ui, &t);
                         comments::quick_bar_controls(ui, tool, &mut app.comment_prefs);
+                    } else if matches!(app.quick_tool, QuickTool::Fill(crate::fill_sign::FillTool::Text | crate::fill_sign::FillTool::Date)) {
+                        quick_bar_divider(ui, &t);
+                        let min = crate::fill_sign::MIN_TEXT_SIZE;
+                        let max = crate::fill_sign::MAX_TEXT_SIZE;
+                        let size = app.fill_text_size;
+                        let mut next_size: Option<(f64, bool)> = None;
+                        let resp = icons::button(ui, "type", 32.0, false, tl!("Font size"));
+                        egui::Popup::menu(&resp)
+                            .align(egui::RectAlign::RIGHT_START)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                if let Some((v, done)) = comments::font_size_popup_controls(ui, size, min..=max) {
+                                    next_size = Some((v, done));
+                                }
+                            });
+                        if ui
+                            .add_enabled_ui(size < max - 1e-3, |ui| icons::button(ui, "plus", 32.0, false, tl!("Increase font size")))
+                            .inner
+                            .clicked()
+                        {
+                            next_size = Some((crate::content_ui::step_font_size(size, true, min, max), true));
+                        }
+                        if ui
+                            .add_enabled_ui(size > min + 1e-3, |ui| icons::button(ui, "minus", 32.0, false, tl!("Decrease font size")))
+                            .inner
+                            .clicked()
+                        {
+                            next_size = Some((crate::content_ui::step_font_size(size, false, min, max), true));
+                        }
+                        if let Some((next, refocus)) = next_size {
+                            app.fill_text_size = next;
+                            if let Some(i) = app.active
+                                && let Some(tb) = app.views[i].fill_text.as_mut()
+                            {
+                                tb.size = next;
+                                if refocus {
+                                    tb.focus = true;
+                                }
+                            }
+                        }
+                    } else if let Some((vi, page, index, size)) = selected_freetext {
+                        quick_bar_divider(ui, &t);
+                        let mut commit_size = None;
+                        let resp = icons::button(ui, "type", 32.0, false, tl!("Font size"));
+                        let drag_id = ui.make_persistent_id("quick-bar-freetext-size");
+                        let source_key = (page, index, size.to_bits());
+                        let mut drag = ui.data_mut(|d| d.get_temp::<(usize, usize, u64, f64)>(drag_id));
+                        let popup_size = match drag {
+                            Some((p, idx, bits, val)) if (p, idx, bits) == source_key => val,
+                            _ => size,
+                        };
+                        egui::Popup::menu(&resp)
+                            .align(egui::RectAlign::RIGHT_START)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                if let Some((v, done)) = comments::font_size_popup_controls(ui, popup_size, 1.0..=400.0) {
+                                    drag = Some((page, index, size.to_bits(), v));
+                                    if done {
+                                        commit_size = Some(v);
+                                        drag = None;
+                                    }
+                                }
+                            });
+                        ui.data_mut(|d| match drag {
+                            Some(entry) => d.insert_temp(drag_id, entry),
+                            None => {
+                                let _ = d.remove_temp::<(usize, usize, u64, f64)>(drag_id);
+                            }
+                        });
+                        if ui
+                            .add_enabled_ui(size < 400.0 - 1e-3, |ui| icons::button(ui, "plus", 32.0, false, tl!("Increase font size")))
+                            .inner
+                            .clicked()
+                        {
+                            commit_size = Some(crate::content_ui::step_font_size(size, true, 1.0, 400.0));
+                        }
+                        if ui
+                            .add_enabled_ui(size > 1.0 + 1e-3, |ui| icons::button(ui, "minus", 32.0, false, tl!("Decrease font size")))
+                            .inner
+                            .clicked()
+                        {
+                            commit_size = Some(crate::content_ui::step_font_size(size, false, 1.0, 400.0));
+                        }
+                        if let Some(next) = commit_size
+                            && (next - size).abs() > 1e-3
+                        {
+                            app.views[vi].pending_edit = Some(pdfcraft_engine::Edit::FontSizeAnnotation { page, index, size: next });
+                        }
                     }
                 });
             });

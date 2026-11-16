@@ -369,7 +369,13 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
         None if app.quick_tool == crate::QuickTool::AddText => {
             crate::content_ui::hint(ui, t);
             if let Some(style) = crate::content_ui::format_panel(ui, t, &app.text_style) {
-                app.text_style = style;
+                app.text_style = style.clone();
+                if let Some((i, _)) = app.active_ids()
+                    && let Some(d) = app.views[i].content.draft.as_mut()
+                    && d.index.is_none()
+                {
+                    d.style = pdfcraft_engine::AddedText { text: String::new(), rect: [0.0; 4], ..style };
+                }
             }
         }
         None => return,

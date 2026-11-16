@@ -1798,6 +1798,74 @@ pub fn set_style(
     set_appearance(doc, r)
 }
 
+/// Change a text box, typewriter text or callout's font size in points (`1..=400`), preserving
+/// its colour, updating rich text (`/DS`, `/RC`), growing its box if needed so larger text is not
+/// clipped, and redrawing its appearance.
+pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let d = annot_dict(doc, r);
+    if d.name(b"Subtype") != Some(b"FreeText") {
+        return Err(AnnotError::Invalid("only text boxes, typewriter text and callouts have a font size".into()));
+    }
+    if !size.is_finite() || !(1.0..=400.0).contains(&size) {
+        return Err(AnnotError::Invalid("font size must be 1\u{2013}400 pt".into()));
+    }
+    if appearance::build(&d).is_none() {
+        return Err(AnnotError::Unsupported("FreeText".into()));
+    }
+    let is_typewriter = d.name(b"IT") == Some(b"FreeTextTypeWriter");
+    let (color, _) = appearance::parse_da(&d);
+    let [cr, cg, cb] = color.map(|x| x.clamp(0.0, 1.0));
+    let before = d;
+    doc.update_dict(r, |d| {
+        d.set(b"DA".to_vec(), PdfString::literal(format!("{} {} {} rg /Helv {} Tf", n(cr), n(cg), n(cb), n(size)).into_bytes()));
+        rich_text(d);
+        touch(d, meta);
+    })?;
+    let cur = annot_dict(doc, r);
+    let text = text_value(doc, &cur, b"Contents").unwrap_or_default();
+    let fit = if is_typewriter {
+        typewriter_box(&cur, &text, size)
+    } else {
+        fitted_box(doc, r, &text).map(|fit| {
+            // Keep the top and sides of a user-drawn text box; only grow downward so a box the
+            // user sized larger stays large.
+            if !cur.contains(b"CL") {
+                let nums: Option<Vec<f64>> = cur.get(b"Rect").and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|x| x.as_f64()).collect());
+                if let Some(old) = nums.filter(|v| v.len() == 4 && v.iter().all(|x| x.is_finite())) {
+                    return [fit[0], fit[1].min(old[1].min(old[3])), fit[2], fit[3]];
+                }
+            }
+            fit
+        })
+    };
+    let result = match fit {
+        Some(rect) => apply_text_box(doc, r, rect, meta),
+        None => set_appearance(doc, r),
+    };
+    if result.is_err() {
+        doc.set(r, Object::Dict(before));
+    }
+    result
+}
+
+/// Fit a typewriter annotation's rectangle to its text at `size`, preserving its top-left corner.
+fn typewriter_box(d: &Dict, text: &str, size: f64) -> Option<[f64; 4]> {
+    let rect: Vec<f64> = d.get(b"Rect")?.as_array()?.iter().map(|o| o.as_f64()).collect::<Option<Vec<_>>>()?;
+    if rect.len() != 4 || rect.iter().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let (x0, top) = (rect[0].min(rect[2]), rect[1].max(rect[3]));
+    let pad = 2.0 + border_width_of(d);
+    let longest = text.lines().map(|l| appearance::text_width(l, size)).fold(0.0, f64::max);
+    let max_w = 600.0_f64.max(size * 1.5);
+    let w = (longest + 2.0 * pad + 4.0).clamp(40.0, max_w);
+    let lines = appearance::wrap(text, size, (w - 2.0 * pad).max(1.0)).len().max(1) as f64;
+    let h = (lines * size * 1.2 + 2.0 * pad + 2.0).max(size * 1.4);
+    Some([x0, top - h, x0 + w, top])
+}
+
 /// Whether a comment of this subtype has an interior that can be filled (`/IC`: rectangles,
 /// ovals, polygons and clouds, §12.5.6.8–9).
 pub fn fillable(subtype: &str) -> bool {
@@ -2050,6 +2118,8 @@ pub struct Props {
     pub opacity: f64,
     /// Border / line width, for shapes, lines and drawings.
     pub width: Option<f64>,
+    /// `/DA` font size in points, for text boxes, typewriter text and callouts.
+    pub font_size: Option<f64>,
     /// Notes only.
     pub icon: Option<NoteIcon>,
     /// `/M`, as written.
@@ -2077,12 +2147,14 @@ pub fn props(doc: &Document, page: usize, index: usize) -> Option<Props> {
     let color = if subtype == "FreeText" { Some(appearance::parse_da(d).0) } else { (c.len() == 3).then(|| [c[0], c[1], c[2]]) };
     let width = matches!(subtype.as_str(), "Square" | "Circle" | "Line" | "Ink" | "Polygon" | "PolyLine")
         .then(|| d.get(b"BS").and_then(|b| b.as_dict()).and_then(|b| b.get(b"W")).and_then(|w| w.as_f64()).unwrap_or(1.0));
+    let font_size = (subtype == "FreeText").then(|| appearance::parse_da(d).1);
     Some(Props {
         author: text_value(doc, d, b"T").unwrap_or_default(),
         subject: text_value(doc, d, b"Subj").unwrap_or_default(),
         color,
         opacity: d.get(b"CA").and_then(|o| o.as_f64()).unwrap_or(1.0),
         width,
+        font_size,
         icon: (subtype == "Text").then(|| d.name(b"Name").and_then(|n| NoteIcon::from_name(&String::from_utf8_lossy(n))).unwrap_or(NoteIcon::Note)),
         modified: text_value(doc, d, b"M"),
         restylable: appearance::build(d).is_some(),

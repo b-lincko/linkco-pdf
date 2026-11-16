@@ -246,6 +246,7 @@ pub struct CommentPrefs {
     /// `/T` of new comments (Acrobat: Preferences ▸ Identity, default the login name).
     pub author: String,
     styles: Vec<(CommentTool, Style)>,
+    font_sizes: Vec<(CommentTool, f64)>,
     /// Keep the tool selected after use (the pin).
     pub pinned: bool,
     /// The tool each flyout group shows (the last one used).
@@ -257,6 +258,7 @@ impl Default for CommentPrefs {
         Self {
             author: login_name(),
             styles: ALL.iter().map(|t| (*t, Style::default_for(&t.sample()))).collect(),
+            font_sizes: vec![(CommentTool::TextBox, 12.0), (CommentTool::Callout, 10.0)],
             pinned: false,
             group_tool: [CommentTool::Note, CommentTool::Highlight, CommentTool::Ink],
         }
@@ -266,6 +268,22 @@ impl Default for CommentPrefs {
 impl CommentPrefs {
     pub fn style(&self, tool: CommentTool) -> Style {
         self.styles.iter().find(|(t, _)| *t == tool).map(|(_, s)| s.clone()).unwrap_or_default()
+    }
+
+    pub fn font_size(&self, tool: CommentTool) -> Option<f64> {
+        self.font_sizes.iter().find(|(t, _)| *t == tool).map(|(_, s)| *s)
+    }
+
+    pub fn font_sizes(&self) -> impl Iterator<Item = (CommentTool, f64)> + '_ {
+        self.font_sizes.iter().copied()
+    }
+
+    pub fn set_font_size(&mut self, tool: CommentTool, size: f64) {
+        if let Some((_, s)) = self.font_sizes.iter_mut().find(|(t, _)| *t == tool)
+            && size.is_finite()
+        {
+            *s = size.clamp(1.0, 400.0);
+        }
     }
 
     /// Every tool with its current default style (the persisted settings read this).
@@ -1201,11 +1219,13 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
         }
         ComposerKind::TextBox => {
             view.comments.tool_done = true;
-            Some(new_comment(&cx, CommentTool::TextBox, Shape::TextBox { rect: text_box_rect(c.at, &text, 12.0), font_size: 12.0 }, text))
+            let size = prefs.font_size(CommentTool::TextBox).unwrap_or(12.0);
+            Some(new_comment(&cx, CommentTool::TextBox, Shape::TextBox { rect: text_box_rect(c.at, &text, size), font_size: size }, text))
         }
         ComposerKind::Callout { point } => {
             view.comments.tool_done = true;
-            let rect = text_box_rect(c.at, &text, 10.0);
+            let size = prefs.font_size(CommentTool::Callout).unwrap_or(10.0);
+            let rect = text_box_rect(c.at, &text, size);
             let side = if point[0] < rect[0] {
                 rect[0]
             } else if point[0] > rect[2] {
@@ -1214,7 +1234,7 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
                 (rect[0] + rect[2]) / 2.0
             };
             let knee = [(point[0] + side) / 2.0, (rect[1] + rect[3]) / 2.0];
-            Some(new_comment(&cx, CommentTool::Callout, Shape::Callout { rect, knee, point, font_size: 10.0, ending: LineEnding::OpenArrow }, text))
+            Some(new_comment(&cx, CommentTool::Callout, Shape::Callout { rect, knee, point, font_size: size, ending: LineEnding::OpenArrow }, text))
         }
         ComposerKind::Replace => {
             view.comments.tool_done = true;
@@ -1236,12 +1256,13 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     }
 }
 
-/// A text box sized to its text (at most 300 pt wide), hanging from its top-left corner.
+/// A text box sized to its text, hanging from its top-left corner.
 pub fn text_box_rect(at: [f64; 2], text: &str, size: f64) -> [f64; 4] {
     use pdfcraft_engine::annot_text::{text_width, wrap};
     let pad = 2.0;
     let longest = text.lines().map(|l| text_width(l, size)).fold(0.0, f64::max);
-    let w = (longest + 2.0 * pad + 4.0).clamp(40.0, 300.0);
+    let max_w = 300.0_f64.max((size * 2.0).min(600.0));
+    let w = (longest + 2.0 * pad + 4.0).clamp(40.0, max_w);
     let lines = wrap(text, size, w - 2.0 * pad).len().max(1);
     let h = lines as f64 * size * 1.2 + 2.0 * pad + 2.0;
     [at[0], at[1] - h, at[0] + w, at[1]]
@@ -1356,7 +1377,8 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
                 action = Some(CanvasAction::Properties(page, index));
                 ui.close();
             }
-            if ui.add_enabled(tool_for(a).is_some(), egui::Button::new(tl!("Make Current Properties Default"))).clicked() {
+            let can_default = tool_for(a).is_some() || (a.fill_sign && a.subtype == "FreeText");
+            if ui.add_enabled(can_default, egui::Button::new(tl!("Make Current Properties Default"))).clicked() {
                 view.comments.default_request = Some((page, index));
                 ui.close();
             }
@@ -1425,7 +1447,29 @@ pub fn fill_picker(ui: &mut egui::Ui, current: Option<Rgb>) -> Option<Option<Rgb
     picked
 }
 
-/// The comment tools' extra quick-bar controls: pin, colour, fill, opacity and thickness.
+/// Slider and preset buttons inside a quick-bar Font size popup; returns `(new_size, from_preset_or_finished)`.
+pub(crate) fn font_size_popup_controls(ui: &mut egui::Ui, size: f64, range: std::ops::RangeInclusive<f64>) -> Option<(f64, bool)> {
+    let min = *range.start();
+    let max = *range.end();
+    ui.set_min_width(210.0);
+    ui.label(egui::RichText::new(tl!("Font size")).font(theme::semibold(12.0)));
+    let mut s = if size.is_finite() { size.clamp(min, max) } else { 12.0_f64.clamp(min, max) };
+    let slider = ui.add(egui::Slider::new(&mut s, range).step_by(1.0).suffix(" pt"));
+    let slider_done = slider.drag_stopped() || (slider.changed() && !slider.dragged());
+    let mut out = slider.changed().then_some((s, slider_done));
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        for p in [8.0, 10.0, 12.0, 14.0, 18.0, 24.0, 36.0, 48.0, 72.0, 96.0] {
+            if p >= min && p <= max && ui.selectable_label((s - p).abs() < 0.05, format!("{p} pt")).clicked() {
+                out = Some((p, true));
+                ui.close();
+            }
+        }
+    });
+    out
+}
+
+/// The comment tools' extra quick-bar controls: pin, colour, fill, opacity, font size and thickness.
 pub(crate) fn quick_bar_controls(ui: &mut egui::Ui, tool: CommentTool, prefs: &mut CommentPrefs) {
     let style = prefs.style(tool);
     if icons::button(ui, "pin", 32.0, prefs.pinned, if prefs.pinned { tl!("Keep tool selected: on") } else { tl!("Keep tool selected") }).clicked() {
@@ -1460,6 +1504,20 @@ pub(crate) fn quick_bar_controls(ui: &mut egui::Ui, tool: CommentTool, prefs: &m
             prefs.set_opacity(tool, percent / 100.0);
         }
     });
+    if let Some(size) = prefs.font_size(tool) {
+        let resp = icons::button(ui, "type", 32.0, false, tl!("Font size"));
+        egui::Popup::menu(&resp).align(egui::RectAlign::RIGHT_START).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            if let Some((next, _)) = font_size_popup_controls(ui, size, 1.0..=400.0) {
+                prefs.set_font_size(tool, next);
+            }
+        });
+        if ui.add_enabled_ui(size < 400.0 - 1e-3, |ui| icons::button(ui, "plus", 32.0, false, tl!("Increase font size"))).inner.clicked() {
+            prefs.set_font_size(tool, crate::content_ui::step_font_size(size, true, 1.0, 400.0));
+        }
+        if ui.add_enabled_ui(size > 1.0 + 1e-3, |ui| icons::button(ui, "minus", 32.0, false, tl!("Decrease font size"))).inner.clicked() {
+            prefs.set_font_size(tool, crate::content_ui::step_font_size(size, false, 1.0, 400.0));
+        }
+    }
     if tool.has_width() {
         let resp = icons::button(ui, "sliders-horizontal", 32.0, false, tl!("Line thickness"));
         egui::Popup::menu(&resp).align(egui::RectAlign::RIGHT_START).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
@@ -1564,5 +1622,19 @@ mod tests {
         let long = text_box_rect([0.0, 500.0], &"word ".repeat(80), 12.0);
         assert_eq!(long[2], 300.0);
         assert!(long[3] - long[1] > 50.0);
+        let huge = text_box_rect([0.0, 500.0], &"word ".repeat(20), 200.0);
+        assert_eq!(huge[2], 400.0);
+    }
+
+    #[test]
+    fn comment_prefs_track_text_box_and_callout_font_sizes() {
+        let mut p = CommentPrefs::default();
+        assert_eq!(p.font_size(CommentTool::TextBox), Some(12.0));
+        assert_eq!(p.font_size(CommentTool::Callout), Some(10.0));
+        assert_eq!(p.font_size(CommentTool::Note), None);
+        p.set_font_size(CommentTool::TextBox, 36.0);
+        p.set_font_size(CommentTool::Callout, 999.0);
+        assert_eq!(p.font_size(CommentTool::TextBox), Some(36.0));
+        assert_eq!(p.font_size(CommentTool::Callout), Some(400.0));
     }
 }

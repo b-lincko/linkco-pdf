@@ -255,6 +255,14 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
     ui.horizontal(|ui| {
         use crate::ui_scale;
         ui.label(tl!("Interface size"));
+        let current = ui_scale::factor(app.ui_scale, app.system_text_scale);
+        if ui
+            .add_enabled_ui(current > ui_scale::MIN + 1e-3, |ui| crate::icons::button(ui, "minus", 24.0, false, tl!("Decrease interface size")))
+            .inner
+            .clicked()
+        {
+            app.ui_scale = Some(ui_scale::step(current, false));
+        }
         let auto =
             crate::i18n::fmt(tl!("Auto ({percent}%)"), &[("percent", &ui_scale::percent(ui_scale::factor(None, app.system_text_scale)).to_string())]);
         let selected = app.ui_scale.map_or_else(|| auto.clone(), |f| format!("{}%", ui_scale::percent(f)));
@@ -270,6 +278,13 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
                 }
             }
         });
+        if ui
+            .add_enabled_ui(current < ui_scale::MAX - 1e-3, |ui| crate::icons::button(ui, "plus", 24.0, false, tl!("Increase interface size")))
+            .inner
+            .clicked()
+        {
+            app.ui_scale = Some(ui_scale::step(current, true));
+        }
     });
     ui.label(
         egui::RichText::new(tl!("Auto follows the system's text size. Pages always render at the display's full resolution."))
