@@ -1298,10 +1298,9 @@ impl Edit {
             Edit::LockAnnotation { .. } => "Unlock comment".into(),
             Edit::MoveAnnotation { .. } => "Move comment".into(),
             Edit::ResizeAnnotation { .. } => "Resize comment".into(),
-            Edit::StyleAnnotation { .. }
-            | Edit::FontSizeAnnotation { .. }
-            | Edit::FillAnnotation { .. }
-            | Edit::SetAnnotationInfo { .. } => "Change comment properties".into(),
+            Edit::StyleAnnotation { .. } | Edit::FontSizeAnnotation { .. } | Edit::FillAnnotation { .. } | Edit::SetAnnotationInfo { .. } => {
+                "Change comment properties".into()
+            }
             Edit::SetFieldValue { name, .. } => format!("Fill in {name}"),
             Edit::SetFieldImage { name, .. } => format!("Set the image of {name}"),
             Edit::ResetForm { .. } => "Clear form".into(),

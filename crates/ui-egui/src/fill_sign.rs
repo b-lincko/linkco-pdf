@@ -429,13 +429,8 @@ pub(crate) fn page_input(
         FillTool::Text => {
             // Clicking away from an open box commits it: the page sees this click before the box
             // sees its lost focus, so replacing the box first would drop what was typed.
-            let open = view.fill_text.replace(TypeBox {
-                page,
-                at: [at[0], at[1] + text_size * 0.6],
-                text: String::new(),
-                focus: true,
-                size: text_size,
-            });
+            let open =
+                view.fill_text.replace(TypeBox { page, at: [at[0], at[1] + text_size * 0.6], text: String::new(), focus: true, size: text_size });
             open.filter(|tb| !tb.text.trim().is_empty())
                 .map(|tb| FillAction::Edit(Box::new(typed_with_size(tb.page, tb.at, tb.text.trim(), author, tb.size))))
         }

@@ -1575,8 +1575,7 @@ impl PdfCraftApp {
         // Set outside json! above, which is at serde_json's macro recursion limit.
         persisted["organize_zoom"] = serde_json::json!(self.organize_zoom);
         persisted["fill_text_size"] = serde_json::json!(self.fill_text_size);
-        let font_sizes: Vec<_> =
-            self.comment_prefs.font_sizes().map(|(t, size)| serde_json::json!({ "tool": t.command(), "size": size })).collect();
+        let font_sizes: Vec<_> = self.comment_prefs.font_sizes().map(|(t, size)| serde_json::json!({ "tool": t.command(), "size": size })).collect();
         persisted["comment_font_sizes"] = serde_json::Value::Array(font_sizes);
         persisted.to_string()
     }
@@ -1848,11 +1847,7 @@ impl PdfCraftApp {
                     self.view_defaults.with_zoom(value).ok_or("default-zoom must be fit-width, fit-page or a percentage from 8 to 6400")?;
             }
             ("fill-text-size", _) => {
-                let size = value
-                    .parse::<f64>()
-                    .ok()
-                    .and_then(fill_sign::valid_text_size)
-                    .ok_or("fill-text-size must be between 4 and 300")?;
+                let size = value.parse::<f64>().ok().and_then(fill_sign::valid_text_size).ok_or("fill-text-size must be between 4 and 300")?;
                 self.fill_text_size = size;
             }
             ("organize", Some(v)) => v.organize = value != "off",

@@ -3535,10 +3535,11 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                                     }
                                 }
                             });
-                        ui.data_mut(|d| match drag {
-                            Some(entry) => d.insert_temp(drag_id, entry),
-                            None => {
-                                let _ = d.remove_temp::<(usize, usize, u64, f64)>(drag_id);
+                        ui.data_mut(|d| {
+                            if let Some(entry) = drag {
+                                d.insert_temp(drag_id, entry);
+                            } else {
+                                d.remove_temp::<(usize, usize, u64, f64)>(drag_id);
                             }
                         });
                         if ui
