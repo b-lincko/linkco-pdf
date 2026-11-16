@@ -930,7 +930,7 @@ fn flatten_on_save_is_off_by_default_and_round_trips() {
 fn saving_flattens_fill_and_sign_only_when_the_preference_is_on() {
     use pdfcraft_engine::{Edit, FillMark, NewAnnotation, Shape, Style};
     use pdfcraft_ui_egui::SaveTarget;
-    use pdfcraft_ui_egui::fill_sign::TypeBox;
+    use pdfcraft_ui_egui::fill_sign::{TEXT_SIZE, TypeBox};
 
     let dir = std::env::temp_dir().join(format!("pdfcraft-fill-flatten-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
