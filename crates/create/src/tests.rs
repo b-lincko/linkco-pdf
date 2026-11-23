@@ -286,11 +286,7 @@ fn a_wrapper_that_does_not_hold_a_jpeg_is_reported() {
     let out = extract_images(&doc, &[0], 0);
     assert!(out.images.is_empty());
     assert_eq!(out.skipped.len(), 1);
-    assert!(
-        out.skipped[0].2.contains("can't be recovered"),
-        "the reason says what went wrong: {:?}",
-        out.skipped
-    );
+    assert!(out.skipped[0].2.contains("can't be recovered"), "the reason says what went wrong: {:?}", out.skipped);
 }
 
 #[test]
