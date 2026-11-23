@@ -92,32 +92,67 @@ fn collect(doc: &Document, res: &Dict, depth: usize, forms: &mut HashSet<ObjRef>
     }
 }
 
-fn filters(s: &Stream) -> Vec<Vec<u8>> {
-    match s.dict.get(b"Filter") {
-        Some(Object::Name(n)) => vec![n.to_vec()],
-        Some(Object::Array(a)) => a.iter().filter_map(|f| f.as_name().map(<[u8]>::to_vec)).collect(),
-        _ => Vec::new(),
+/// The JPEG codestream a `/DCTDecode` stream carries, with the general-purpose filters recorded in
+/// front of that codec decoded off it. `chain` is `Stream::filters()`; the last entry is the codec.
+///
+/// `None` when the bytes in front cannot be read: another image codec (which is itself the thing
+/// to export, not a wrapper), a damaged stage, or data that turns out not to be a JPEG at all. The
+/// caller reports that rather than writing a file whose extension lies about it.
+fn peel_jpeg(s: &Stream, chain: &[(pdfcraft_filters::Filter, pdfcraft_filters::Params)]) -> Option<Vec<u8>> {
+    let (_, front) = chain.split_last()?;
+    if front.iter().any(|(f, _)| f.is_image_codec()) {
+        return None;
     }
+    let bytes = if front.is_empty() {
+        s.raw.to_vec()
+    } else {
+        // A wrapper around compressed data must not be allowed to expand without bound: the
+        // decoded JPEG can be larger than the stream that held it, but not indefinitely.
+        // Strict, not tolerant: a half-decoded wrapper would hand over a truncated JPEG, and a
+        // file that opens partway is worse than a refusal the caller can report.
+        let cap = s.raw.len().saturating_mul(8).max(1 << 20);
+        pdfcraft_filters::decode(front, &s.raw, cap).ok()?
+    };
+    // SOI: the one thing every JPEG file begins with. A chain that decodes to anything else is not
+    // a JPEG under a wrapper, and exporting it as `.jpg` would be a lie in the filename.
+    bytes.starts_with(&[0xFF, 0xD8]).then_some(bytes)
 }
 
 /// The file for one image: its JPEG data as is, or a PNG. An image with transparency (a soft
 /// mask, a stencil `/Mask` or a colour-key `/Mask`) is always a PNG with that transparency as
 /// alpha, JPEG images included, so cut-out images keep their transparent background.
 fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> {
-    let f = filters(s);
-    let jpeg = matches!(f.last().map(Vec::as_slice), Some(b"DCTDecode" | b"DCT")) && f.len() == 1;
-    match f.last().map(Vec::as_slice) {
-        Some(b"JPXDecode") => return Err("JPEG 2000 images can't be exported yet".into()),
-        Some(b"JBIG2Decode") => return Err("JBIG2 images can't be exported yet".into()),
-        Some(b"CCITTFaxDecode" | b"CCF") => return Err("CCITT fax images can't be exported yet".into()),
-        Some(b"DCTDecode" | b"DCT") if !jpeg => return Err("JPEG images inside other filters can't be exported yet".into()),
+    // JPEG data is a file of its own once the filters in front of `/DCTDecode` are peeled off
+    // (§7.4: the chain runs in order, so those stages come before the codec). `FlateDecode` in
+    // front of a JPEG is common — producers compress an already-compressed stream — and the JPEG
+    // itself is still intact underneath.
+    let chain = s.filters();
+    // The codecs this build cannot decode are named first, so their reason is the one reported
+    // rather than a peeling failure (`/Crypt` is dropped from `chain` — it is applied on load).
+    match chain.last().map(|(f, _)| f.name()) {
+        Some("JPXDecode") => return Err("JPEG 2000 images can't be exported yet".into()),
+        Some("JBIG2Decode") => return Err("JBIG2 images can't be exported yet".into()),
+        Some("CCITTFaxDecode") => return Err("CCITT fax images can't be exported yet".into()),
         _ => {}
     }
-    let as_is = || Ok(("jpg", s.raw.to_vec()));
+    // `coded` says a JPEG decoder is needed to read the samples (true whether or not the codec is
+    // wrapped). `as_is_ok` says the stream's own bytes are already the JPEG file, which holds only
+    // when nothing in front of the codec has to be peeled.
+    let coded = chain.last().is_some_and(|(f, _)| *f == pdfcraft_filters::Filter::Dct);
+    let data = if coded {
+        match peel_jpeg(s, &chain) {
+            Some(bytes) => bytes,
+            None => return Err("the JPEG data inside these filters can't be recovered".into()),
+        }
+    } else {
+        s.raw.to_vec()
+    };
+    let as_is_ok = coded && chain.len() == 1;
+    let as_is = || Ok(("jpg", data.clone()));
     let (w, h) = (s.dict.int(b"Width").unwrap_or(0), s.dict.int(b"Height").unwrap_or(0));
     let Some((w, h)) = size(w, h) else {
         return match () {
-            _ if jpeg => as_is(),
+            _ if as_is_ok => as_is(),
             _ if w <= 0 || h <= 0 => Err("the image has no size".into()),
             _ => Err(format!("{w} × {h} is too large to export")),
         };
@@ -126,14 +161,14 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
     // A stencil mask (`ImageMask true`) has no /SMask or /Mask of its own (8.9.6.2).
     let mut alpha = if mask { None } else { soft_mask(doc, s, w, h).or_else(|| stencil_mask(doc, s, w, h)) };
     let key = if mask { None } else { colour_key(doc, s) };
-    if jpeg && alpha.is_none() && key.is_none() {
+    if as_is_ok && alpha.is_none() && key.is_none() {
         return as_is();
     }
     let mut space = if mask { Space::Gray } else { space(doc, s.dict.get(b"ColorSpace"))? };
-    let (samples, bpc) = if jpeg {
+    let (samples, bpc) = if coded {
         // A JPEG decoder gives grey or RGB (CMYK and YCCK are converted); a JPEG that doesn't
         // decode, or an indexed one (not valid), is written as is, without its transparency.
-        let Some((samples, decoded)) = jpeg_samples(&s.raw, &space, w, h) else { return as_is() };
+        let Some((samples, decoded)) = jpeg_samples(&data, &space, w, h) else { return as_is() };
         space = decoded;
         (samples, 8)
     } else {
@@ -153,7 +188,7 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
     if alpha.is_none() {
         alpha = key.and_then(|k| keyed_alpha(&samples, n, bpc, &k));
     }
-    if jpeg && alpha.is_none() {
+    if as_is_ok && alpha.is_none() {
         return as_is();
     }
     // Decode arrays: only inversion ([1 0] per component) is honoured, the common case. A JPEG
@@ -163,7 +198,7 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
         .get(b"Decode")
         .map(|d| doc.resolve(d))
         .and_then(|d| d.as_array().map(|a| a.first().and_then(Object::as_f64) > a.get(1).and_then(Object::as_f64)));
-    let invert = (invert.unwrap_or(false) && !jpeg) ^ mask; // a stencil mask paints its 0 samples
+    let invert = (invert.unwrap_or(false) && !coded) ^ mask; // a stencil mask paints its 0 samples
     let max = (1u32 << bpc.min(8)) - 1;
     let mut rgb = Vec::with_capacity(w * h * 3);
     for px in samples.chunks_exact(n) {
@@ -384,13 +419,19 @@ fn stencil_mask(doc: &Document, s: &Stream, w: usize, h: usize) -> Option<Vec<u8
 fn gray_plane(doc: &Document, m: &Stream, w: usize, h: usize) -> Option<Vec<u8>> {
     let (mw, mh) = size(m.dict.int(b"Width")?, m.dict.int(b"Height")?)?;
     let stencil = m.dict.get(b"ImageMask").is_some_and(|v| matches!(&*doc.resolve(v), Object::Bool(true)));
-    let f = filters(m);
-    let mut px = match f.last().map(Vec::as_slice) {
-        Some(b"DCTDecode" | b"DCT") if f.len() == 1 => {
-            let img = image::load_from_memory_with_format(&m.raw, image::ImageFormat::Jpeg).ok()?.into_luma8();
+    // A JPEG mask is read through a decoder, whether or not a filter wraps the codec: the wrapper
+    // is peeled first, exactly as `image` does it, so a mask inside `/FlateDecode` is not lost.
+    let chain = m.filters();
+    let mut px = match chain.last().map(|(f, _)| f.name()) {
+        Some("DCTDecode") => {
+            // `peel_jpeg` takes the codec off the end itself; handing it the bytes of a wrapper
+            // would give the decoder a Flate stream and quietly produce nothing.
+            let data = peel_jpeg(m, &chain)?;
+            let img = image::load_from_memory_with_format(&data, image::ImageFormat::Jpeg).ok()?.into_luma8();
             (img.width() as usize == mw && img.height() as usize == mh).then(|| img.into_raw())?
         }
-        Some(b"DCTDecode" | b"DCT" | b"JPXDecode" | b"JBIG2Decode" | b"CCITTFaxDecode" | b"CCF") => return None,
+        // Another image codec: the sample path below would decode its bytes as raw samples.
+        Some("JPXDecode" | "JBIG2Decode" | "CCITTFaxDecode") => return None,
         _ => {
             let bpc = if stencil { 1 } else { m.dict.int(b"BitsPerComponent").unwrap_or(8) };
             let bpc = match bpc {

@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 pdfcraft-cos = { workspace = true }
+# Peels general-purpose filters recorded in front of a `/DCTDecode` stage.
+pdfcraft-filters = { workspace = true }
 pdfcraft-model = { workspace = true }
 pdfcraft-fonts = { workspace = true }
 png = "0.18"

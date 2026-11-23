@@ -220,6 +220,79 @@ fn images_export_as_jpeg_unchanged_and_others_as_png() {
     assert!(extract_images(&doc, &[0, 1, 2], 3).images.iter().all(|i| i.width.min(i.height) >= 3));
 }
 
+/// Replace the only image XObject on page 0 with `dict` + `data`, as a producer that wrapped a
+/// JPEG in another filter would have written it.
+fn replace_image(doc: &mut Document, patch: impl FnOnce(&mut Dict), data: Vec<u8>) {
+    let page = pdfcraft_model::pages(doc)[0].clone();
+    let res = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().cloned().unwrap();
+    let xo = doc.resolve(res.get(b"XObject").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(xo.len(), 1, "the fixture leaves one image to replace, not an arbitrary pick");
+    let (_, r) = xo.iter().next().map(|(k, v)| (k.clone(), v.as_ref().unwrap())).unwrap();
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Image"));
+    d.set(b"Width".to_vec(), Object::Int(3));
+    d.set(b"Height".to_vec(), Object::Int(2));
+    d.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+    d.set(b"ColorSpace".to_vec(), Object::name("DeviceRGB"));
+    patch(&mut d);
+    doc.set(r, Object::Stream(Stream::from_raw(d, data)));
+}
+
+/// A JPEG stored inside `/FlateDecode` is still a JPEG, and exports as one. Producers compress an
+/// already-compressed stream often enough that refusing it loses real images: the file is a JPEG
+/// once the wrapper is off, which is exactly what `Flate` in front of `/DCTDecode` means.
+#[test]
+fn a_jpeg_inside_flate_exports_as_the_jpeg_it_is() {
+    // No alpha: one XObject on the page, so the replacement below has only one candidate.
+    let mut doc = from_images(&[("photo.png".into(), png_bytes(false))]).unwrap();
+    let wrapped = pdfcraft_filters::encode_flate(&jpeg_bytes());
+    replace_image(
+        &mut doc,
+        |d| {
+            d.set(b"Filter".to_vec(), Object::Array(vec![Object::name("FlateDecode"), Object::name("DCTDecode")]));
+        },
+        wrapped,
+    );
+    let out = extract_images(&doc, &[0], 0);
+    assert!(out.skipped.is_empty(), "{:?}", out.skipped);
+    assert_eq!(out.images.len(), 1);
+    assert_eq!(out.images[0].extension, "jpg");
+    assert_eq!(out.images[0].data, jpeg_bytes(), "the wrapper is gone, the JPEG is intact");
+}
+
+/// Nothing in front of the codec means nothing to peel: the stream's own bytes are the file, and a
+/// plain JPEG keeps being written straight through.
+#[test]
+fn an_unwrapped_jpeg_is_still_written_byte_for_byte() {
+    let mut doc = from_images(&[("scan.jpg".into(), jpeg_bytes())]).unwrap();
+    replace_image(&mut doc, |d| d.set(b"Filter".to_vec(), Object::name("DCTDecode")), jpeg_bytes());
+    let out = extract_images(&doc, &[0], 0);
+    assert_eq!((out.images[0].extension, out.images[0].data.clone()), ("jpg", jpeg_bytes()));
+}
+
+/// A wrapper whose contents are not a JPEG is reported, not written out as `.jpg`. The filename
+/// would otherwise claim a format the bytes do not have.
+#[test]
+fn a_wrapper_that_does_not_hold_a_jpeg_is_reported() {
+    let mut doc = from_images(&[("photo.png".into(), png_bytes(false))]).unwrap();
+    replace_image(
+        &mut doc,
+        |d| {
+            d.set(b"Filter".to_vec(), Object::Array(vec![Object::name("FlateDecode"), Object::name("DCTDecode")]));
+        },
+        pdfcraft_filters::encode_flate(b"not a jpeg at all"),
+    );
+    let out = extract_images(&doc, &[0], 0);
+    assert!(out.images.is_empty());
+    assert_eq!(out.skipped.len(), 1);
+    assert!(
+        out.skipped[0].2.contains("can't be recovered"),
+        "the reason says what went wrong: {:?}",
+        out.skipped
+    );
+}
+
 #[test]
 fn indexed_and_one_bit_images_decode() {
     let mut doc = from_images(&[("flat.png".into(), png_bytes(false))]).unwrap();
