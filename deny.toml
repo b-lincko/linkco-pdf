@@ -62,6 +62,18 @@ ignore = [
     # checksum edited without cargo is a build break waiting to happen, and this container has no
     # toolchain. Move to 1.1.6 with `cargo update -p rustix` at the next lockfile touch.
     { id = "RUSTSEC-2026-0486", reason = "rustix xattr buffer, none of the six functions is called here" },
+    # `url` 2.5.8: `url::Url::origin()` can overflow the stack on nested `blob:` URLs. No PdfCraft
+    # crate calls it — links are parsed and their scheme or host read, nothing more. (The `.origin()`
+    # in `apps/pdfcraft-web` is the DOM's `window.location()`, a different function.) The other
+    # caller is `webbrowser`, which opens a URL rather than inspecting one. Patched in 2.5.9; the
+    # lockfile is not bumped by hand — no checksum without network, and a guessed one breaks every
+    # build. Do it with `cargo update -p url` at the next lockfile touch, then delete this entry.
+    { id = "RUSTSEC-2026-0592", reason = "url blob: origin stack overflow, origin() is never called here" },
+    # `chrono` 0.4.45 is unmaintained (RUSTSEC-2026-0543), not vulnerable. We use exactly one
+    # thing from it — `chrono::Local::now()`'s UTC offset — and it also reaches the tree through the
+    # pinned `pdfcraft-cos` fork of lopdf. There is no maintained successor on this version line, so
+    # the fact is recorded rather than suppressed silently; revisit when lopdf moves off it.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; our date handling and the lopdf fork use it" },
     # xml-rs 0.8.29 is still in the tree, only as a build dependency of gl_generator (the OpenGL
     # bindings generator), so it runs at compile time and ships in no binary. Its unmaintained
     # advisory (RUSTSEC-2022-0048) also no longer matches, so like `ring` above it is recorded
