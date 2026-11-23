@@ -709,3 +709,23 @@ ignores are recorded as notes with their facts kept, and rustix is accounted for
 what was checked written down. rustix is not bumped: no toolchain in this container, and a hand-edited
 checksum breaks the build.
 "
+B054,component,basic,P0,Export a JPEG that a filter wraps (GAP-core.image-filters),complete,bounded implementation component,GAP-core.image-filters,"An image whose `/DCTDecode` codec is wrapped in general-purpose filters exports as the JPEG it is:
+the wrapper is decoded off and the codestream written. Only data that begins with SOI is accepted, so
+a chain that decodes to something else is reported instead of written under an extension that lies.
+A plain JPEG is still written byte for byte.
+","`coded` (a JPEG decoder is needed) and `as_is_ok` (the bytes are already the file) are now separate,
+which is what the wrapper case needed: a wrapped JPEG with a mask must go through the decoder and must
+not be written as-is. Decoding is strict rather than tolerant — a half-decoded wrapper would hand over
+a truncated JPEG, and a file that opens partway is worse than a refusal.
+
+`crates/create` gains `pdfcraft-filters`, already in the graph through `pdfcraft-cos`; `create` is L4
+over an L0 dependency, so layering is satisfied. `pdfcraft-create`'s entry in `Cargo.lock` had to list
+it too: a path dependency needs no new package, but it does change the dependency graph that
+`--locked` checks.
+
+This branch also had to fix what `main` was already failing on, since nothing could be tested
+otherwise: two `needless_range_loop` errors in `pdfcraft-engine` and `pdfcraft-ui-egui` (from B036, the
+first hiding the second), and two advisories filed after the base — RUSTSEC-2026-0592 (`url`, patched
+in 2.5.9) and RUSTSEC-2026-0543 (`chrono`, unmaintained). Neither lockfile is edited by hand without a
+toolchain to compute a checksum.
+"

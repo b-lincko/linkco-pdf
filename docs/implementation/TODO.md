@@ -10,11 +10,11 @@ Scope: **222 recommendations + 384 existing gaps + 23 scope reviews**, plus boun
 
 P0 is a safety priority, not a universal scheduling stage. Gates for a new collaboration service stay attached to that advanced service; native mobile work is future. Never launch such a surface before its safety gates pass.
 
-**Active component:** B053 · **Active stage:** basic
+**Active component:** B054 · **Active stage:** basic
 
-## Basic (384 records)
+## Basic (385 records)
 
-complete: 56, in_progress: 7, pending: 321
+complete: 57, in_progress: 7, pending: 321
 
 | ID | TODO | Priority | Status | Related tasks |
 |---|---|---|---|---|
@@ -71,6 +71,7 @@ complete: 56, in_progress: 7, pending: 321
 | B051 | [x] Crop an image: trim each side and only the kept region shows (GAP-edit.image-crop) | P0 | complete | GAP-edit.image-crop |
 | B052 | [x] Every automation tool names the command it serves (GAP-misc.cli-completeness) | P0 | complete | GAP-misc.cli-completeness |
 | B053 | [x] Flattening keeps a comment it cannot draw (REC-C01) | P0 | complete | REC-C01 |
+| B054 | [x] Export a JPEG that a filter wraps (GAP-core.image-filters) | P0 | complete | GAP-core.image-filters |
 | GAP-a11y.app-screen-reader | [ ] Screen-reader support for the app (AccessKit) | P0 | pending | REC-A02 |
 | GAP-a11y.keyboard-only | [ ] Full keyboard operation of the app | P0 | pending | REC-A01 |
 | GAP-comment.appearance-generation | [ ] Generate correct appearances for every markup type | P0 | pending | REC-C01 |
@@ -1804,3 +1805,52 @@ checksum breaks the build.
 - Local evidence: crates/ui-egui/tests/redact.rs::removing_hidden_information_and_sanitizing: unchanged, the field tree is empty after sanitize.
 - Local evidence: docs/implementation/build_backlog.py and build_capabilities.py --check: pass; 60 implementation unittests pass.
 - CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/43001282305
+
+### B054: Export a JPEG that a filter wraps (GAP-core.image-filters)
+
+- Status: **complete**; parent(s): GAP-core.image-filters.
+- Acceptance: An image whose `/DCTDecode` codec is wrapped in general-purpose filters exports as the JPEG it is:
+the wrapper is decoded off and the codestream written. Only data that begins with SOI is accepted, so
+a chain that decodes to something else is reported instead of written under an extension that lies.
+A plain JPEG is still written byte for byte.
+
+- Audit: GAP-core.image-filters, reached from the upstream comparison: upstream fixed wrapped-JPEG export on
+14 November (#7168) and our code still refused it, with the refusal written into the source as
+"JPEG images inside other filters can't be exported yet".
+
+A filter chain runs in order (§7.4), so `/FlateDecode /DCTDecode` means the Flate stream holds a
+complete JPEG. The old check folded two questions into one flag — whether a JPEG decoder is needed,
+and whether the stream's bytes are already the file — and answered "no" to both when a filter was in
+front, which turned a decodable image into a skipped one.
+
+The same check was in `gray_plane`, the soft-mask path, where it was worse: a mask returns `None`, so
+a JPEG mask inside Flate silently cost an image its transparency without even an entry under
+`skipped`. Both paths now share `peel_jpeg`.
+
+- Ci: passed
+- Notes: `coded` (a JPEG decoder is needed) and `as_is_ok` (the bytes are already the file) are now separate,
+which is what the wrapper case needed: a wrapped JPEG with a mask must go through the decoder and must
+not be written as-is. Decoding is strict rather than tolerant — a half-decoded wrapper would hand over
+a truncated JPEG, and a file that opens partway is worse than a refusal.
+
+`crates/create` gains `pdfcraft-filters`, already in the graph through `pdfcraft-cos`; `create` is L4
+over an L0 dependency, so layering is satisfied. `pdfcraft-create`'s entry in `Cargo.lock` had to list
+it too: a path dependency needs no new package, but it does change the dependency graph that
+`--locked` checks.
+
+This branch also had to fix what `main` was already failing on, since nothing could be tested
+otherwise: two `needless_range_loop` errors in `pdfcraft-engine` and `pdfcraft-ui-egui` (from B036, the
+first hiding the second), and two advisories filed after the base — RUSTSEC-2026-0592 (`url`, patched
+in 2.5.9) and RUSTSEC-2026-0543 (`chrono`, unmaintained). Neither lockfile is edited by hand without a
+toolchain to compute a checksum.
+
+- Local evidence: crates/create/src/tests.rs::a_jpeg_inside_flate_exports_as_the_jpeg_it_is: a Flate-wrapped JPEG exports byte-identical with a jpg extension.
+- Local evidence: crates/create/src/tests.rs::an_unwrapped_jpeg_is_still_written_byte_for_byte: the no-wrapper path is unchanged.
+- Local evidence: crates/create/src/tests.rs::a_wrapper_that_does_not_hold_a_jpeg_is_reported: refused with a reason rather than written under a wrong extension.
+- Local evidence: crates/create/src/tests.rs::images_export_as_jpeg_unchanged_and_others_as_png: unchanged, plain JPEG still byte-identical.
+- Local evidence: crates/create/src/tests.rs::indexed_and_one_bit_images_decode: unchanged, the mask and sample paths still decode.
+- Local evidence: crates/engine/src/tests.rs and crates/ui-egui/tests/redact.rs: the compare and redact paths these two loop rewrites touch pass unchanged.
+- Local evidence: docs/implementation/build_backlog.py and build_capabilities.py --check: pass; 60 implementation unittests pass.
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/45125320079
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/45125320056
+- CI run: https://github.com/b-lincko/linkco-pdf/actions/runs/45125320062

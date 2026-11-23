@@ -3,7 +3,7 @@
 [workflow]
 order = ["basic", "advanced", "future"]
 active_stage = "basic"
-active_component = "B053"
+active_component = "B054"
 confirmation_required_after_each_component = false
 auto_advance = false # Stage changes still require explicit approval.
 batch_authorized_stage = "basic"
@@ -1333,4 +1333,79 @@ on the stale ring ignore. 5329e8b fixed the shape but failed clippy on `&sound` 
 already `&str`, and the same audit job. 77237ab fixed both, and the tests then failed: my rule was too
 broad and caught widgets. 839e9ec narrowed it to comments; tests passed everywhere and the audit job
 went red on newly filed advisories. 427dcee accounted for those, and the run is green.
+"""
+
+[components.B054]
+title = "Export a JPEG that a filter wraps (GAP-core.image-filters)"
+stage = "basic"
+parent_tasks = ["GAP-core.image-filters"]
+status = "complete"
+code = [
+  "crates/create/src/extract.rs",
+  "crates/create/src/tests.rs",
+  "crates/create/Cargo.toml",
+  "Cargo.lock",
+  "crates/engine/src/compare.rs",
+  "crates/ui-egui/src/redact_ui.rs",
+  "deny.toml",
+]
+acceptance = """
+An image whose `/DCTDecode` codec is wrapped in general-purpose filters exports as the JPEG it is:
+the wrapper is decoded off and the codestream written. Only data that begins with SOI is accepted, so
+a chain that decodes to something else is reported instead of written under an extension that lies.
+A plain JPEG is still written byte for byte.
+"""
+audit = """
+GAP-core.image-filters, reached from the upstream comparison: upstream fixed wrapped-JPEG export on
+14 November (#7168) and our code still refused it, with the refusal written into the source as
+"JPEG images inside other filters can't be exported yet".
+
+A filter chain runs in order (§7.4), so `/FlateDecode /DCTDecode` means the Flate stream holds a
+complete JPEG. The old check folded two questions into one flag — whether a JPEG decoder is needed,
+and whether the stream's bytes are already the file — and answered "no" to both when a filter was in
+front, which turned a decodable image into a skipped one.
+
+The same check was in `gray_plane`, the soft-mask path, where it was worse: a mask returns `None`, so
+a JPEG mask inside Flate silently cost an image its transparency without even an entry under
+`skipped`. Both paths now share `peel_jpeg`.
+"""
+notes = """
+`coded` (a JPEG decoder is needed) and `as_is_ok` (the bytes are already the file) are now separate,
+which is what the wrapper case needed: a wrapped JPEG with a mask must go through the decoder and must
+not be written as-is. Decoding is strict rather than tolerant — a half-decoded wrapper would hand over
+a truncated JPEG, and a file that opens partway is worse than a refusal.
+
+`crates/create` gains `pdfcraft-filters`, already in the graph through `pdfcraft-cos`; `create` is L4
+over an L0 dependency, so layering is satisfied. `pdfcraft-create`'s entry in `Cargo.lock` had to list
+it too: a path dependency needs no new package, but it does change the dependency graph that
+`--locked` checks.
+
+This branch also had to fix what `main` was already failing on, since nothing could be tested
+otherwise: two `needless_range_loop` errors in `pdfcraft-engine` and `pdfcraft-ui-egui` (from B036, the
+first hiding the second), and two advisories filed after the base — RUSTSEC-2026-0592 (`url`, patched
+in 2.5.9) and RUSTSEC-2026-0543 (`chrono`, unmaintained). Neither lockfile is edited by hand without a
+toolchain to compute a checksum.
+"""
+local_evidence = [
+  "crates/create/src/tests.rs::a_jpeg_inside_flate_exports_as_the_jpeg_it_is: a Flate-wrapped JPEG exports byte-identical with a jpg extension",
+  "crates/create/src/tests.rs::an_unwrapped_jpeg_is_still_written_byte_for_byte: the no-wrapper path is unchanged",
+  "crates/create/src/tests.rs::a_wrapper_that_does_not_hold_a_jpeg_is_reported: refused with a reason rather than written under a wrong extension",
+  "crates/create/src/tests.rs::images_export_as_jpeg_unchanged_and_others_as_png: unchanged, plain JPEG still byte-identical",
+  "crates/create/src/tests.rs::indexed_and_one_bit_images_decode: unchanged, the mask and sample paths still decode",
+  "crates/engine/src/tests.rs and crates/ui-egui/tests/redact.rs: the compare and redact paths these two loop rewrites touch pass unchanged",
+  "docs/implementation/build_backlog.py and build_capabilities.py --check: pass; 60 implementation unittests pass",
+]
+ci = "passed"
+ci_run_urls = [
+  "https://github.com/b-lincko/linkco-pdf/actions/runs/45125320079",
+  "https://github.com/b-lincko/linkco-pdf/actions/runs/45125320056",
+  "https://github.com/b-lincko/linkco-pdf/actions/runs/45125320062",
+]
+ci_notes = """
+Four rounds, and the first two never reached the code: `main` does not compile under clippy. The
+`pdfcraft-engine` loop error was found on the base commit, fixed, and uncovered the same shape in
+`pdfcraft-ui-egui`; meanwhile two new advisories failed the audit job. A third round failed FreeBSD on
+`cargo build --locked` because the new dependency was missing from `pdfcraft-create`'s lockfile entry.
+The fourth is green on CI, FreeBSD and Windows ARM64 — the first green run on this repository since
+B036.
 """
